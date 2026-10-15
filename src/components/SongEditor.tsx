@@ -4,7 +4,7 @@ import { ArrowLeft, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useSongs } from '@/hooks/useSongs'
-import { chartToCho, fetchChartPage } from '@/lib/importChart'
+import { chartToSongMd, fetchChartPage, isBlockedPage } from '@/lib/importChart'
 
 export function SongEditor() {
   const { songId = '' } = useParams()
@@ -35,15 +35,15 @@ export function SongEditor() {
   const convert = async () => {
     setError('')
     setBusy(true)
-    setStatus('Leyendo el enlace y armando el .cho…')
+    setStatus('Leyendo el enlace y armando el .song.md…')
     try {
       const link = url.trim()
       let next = ''
       if (link) {
         const page = await fetchChartPage(link)
-        next = chartToCho(page, link)
+        next = chartToSongMd(page, link)
       } else if (cho.trim()) {
-        next = chartToCho(cho, song?.source ?? '')
+        next = chartToSongMd(cho, song?.source ?? '')
       } else {
         throw new Error('Pega un enlace o la cifra.')
       }
@@ -51,7 +51,9 @@ export function SongEditor() {
       setStatus('Listo. Revisa los acordes arriba de la letra y guarda.')
     } catch (reason) {
       setStatus('')
-      setError(reason instanceof Error ? reason.message : 'No se pudo convertir.')
+      const message = reason instanceof Error ? reason.message : 'No se pudo convertir.'
+      setError(message)
+      if (message.includes('bloqueó') && isBlockedPage(cho)) setCho('')
     } finally {
       setBusy(false)
     }
@@ -110,7 +112,7 @@ export function SongEditor() {
       </header>
       <main className="mx-auto flex max-w-3xl flex-col gap-4 px-4 py-4">
         <p className="text-sm text-muted-foreground">
-          Pega el enlace de Cifra Club, Ultimate Guitar o La Cuerda. Se arma un archivo .cho con los acordes en su propia línea, como el resto del songbook. Se guarda en este navegador.
+          Pega el enlace de Cifra Club, Ultimate Guitar o La Cuerda. Se arma un archivo .song.md, el mismo formato de las canciones del songbook. Se guarda en este navegador.
         </p>
         <label className="flex flex-col gap-1 text-sm font-medium">
           Enlace
@@ -124,7 +126,7 @@ export function SongEditor() {
         </label>
         <div className="flex flex-wrap gap-2">
           <Button onClick={() => void convert()} disabled={busy}>
-            {busy ? 'Convirtiendo…' : 'Convertir a .cho'}
+            {busy ? 'Convirtiendo…' : 'Convertir a .song.md'}
           </Button>
           {song?.overridden && song.origin === 'catalog' && (
             <Button
@@ -141,13 +143,13 @@ export function SongEditor() {
         {status && <p className="text-sm text-primary">{status}</p>}
         {error && <p className="text-sm text-destructive">{error}</p>}
         <label className="flex flex-col gap-1 text-sm font-medium">
-          Archivo .cho
+          Archivo .song.md
           <textarea
             value={cho}
             onChange={(event) => setCho(event.target.value)}
             spellCheck={false}
             className="min-h-[24rem] rounded-md border bg-card p-3 font-mono text-sm leading-5"
-            aria-label="Archivo ChordPro"
+            aria-label="Archivo de la canción"
           />
         </label>
         <div className="flex flex-wrap gap-2">
@@ -161,7 +163,7 @@ export function SongEditor() {
           )}
           {cho.trim() && (
             <Button variant="outline" onClick={() => downloadCho(cho)}>
-              Descargar .cho
+              Descargar .song.md
             </Button>
           )}
         </div>
@@ -171,13 +173,23 @@ export function SongEditor() {
 }
 
 function downloadCho(cho: string) {
-  const title = cho.match(/\{title:\s*([^}]+)\}/i)?.[1]?.trim() || 'cancion'
-  const artist = cho.match(/\{artist:\s*([^}]+)\}/i)?.[1]?.trim()
+  const title = field(cho, 'title') || cho.match(/\{title:\s*([^}]+)\}/i)?.[1]?.trim() || 'cancion'
+  const artist = field(cho, 'artist') || cho.match(/\{artist:\s*([^}]+)\}/i)?.[1]?.trim()
+  const markdown = cho.trimStart().startsWith('---')
   const blob = new Blob([cho], { type: 'text/plain;charset=utf-8' })
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
-  link.download = `${artist ? `${title} - ${artist}` : title}.cho`.replace(/[\\/]/g, '-')
+  link.download = `${artist ? `${title} - ${artist}` : title}.${markdown ? 'song.md' : 'cho'}`.replace(
+    /[\\/]/g,
+    '-',
+  )
   link.click()
   URL.revokeObjectURL(url)
+}
+
+function field(text: string, key: string): string {
+  const line = text.match(new RegExp(`^${key}:\\s*(.*)$`, 'm'))?.[1]?.trim() ?? ''
+  if (line.startsWith('"') && line.endsWith('"')) return line.slice(1, -1).replace(/\\"/g, '"')
+  return line
 }

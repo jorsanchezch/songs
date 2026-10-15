@@ -147,7 +147,8 @@ export function useSongs() {
 
   const saveSong = (cho: string, id?: string) => {
     const songId = id || `local-${Date.now()}`
-    const parsed = parseChart(cho, `${songId}.cho`)
+    const ext = cho.trimStart().startsWith('---') ? 'song.md' : 'cho'
+    const parsed = parseChart(cho, `${songId}.${ext}`)
     const lines = parsed.sections.reduce((sum, section) => sum + section.lines.length, 0)
     if (!parsed.title.trim() || lines === 0) {
       throw new Error('El archivo necesita un título y al menos una línea.')

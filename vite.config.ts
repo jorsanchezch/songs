@@ -64,16 +64,25 @@ function importChart(): Plugin {
               signal: AbortSignal.timeout(15000),
               headers: {
                 accept: 'text/html,application/xhtml+xml',
+                'accept-language': 'es-ES,es;q=0.9,en;q=0.8',
                 'user-agent':
                   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
               },
             })
-            if (!response.ok) {
+            const html = await response.text()
+            const sample = html.slice(0, 2500)
+            const blocked = /access denied/i.test(sample) && /permission|edgesuite|akamai/i.test(sample)
+            if (!response.ok || blocked) {
               res.statusCode = 502
-              res.end(JSON.stringify({ error: 'El sitio no respondió.' }))
+              res.end(
+                JSON.stringify({
+                  blocked: true,
+                  error:
+                    'Ese sitio bloqueó la lectura automática. Ábrelo, copia la cifra y pégala abajo.',
+                }),
+              )
               return
             }
-            const html = await response.text()
             res.end(JSON.stringify({ html }))
           } catch {
             res.statusCode = 502

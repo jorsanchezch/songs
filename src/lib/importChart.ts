@@ -1,3 +1,6 @@
+import { parseChart } from '@/lib/parseChart'
+import type { ChartLine, Song, SongNote, SongSection } from '@/lib/types'
+
 const CHORD_TOKEN =
   /^[A-G](?:#|b)?(?:(?:maj|min|m|dim|aug|sus|add|M)?\d*(?:M)?(?:\([^)]*\))?)?(?:\/[A-G](?:#|b)?)?$/
 
@@ -8,11 +11,98 @@ export function isChordToken(token: string): boolean {
   return /^(?:maj|min|m|dim|aug|sus|add|M)?\d*(?:M)?(?:\([^)]*\))?$/.test(quality)
 }
 
+const BLOCKED_PAGE = 'Ese sitio bloqueó la lectura automática. Ábrelo, copia la cifra y pégala abajo.'
+
 export function chartToCho(raw: string, sourceUrl = ''): string {
   const text = raw.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n')
+  if (isBlockedPage(text)) throw new Error(BLOCKED_PAGE)
   if (/\{title\s*:/i.test(text) && /\[[A-G]/.test(text)) return ensureSource(text, sourceUrl)
   if (/<[a-z!/]/i.test(text)) return htmlToCho(text, sourceUrl)
   return plainToCho(text, sourceUrl)
+}
+
+export function isBlockedPage(text: string): boolean {
+  const sample = text.slice(0, 2500)
+  return /access denied/i.test(sample) && /permission|edgesuite|akamai/i.test(sample)
+}
+
+/** The same display markdown the catalog reads from `*.song.md`. */
+export function chartToSongMd(raw: string, sourceUrl = ''): string {
+  const text = raw.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n')
+  if (isBlockedPage(text)) throw new Error(BLOCKED_PAGE)
+  if (text.trimStart().startsWith('---')) {
+    const song = parseChart(text, 'import.song.md')
+    if (sourceUrl && !song.source) song.source = sourceUrl
+    return songToMarkdown(song)
+  }
+  return songToMarkdown(parseChart(chartToCho(text, sourceUrl), 'import.cho'))
+}
+
+function songToMarkdown(song: Song): string {
+  const fields = [
+    ['title', song.title],
+    ['artist', song.artist],
+    ['composer', song.composer],
+    ['key', song.key],
+    ['source', song.source],
+  ].filter(([, value]) => value.trim())
+  const front = fields.map(([key, value]) => `${key}: ${yaml(value)}`).join('\n')
+  const body = song.sections.map(sectionToMarkdown).filter(Boolean).join('\n\n')
+  const versions = versionsToMarkdown(song)
+  return `---\n${front}\n---\n\n${[body, versions].filter(Boolean).join('\n\n')}\n`
+}
+
+function sectionToMarkdown(section: SongSection): string {
+  const attrs = [`#${section.id}`]
+  if (section.sameAs) attrs.push(`same=${section.sameAs}`)
+  if (section.repeat > 1) attrs.push(`repeat=${section.repeat}`)
+  const heading = `## ${section.label} {${attrs.join(' ')}}`
+  if (section.sameAs) {
+    const notes = notesToMarkdown(section.notes)
+    return notes ? `${heading}\n${notes}` : heading
+  }
+  const lines = section.lines.map(lineToMarkdown).filter(Boolean)
+  return [heading, notesToMarkdown(section.notes), lines.join('\n\n')]
+    .filter(Boolean)
+    .join('\n')
+}
+
+function lineToMarkdown(line: ChartLine): string {
+  const parts = [notesToMarkdown(line.notes)]
+  if (line.chords.length) parts.push(chordMarkdown(line))
+  if (line.lyric != null) parts.push(line.lyric)
+  return parts.filter(Boolean).join('\n')
+}
+
+function chordMarkdown(line: ChartLine): string {
+  let text = ''
+  for (const chord of line.chords) {
+    const token = `[${chord.raw}]${chord.notes.map((note) => `{${note.type}: ${note.text}}`).join('')}`
+    const column = Math.max(chord.column, text.length)
+    text += ' '.repeat(column - text.length) + token
+  }
+  return text
+}
+
+function notesToMarkdown(notes: SongNote[]): string {
+  return notes.map((note) => `> ${note.type}: ${note.text}`).join('\n')
+}
+
+function versionsToMarkdown(song: Song): string {
+  if (!song.versions.length) return ''
+  const blocks = song.versions.map((version) =>
+    [
+      `### ${version.label}`,
+      `- flow: ${version.flow.join(', ')}`,
+      `- notes: ${version.openNotes.join(', ')}`,
+    ].join('\n'),
+  )
+  return `## Versions\n\n${blocks.join('\n\n')}`
+}
+
+function yaml(value: string): string {
+  if (/[:#\n"']|^\s|\s$/.test(value)) return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
+  return value
 }
 
 export async function fetchChartPage(url: string): Promise<string> {
@@ -24,25 +114,33 @@ export async function fetchChartPage(url: string): Promise<string> {
   try {
     const local = await fetch(endpoint)
     if (local.headers.get('content-type')?.includes('json')) {
-      const data = (await local.json()) as { html?: string; error?: string }
-      if (data.html) return data.html
+      const data = (await local.json()) as { html?: string; error?: string; blocked?: boolean }
+      if (data.blocked && data.error) throw new Error(data.error)
+      if (data.html) return acceptChartPage(data.html)
       if (local.status === 400 && data.error) throw new Error(data.error)
     }
   } catch (reason) {
-    if (reason instanceof Error && reason.message === 'Ese enlace no se puede leer.') throw reason
+    if (reason instanceof Error && (reason.message === 'Ese enlace no se puede leer.' || reason.message === BLOCKED_PAGE)) {
+      throw reason
+    }
   }
   try {
     const direct = await fetch(url)
-    if (direct.ok) return direct.text()
-  } catch {
-    // The chart site does not allow the browser to read it directly.
+    if (direct.ok) return acceptChartPage(await direct.text())
+  } catch (reason) {
+    if (reason instanceof Error && reason.message === BLOCKED_PAGE) throw reason
   }
   const proxy = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(url)}`)
   if (proxy.ok) {
     const data = (await proxy.json()) as { contents?: string }
-    if (data.contents) return data.contents
+    if (data.contents) return acceptChartPage(data.contents)
   }
   throw new Error('No pude leer ese enlace. Ábrelo, copia la cifra y pégala abajo.')
+}
+
+function acceptChartPage(html: string): string {
+  if (isBlockedPage(html)) throw new Error(BLOCKED_PAGE)
+  return html
 }
 
 function htmlToCho(html: string, sourceUrl: string): string {

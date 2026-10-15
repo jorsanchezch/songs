@@ -3,8 +3,8 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { formatChord, transposeKeyName } from '../src/lib/chords.ts'
 import { blocksFor } from '../src/lib/display.ts'
-import { diagramFor } from '../src/lib/guitar.ts'
-import { chartToCho, isPlainChordLine, wrapPlainChordLine } from '../src/lib/importChart.ts'
+import { diagramFor, shapesFor } from '../src/lib/guitar.ts'
+import { chartToCho, chartToSongMd, isBlockedPage, isPlainChordLine, wrapPlainChordLine } from '../src/lib/importChart.ts'
 import { parseChart } from '../src/lib/parseChart.ts'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -84,6 +84,11 @@ const barreF = diagramFor('F')
 assert(barreF?.frets[0] === 1 && barreF.frets[1] === 3, 'F barre')
 const slash = diagramFor('E/G#')
 assert(slash?.frets[0] === 4 && slash.frets[4] === 0, 'E/G# bass')
+const cShapes = shapesFor('C')
+assert(cShapes.length >= 3, `C has alternate shapes, got ${cShapes.length}`)
+assert(new Set(cShapes.map((shape) => shape.id)).size === cShapes.length, 'C shapes are unique')
+const barreC = cShapes.find((shape) => shape.id !== openC?.id)
+assert(barreC && diagramFor('C', barreC.id)?.id === barreC.id, 'selected C shape')
 
 assert(wrapPlainChordLine('C    F') === '[C]  [F]', 'UG removes two spaces')
 assert(isPlainChordLine('Am  G  F'), 'plain chord line')
@@ -117,6 +122,27 @@ assert(
     chorus?.notes.some((note) => note.text.includes('Tablatura')),
   'tab becomes a comment',
 )
+
+assert(isBlockedPage('<TITLE>Access Denied</TITLE> You don\'t have permission. https://errors.edgesuite.net/18'), 'denied page')
+let denied = false
+try {
+  chartToCho(
+    '<HTML><HEAD><TITLE>Access Denied</TITLE></HEAD><BODY>You don\'t have permission to access this server. edgesuite</BODY></HTML>',
+    'https://www.cifraclub.com/marcos-brunet/dame-a-cristo/',
+  )
+} catch {
+  denied = true
+}
+assert(denied, 'access denied is not converted into a chart')
+
+const songMd = chartToSongMd(cho, imported.source)
+assert(songMd.startsWith('---\ntitle: Bienvenido Espíritu Santo'), 'link becomes display markdown')
+const fromMd = parseChart(songMd, 'bienvenido.song.md')
+assert(fromMd.title === imported.title, 'markdown keeps the title')
+assert(fromMd.artist === imported.artist, 'markdown keeps the artist')
+assert(fromMd.key === 'C', 'markdown keeps the key')
+assert(fromMd.sections.find((section) => section.label === 'Intro')?.lines[0]?.chords[1]?.column === 5, 'markdown keeps chord columns')
+assert(fromMd.sections.find((section) => section.label === 'Estribillo')?.lines[0]?.lyric?.includes('Bienvenido'), 'markdown keeps the lyric')
 
 const names = await readdir(charts)
 const files = names.filter((name) => /\.(cho|chopro)$/i.test(name))

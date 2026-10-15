@@ -13,6 +13,7 @@ export type ViewSettings = {
   concise: boolean
   visibleNotes: NoteType[]
   semitones: Record<string, number>
+  chordShapes: Record<string, Record<string, string>>
 }
 
 const DEFAULTS: ViewSettings = {
@@ -24,21 +25,23 @@ const DEFAULTS: ViewSettings = {
   concise: false,
   visibleNotes: [...NOTE_TYPES],
   semitones: {},
+  chordShapes: {},
 }
 
 export function loadSettings(): ViewSettings {
   try {
     const raw = localStorage.getItem(STORAGE)
-    if (!raw) return { ...DEFAULTS, visibleNotes: [...NOTE_TYPES], semitones: {} }
+    if (!raw) return { ...DEFAULTS, visibleNotes: [...NOTE_TYPES], semitones: {}, chordShapes: {} }
     const parsed = JSON.parse(raw) as Partial<ViewSettings>
     return {
       ...DEFAULTS,
       ...parsed,
       visibleNotes: parsed.visibleNotes?.length ? parsed.visibleNotes : [...NOTE_TYPES],
       semitones: parsed.semitones ?? {},
+      chordShapes: parsed.chordShapes ?? {},
     }
   } catch {
-    return { ...DEFAULTS, visibleNotes: [...NOTE_TYPES], semitones: {} }
+    return { ...DEFAULTS, visibleNotes: [...NOTE_TYPES], semitones: {}, chordShapes: {} }
   }
 }
 

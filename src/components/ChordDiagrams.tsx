@@ -1,5 +1,6 @@
-import type { Diagram } from '@/lib/guitar'
-import { diagramFor } from '@/lib/guitar'
+import { useState } from 'react'
+import { diagramFor, shapesFor, type Diagram } from '@/lib/guitar'
+import { cn } from '@/lib/utils'
 
 export function ChordDiagram({ diagram }: { diagram: Diagram }) {
   const left = 18
@@ -86,14 +87,75 @@ export function ChordDiagram({ diagram }: { diagram: Diagram }) {
   )
 }
 
-export function ChordStrip({ names }: { names: string[] }) {
+export function ChordStrip({
+  names,
+  choices,
+  onChoose,
+}: {
+  names: string[]
+  choices: Record<string, string>
+  onChoose: (name: string, shapeId: string | null) => void
+}) {
+  const [openName, setOpenName] = useState<string | null>(null)
+  const active = openName && names.includes(openName) ? openName : null
+  const options = active ? shapesFor(active) : []
+  const selectedId = active ? (choices[active] ?? options[0]?.id) : undefined
+
   return (
-    <div className="mb-4 flex gap-3 overflow-x-auto rounded-xl border bg-card/70 px-3 py-2">
-      {names.map((name) => (
-        <ChordBox key={name} name={name} />
-      ))}
+    <div className="mb-4 rounded-xl border bg-card/70 px-3 py-2">
+      <div className="flex gap-1 overflow-x-auto">
+        {names.map((name) => (
+          <ChordBox
+            key={name}
+            name={name}
+            shapeId={choices[name]}
+            open={active === name}
+            onToggle={() => setOpenName(active === name ? null : name)}
+          />
+        ))}
+      </div>
+      {active && options.length > 0 && (
+        <div className="mt-2 border-t pt-2">
+          <div className="mb-1 flex items-center justify-between gap-2">
+            <p className="text-xs font-medium text-muted-foreground">Forma de {active}</p>
+            {choices[active] && (
+              <button
+                type="button"
+                className="text-xs font-medium text-primary"
+                onClick={() => onChoose(active, null)}
+              >
+                Forma inicial
+              </button>
+            )}
+          </div>
+          <div className="flex gap-2 overflow-x-auto">
+            {options.map((shape) => (
+              <button
+                key={shape.id}
+                type="button"
+                aria-pressed={shape.id === selectedId}
+                aria-label={`${shapeLabel(shape)} de ${active}`}
+                className={cn(
+                  'rounded-lg px-1 pb-1',
+                  shape.id === selectedId && 'bg-primary/15 ring-2 ring-primary',
+                )}
+                onClick={() => onChoose(active, shape.id)}
+              >
+                <ChordDiagram diagram={shape} />
+                <span className="block text-[10px] text-muted-foreground">{shapeLabel(shape)}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
+}
+
+function shapeLabel(diagram: Diagram): string {
+  const pressed = diagram.frets.filter((fret) => fret > 0)
+  if (!pressed.length || diagram.frets.some((fret) => fret === 0)) return 'Al aire'
+  return `Traste ${Math.min(...pressed)}`
 }
 
 function barreSpan(frets: number[]): { fret: number; from: number; to: number } | null {
@@ -108,8 +170,18 @@ function barreSpan(frets: number[]): { fret: number; from: number; to: number } 
   return covered ? { fret, from, to } : null
 }
 
-function ChordBox({ name }: { name: string }) {
-  const diagram = diagramFor(name)
+function ChordBox({
+  name,
+  shapeId,
+  open,
+  onToggle,
+}: {
+  name: string
+  shapeId?: string
+  open: boolean
+  onToggle: () => void
+}) {
+  const diagram = diagramFor(name, shapeId)
   if (!diagram) {
     return (
       <figure className="w-[4.6rem] shrink-0 text-center">
@@ -118,5 +190,15 @@ function ChordBox({ name }: { name: string }) {
       </figure>
     )
   }
-  return <ChordDiagram diagram={diagram} />
+  return (
+    <button
+      type="button"
+      aria-expanded={open}
+      aria-label={`Cambiar forma de ${name}`}
+      className={cn('rounded-lg px-1', open && 'bg-primary/10')}
+      onClick={onToggle}
+    >
+      <ChordDiagram diagram={diagram} />
+    </button>
+  )
 }

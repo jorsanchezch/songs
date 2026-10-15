@@ -1,4 +1,5 @@
 export type Diagram = {
+  id: string
   name: string
   frets: number[]
   startFret: number
@@ -105,30 +106,45 @@ const MOVABLE: Record<string, { openPc: number; frets: number[] }[]> = {
 
 const BASE: Record<string, number> = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 }
 
-export function diagramFor(chordName: string): Diagram | null {
+export function diagramFor(chordName: string, shapeId?: string): Diagram | null {
+  const shapes = shapesFor(chordName)
+  if (!shapes.length) return null
+  return shapes.find((shape) => shape.id === shapeId) ?? shapes[0] ?? null
+}
+
+export function shapesFor(chordName: string): Diagram[] {
   const name = chordName.trim()
-  const slash = SLASH[name]
-  if (slash) return windowed(name, slash)
   const parsed = name.match(/^([A-G](?:#|b)?)([^/]*)(?:\/([A-G](?:#|b)?))?$/)
-  if (!parsed) return null
+  if (!parsed) return []
   const root = pitch(parsed[1] ?? '')
-  if (root == null) return null
+  if (root == null) return []
   const quality = normalizeQuality(parsed[2] ?? '')
+  const fingerings: number[][] = []
+  const slash = SLASH[name]
+  if (slash) fingerings.push(slash)
   const open = OPEN[`${root}:${quality}`]
-  if (open) return windowed(name, open)
-  const shapes = MOVABLE[quality] ?? MOVABLE['']
-  let best: number[] | null = null
-  let bestFret = 99
-  for (const shape of shapes) {
+  if (open) fingerings.push(open)
+  for (const shape of MOVABLE[quality] ?? MOVABLE['']) {
     const fret = (root - shape.openPc + 12) % 12
-    const frets = shape.frets.map((value) => (value < 0 ? -1 : value + fret))
-    const top = Math.max(...frets)
-    if (fret < bestFret || (fret === bestFret && best && top < Math.max(...best))) {
-      best = frets
-      bestFret = fret
-    }
+    fingerings.push(shape.frets.map((value) => (value < 0 ? -1 : value + fret)))
   }
-  return best ? windowed(name, best) : null
+  const seen = new Set<string>()
+  const diagrams = fingerings.flatMap((frets) => {
+    const id = frets.join(',')
+    if (seen.has(id)) return []
+    seen.add(id)
+    return [windowed(name, frets)]
+  })
+  const preferred = slash ? diagrams[0] : undefined
+  const rest = (preferred ? diagrams.slice(1) : diagrams).sort(
+    (a, b) => ease(a.frets) - ease(b.frets),
+  )
+  return preferred ? [preferred, ...rest] : rest
+}
+
+function ease(frets: number[]): number {
+  const pressed = frets.filter((fret) => fret > 0)
+  return pressed.length ? Math.min(...pressed) : 0
 }
 
 function windowed(name: string, frets: number[]): Diagram {
@@ -136,7 +152,7 @@ function windowed(name: string, frets: number[]): Diagram {
   const max = pressed.length ? Math.max(...pressed) : 1
   const min = pressed.length ? Math.min(...pressed) : 1
   const startFret = max <= 4 ? 1 : min
-  return { name, frets, startFret }
+  return { id: frets.join(','), name, frets, startFret }
 }
 
 function pitch(note: string): number | null {

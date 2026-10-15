@@ -308,7 +308,20 @@ export function SongView() {
       </header>
 
       <main className="mx-auto max-w-5xl px-4 py-4">
-        {settings.showDiagrams && diagramNames.length > 0 && <ChordStrip names={diagramNames} />}
+        {settings.showDiagrams && diagramNames.length > 0 && (
+          <ChordStrip
+            names={diagramNames}
+            choices={settings.chordShapes[song.id] ?? {}}
+            onChoose={(name, shapeId) => {
+              const current = { ...(settings.chordShapes[song.id] ?? {}) }
+              if (shapeId) current[name] = shapeId
+              else delete current[name]
+              update({
+                chordShapes: { ...settings.chordShapes, [song.id]: current },
+              })
+            }}
+          />
+        )}
         {uniqueNames.length > 0 && (
           <p className="mb-4 text-sm leading-6 text-chart-chord">
             <span className="mr-2 font-medium text-muted-foreground">Acordes</span>
