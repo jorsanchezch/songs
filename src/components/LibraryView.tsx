@@ -1,12 +1,12 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Loader2, Music, RefreshCw, Search } from 'lucide-react'
+import { Loader2, Music, Plus, RefreshCw, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useSongs } from '@/hooks/useSongs'
 
 export function LibraryView() {
-  const { state, reload } = useSongs()
+  const { state, reload, revealHidden } = useSongs()
   const [query, setQuery] = useState('')
   const [artist, setArtist] = useState('')
   const [keyName, setKeyName] = useState('')
@@ -38,11 +38,17 @@ export function LibraryView() {
             <Music className="size-5" />
           </div>
           <div>
-            <h1 className="text-lg font-semibold leading-tight">Cancionero</h1>
+            <h1 className="text-lg font-semibold leading-tight">Acuerdes</h1>
             <p className="text-sm text-muted-foreground">
               {state.status === 'ready' ? `${songs.length} canciones` : 'Acordes para cantar'}
             </p>
           </div>
+          <Button asChild className="ml-auto">
+            <Link to="/nueva">
+              <Plus className="size-4" />
+              Agregar
+            </Link>
+          </Button>
         </div>
       </header>
 
@@ -77,6 +83,13 @@ export function LibraryView() {
                 aria-label="Buscar canciones"
               />
             </div>
+            {state.hiddenCount > 0 && (
+              <div className="mb-3">
+                <Button variant="outline" size="sm" onClick={revealHidden}>
+                  Mostrar ocultas ({state.hiddenCount})
+                </Button>
+              </div>
+            )}
             <div className="mb-4 flex gap-2">
               <select
                 value={artist}

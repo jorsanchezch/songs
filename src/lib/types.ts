@@ -46,6 +46,9 @@ export type Song = {
   sections: SongSection[]
   versions: SongVersion[]
   lyricsText: string
+  sourceText?: string
+  origin?: 'catalog' | 'local'
+  overridden?: boolean
 }
 
 export const NOTE_TYPES: NoteType[] = [

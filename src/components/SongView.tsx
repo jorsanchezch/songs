@@ -2,13 +2,17 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
   ArrowLeft,
+  ChevronLeft,
+  ChevronRight,
   ExternalLink,
   Loader2,
   Minus,
   Moon,
+  Pencil,
   Plus,
   Sun,
 } from 'lucide-react'
+import { ChordStrip } from '@/components/ChordDiagrams'
 import { Button } from '@/components/ui/button'
 import { formatChord, transposeKeyName } from '@/lib/chords'
 import { blocksFor, chordSequence, displayLyric, type DisplayBlock } from '@/lib/display'
@@ -93,6 +97,24 @@ export function SongView() {
     if (next) go(next.id)
   }
 
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
+      const target = event.target
+      if (
+        target instanceof HTMLElement &&
+        (target.isContentEditable || target.closest('input, textarea, select'))
+      ) {
+        return
+      }
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+      event.preventDefault()
+      stepSection(event.key === 'ArrowLeft' ? -1 : 1)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [blocks, activeId])
+
   if (state.status === 'loading') {
     return (
       <div className="flex flex-col items-center gap-3 py-24 text-muted-foreground" role="status">
@@ -116,17 +138,26 @@ export function SongView() {
       <div className="mx-auto max-w-md px-4 py-16 text-center">
         <p className="mb-4 font-medium">No está esta canción.</p>
         <Button asChild>
-          <Link to="/">Volver al cancionero</Link>
+          <Link to="/">Volver a Acuerdes</Link>
         </Button>
       </div>
     )
   }
 
   const soundingKey = transposeKeyName(song.key, semitones)
+  const partIndex = blocks.findIndex((block) => block.id === activeId)
+  const partLabel = blocks[partIndex]?.label ?? ''
   const names = chordSequence(blocks.flatMap((block) => block.section.lines)).map((raw) =>
     formatChord(raw, song.key, semitones, settings.spelling),
   )
   const uniqueNames = [...new Set(names)]
+  const diagramNames = [
+    ...new Set(
+      chordSequence(blocks.flatMap((block) => block.section.lines)).map((raw) =>
+        formatChord(raw, song.key, semitones, 'letters'),
+      ),
+    ),
+  ]
 
   return (
     <div className="min-h-svh pb-24">
@@ -145,6 +176,11 @@ export function SongView() {
                 {song.composer ? ` · ${song.composer}` : ''}
               </p>
             </div>
+            <Button variant="outline" size="icon" asChild aria-label="Editar">
+              <Link to={`/editar/${encodeURIComponent(song.id)}`}>
+                <Pencil />
+              </Link>
+            </Button>
             <Button
               variant="outline"
               size="icon"
@@ -190,6 +226,13 @@ export function SongView() {
               onClick={() => update({ showChords: !settings.showChords })}
             >
               Acordes
+            </Button>
+            <Button
+              variant={settings.showDiagrams ? 'default' : 'outline'}
+              aria-pressed={settings.showDiagrams}
+              onClick={() => update({ showDiagrams: !settings.showDiagrams })}
+            >
+              Diagrama
             </Button>
             <Button
               variant={settings.concise ? 'default' : 'outline'}
@@ -265,6 +308,7 @@ export function SongView() {
       </header>
 
       <main className="mx-auto max-w-5xl px-4 py-4">
+        {settings.showDiagrams && diagramNames.length > 0 && <ChordStrip names={diagramNames} />}
         {uniqueNames.length > 0 && (
           <p className="mb-4 text-sm leading-6 text-chart-chord">
             <span className="mr-2 font-medium text-muted-foreground">Acordes</span>
@@ -356,12 +400,26 @@ export function SongView() {
       </main>
 
       <footer className="fixed inset-x-0 bottom-0 z-20 border-t bg-background/95 px-4 py-3 backdrop-blur">
-        <div className="mx-auto flex max-w-5xl gap-2">
-          <Button className="flex-1" size="lg" variant="secondary" onClick={() => stepSection(-1)}>
+        <div className="mx-auto flex max-w-5xl items-center gap-2">
+          <Button
+            size="lg"
+            variant="secondary"
+            aria-label="Parte anterior"
+            disabled={partIndex <= 0}
+            onClick={() => stepSection(-1)}
+          >
+            <ChevronLeft />
             Anterior
           </Button>
-          <Button className="flex-1" size="lg" onClick={() => stepSection(1)}>
+          <p className="min-w-0 flex-1 truncate text-center text-sm font-semibold">{partLabel}</p>
+          <Button
+            size="lg"
+            aria-label="Parte siguiente"
+            disabled={partIndex >= blocks.length - 1}
+            onClick={() => stepSection(1)}
+          >
             Siguiente
+            <ChevronRight />
           </Button>
         </div>
       </footer>

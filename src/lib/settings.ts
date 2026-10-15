@@ -9,6 +9,7 @@ export type ViewSettings = {
   spelling: Spelling
   fontSize: number
   showChords: boolean
+  showDiagrams: boolean
   concise: boolean
   visibleNotes: NoteType[]
   semitones: Record<string, number>
@@ -19,6 +20,7 @@ const DEFAULTS: ViewSettings = {
   spelling: 'letters',
   fontSize: 22,
   showChords: true,
+  showDiagrams: true,
   concise: false,
   visibleNotes: [...NOTE_TYPES],
   semitones: {},

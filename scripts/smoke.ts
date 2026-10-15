@@ -3,6 +3,8 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { formatChord, transposeKeyName } from '../src/lib/chords.ts'
 import { blocksFor } from '../src/lib/display.ts'
+import { diagramFor } from '../src/lib/guitar.ts'
+import { chartToCho, isPlainChordLine, wrapPlainChordLine } from '../src/lib/importChart.ts'
 import { parseChart } from '../src/lib/parseChart.ts'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -74,6 +76,47 @@ assert(only[0].repeat === 2, 'repeat badge')
 const collapsed = blocksFor(markdown, ['estribillo', 'estribillo-2'])
 assert(collapsed.length === 1, 'adjacent chorus collapses')
 assert(collapsed[0]?.repeat === 3, 'repeat counts add')
+
+const openC = diagramFor('C')
+assert(openC?.frets.join(',') === '-1,3,2,0,1,0', 'open C shape')
+assert(openC?.startFret === 1, 'open C starts at the nut')
+const barreF = diagramFor('F')
+assert(barreF?.frets[0] === 1 && barreF.frets[1] === 3, 'F barre')
+const slash = diagramFor('E/G#')
+assert(slash?.frets[0] === 4 && slash.frets[4] === 0, 'E/G# bass')
+
+assert(wrapPlainChordLine('C    F') === '[C]  [F]', 'UG removes two spaces')
+assert(isPlainChordLine('Am  G  F'), 'plain chord line')
+
+const cifra = `<!doctype html><title>Bienvenido Espíritu Santo - Miel San Marcos - Cifra Club</title>
+<pre>
+[Intro]
+<b>C</b>    <b>F</b>
+<b>G</b>
+
+[Estribillo]
+<b>C</b>Bienvenido <b>G</b>espíritu
+E|---0---|
+</pre>
+<script>{"tone":"C"}</script>`
+const cho = chartToCho(cifra, 'https://www.cifraclub.com/miel-san-marcos/bienvenido-espiritu-santo/')
+const imported = parseChart(cho, 'bienvenido.cho')
+assert(imported.title === 'Bienvenido Espíritu Santo', `imported title ${imported.title}`)
+assert(imported.artist === 'Miel San Marcos', `imported artist ${imported.artist}`)
+assert(imported.key === 'C', `imported key ${imported.key}`)
+assert(imported.source.includes('cifraclub.com'), 'imported source')
+const intro = imported.sections.find((section) => section.label === 'Intro')
+assert(intro?.lines[0]?.chords[0]?.raw === 'C', 'intro chord C')
+assert(intro?.lines[0]?.chords[1]?.column === 5, `F column ${intro?.lines[0]?.chords[1]?.column}`)
+assert(intro?.lines[0]?.lyric == null, 'intro chord line stays instrumental')
+const chorus = imported.sections.find((section) => section.label === 'Estribillo')
+assert(chorus?.lines[0]?.lyric?.includes('Bienvenido'), 'inline chords leave the lyric')
+assert(chorus?.lines[0]?.chords[1]?.raw === 'G', 'inline G')
+assert(
+  chorus?.lines.some((line) => line.notes.some((note) => note.text.includes('Tablatura'))) ||
+    chorus?.notes.some((note) => note.text.includes('Tablatura')),
+  'tab becomes a comment',
+)
 
 const names = await readdir(charts)
 const files = names.filter((name) => /\.(cho|chopro)$/i.test(name))
