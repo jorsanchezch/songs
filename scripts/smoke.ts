@@ -135,6 +135,16 @@ try {
 }
 assert(denied, 'access denied is not converted into a chart')
 
+const brokenTags = chartToCho(
+  `<title>Glorioso Día (acordes) - Passion - Cifra Club</title><pre data-chord-content="true"><div>[Intro] <b data-chord-name="D5" data-chord-original-trailing="\n\n[First Part]\n\n">D5</b></div><div>        <b data-chord-name="D5" data-chord-original-trailing="\nHola\n">D5</b>\nHola\n</div></pre>`,
+  'https://www.cifraclub.com/passion/glorioso-dia/',
+)
+const broken = parseChart(brokenTags, 'glorioso.cho')
+assert(broken.sections[0]?.label === 'Intro', `broken tag intro ${broken.sections[0]?.label}`)
+assert(broken.sections[0]?.lines[0]?.chords[0]?.raw === 'D5', 'broken tag keeps D5')
+assert(!brokenTags.includes('<b'), 'broken tags are not left in the chart')
+assert(broken.sections.some((section) => section.lines.some((line) => line.lyric === 'Hola')), 'broken tag keeps the lyric')
+
 const songMd = chartToSongMd(cho, imported.source)
 assert(songMd.startsWith('---\ntitle: Bienvenido Espíritu Santo'), 'link becomes display markdown')
 const fromMd = parseChart(songMd, 'bienvenido.song.md')

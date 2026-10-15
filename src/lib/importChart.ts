@@ -110,37 +110,80 @@ export async function fetchChartPage(url: string): Promise<string> {
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     throw new Error('El enlace tiene que empezar por http o https.')
   }
-  const endpoint = `${import.meta.env.BASE_URL}api/import-chart?url=${encodeURIComponent(url)}`
-  try {
-    const local = await fetch(endpoint)
-    if (local.headers.get('content-type')?.includes('json')) {
-      const data = (await local.json()) as { html?: string; error?: string; blocked?: boolean }
-      if (data.blocked && data.error) throw new Error(data.error)
-      if (data.html) return acceptChartPage(data.html)
-      if (local.status === 400 && data.error) throw new Error(data.error)
-    }
-  } catch (reason) {
-    if (reason instanceof Error && (reason.message === 'Ese enlace no se puede leer.' || reason.message === BLOCKED_PAGE)) {
-      throw reason
-    }
+  if (blockedHost(parsed.hostname)) throw new Error('Ese enlace no se puede leer.')
+
+  if (import.meta.env.DEV) {
+    const local = await readChartHtml(() => fetchLocal(url))
+    if (local) return local
   }
-  try {
-    const direct = await fetch(url)
-    if (direct.ok) return acceptChartPage(await direct.text())
-  } catch (reason) {
-    if (reason instanceof Error && reason.message === BLOCKED_PAGE) throw reason
-  }
-  const proxy = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(url)}`)
-  if (proxy.ok) {
-    const data = (await proxy.json()) as { contents?: string }
-    if (data.contents) return acceptChartPage(data.contents)
-  }
+
+  const reader = await readChartHtml(() => fetchReader(url))
+  if (reader) return reader
+
+  const direct = await readChartHtml(async () => {
+    const response = await fetch(url)
+    if (!response.ok) return null
+    return response.text()
+  })
+  if (direct) return direct
+
+  const proxy = await readChartHtml(async () => {
+    const response = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(url)}`)
+    if (!response.ok) return null
+    const data = (await response.json()) as { contents?: string }
+    return data.contents ?? null
+  })
+  if (proxy) return proxy
+
   throw new Error('No pude leer ese enlace. Ábrelo, copia la cifra y pégala abajo.')
 }
 
-function acceptChartPage(html: string): string {
-  if (isBlockedPage(html)) throw new Error(BLOCKED_PAGE)
+async function fetchLocal(url: string): Promise<string | null> {
+  const endpoint = `${import.meta.env.BASE_URL}api/import-chart?url=${encodeURIComponent(url)}`
+  const local = await fetch(endpoint)
+  if (!local.headers.get('content-type')?.includes('json')) return null
+  const data = (await local.json()) as { html?: string; error?: string; blocked?: boolean }
+  if (local.status === 400 && data.error) throw new Error(data.error)
+  if (data.blocked) return null
+  return data.html ?? null
+}
+
+async function fetchReader(url: string): Promise<string | null> {
+  const response = await fetch(`https://r.jina.ai/${url}`, {
+    headers: { accept: 'text/html', 'x-return-format': 'html' },
+  })
+  if (!response.ok) return null
+  const html = await response.text()
+  if (!/data-chord-content|<pre\b|<b>/i.test(html)) return null
   return html
+}
+
+async function readChartHtml(load: () => Promise<string | null>): Promise<string | null> {
+  try {
+    const html = await load()
+    if (!html || isBlockedPage(html)) return null
+    return html
+  } catch (reason) {
+    if (reason instanceof Error && reason.message === 'Ese enlace no se puede leer.') throw reason
+    return null
+  }
+}
+
+function blockedHost(hostname: string): boolean {
+  const host = hostname.replace(/^\[|\]$/g, '').toLowerCase()
+  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local')) return true
+  if (host === '0.0.0.0' || host === '::1' || host === '::') return true
+  const parts = host.split('.').map((part) => Number(part))
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
+    return false
+  }
+  const a = parts[0] ?? 0
+  const b = parts[1] ?? 0
+  if (a === 10 || a === 127 || a === 0) return true
+  if (a === 169 && b === 254) return true
+  if (a === 172 && b >= 16 && b <= 31) return true
+  if (a === 192 && b === 168) return true
+  return false
 }
 
 function htmlToCho(html: string, sourceUrl: string): string {
@@ -294,13 +337,17 @@ function extractKey(html: string): string {
 
 function extractBody(html: string): string {
   const marked = html.match(/<pre[^>]*data-chord-content[^>]*>([\s\S]*?)<\/pre>/i)?.[1]
-  if (marked && marked.length > 30) return marked
+  if (marked && marked.length > 30) return normalizeChordTags(marked)
   const pres = [...html.matchAll(/<pre[^>]*>([\s\S]*?)<\/pre>/gi)].map((match) => match[1] ?? '')
   const pre = pres.sort((a, b) => b.length - a.length)[0]
-  if (pre && pre.length > 30) return pre
+  if (pre && pre.length > 30) return normalizeChordTags(pre)
   const embedded = longestJsonString(html)
-  if (embedded && /<b[\s>]/i.test(embedded)) return embedded
-  return html
+  if (embedded && /<b[\s>]/i.test(embedded)) return normalizeChordTags(embedded)
+  return normalizeChordTags(html)
+}
+
+function normalizeChordTags(fragment: string): string {
+  return fragment.replace(/<b\b[^>]*\bdata-chord-name="([^"]+)"[\s\S]*?<\/b>/gi, '<b>$1</b>')
 }
 
 function longestJsonString(html: string): string {
