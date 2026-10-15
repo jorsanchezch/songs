@@ -1,8 +1,8 @@
 import type { NoteType, Spelling } from '@/lib/types'
 import { NOTE_TYPES } from '@/lib/types'
 
-const STORAGE = 'cancionero-v1'
-export const THEME_KEY = 'cancionero-theme'
+const STORAGE = 'songbook-v1'
+export const THEME_KEY = 'songbook-theme'
 
 export type ViewSettings = {
   theme: 'dark' | 'light'

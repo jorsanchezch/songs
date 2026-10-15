@@ -138,7 +138,7 @@ export function SongView() {
       <div className="mx-auto max-w-md px-4 py-16 text-center">
         <p className="mb-4 font-medium">No está esta canción.</p>
         <Button asChild>
-          <Link to="/">Volver a Acuerdes</Link>
+          <Link to="/">Volver a Songbook</Link>
         </Button>
       </div>
     )

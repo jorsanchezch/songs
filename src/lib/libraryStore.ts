@@ -1,4 +1,4 @@
-const KEY = 'acuerdes-songs-v1'
+const KEY = 'songbook-songs-v1'
 
 export type LibraryData = {
   hidden: string[]

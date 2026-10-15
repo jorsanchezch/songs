@@ -90,7 +90,7 @@ export function SongEditor() {
       <div className="mx-auto max-w-md px-4 py-16 text-center">
         <p className="mb-4">No está esta canción.</p>
         <Button asChild>
-          <Link to="/">Volver a Acuerdes</Link>
+          <Link to="/">Volver a Songbook</Link>
         </Button>
       </div>
     )
@@ -110,7 +110,7 @@ export function SongEditor() {
       </header>
       <main className="mx-auto flex max-w-3xl flex-col gap-4 px-4 py-4">
         <p className="text-sm text-muted-foreground">
-          Pega el enlace de Cifra Club, Ultimate Guitar o La Cuerda. Se arma un archivo .cho con los acordes en su propia línea, como el resto del cancionero. Se guarda en este navegador.
+          Pega el enlace de Cifra Club, Ultimate Guitar o La Cuerda. Se arma un archivo .cho con los acordes en su propia línea, como el resto del songbook. Se guarda en este navegador.
         </p>
         <label className="flex flex-col gap-1 text-sm font-medium">
           Enlace
