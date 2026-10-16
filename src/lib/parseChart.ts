@@ -26,8 +26,8 @@ const TAG_LABEL: Record<string, string> = {
 const DIRECTIVE = /^\{([a-z0-9_-]+)(?::\s*([^}]*))?\}\s*$/i
 
 export function parseChart(text: string, filePath: string): Song {
-  const body = text.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n')
-  if (filePath.endsWith('.song.md')) return parseMarkdown(body, filePath)
+  const body = text.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').trimStart()
+  if (filePath.endsWith('.song.md') || body.startsWith('---\n')) return parseMarkdown(body, filePath)
   return parseChordPro(body, filePath)
 }
 
@@ -339,9 +339,20 @@ function frontMatter(text: string): { meta: Record<string, string>; body: string
   const meta: Record<string, string> = {}
   for (const line of (match[1] ?? '').split('\n')) {
     const pair = line.match(/^([A-Za-z0-9_]+):\s*(.*)$/)
-    if (pair) meta[pair[1]!.toLowerCase()] = pair[2]!.trim()
+    if (pair) meta[pair[1]!.toLowerCase()] = unquote(pair[2] ?? '')
   }
   return { meta, body: text.slice(match[0].length) }
+}
+
+function unquote(value: string): string {
+  const trimmed = value.trim()
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1).replace(/\\"/g, '"').replace(/\\\\/g, '\\')
+  }
+  return trimmed
 }
 
 function markdownHeading(line: string): {

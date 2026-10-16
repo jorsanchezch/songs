@@ -38,7 +38,7 @@ export function chartToSongMd(raw: string, sourceUrl = ''): string {
   return songToMarkdown(parseChart(chartToCho(text, sourceUrl), 'import.cho'))
 }
 
-function songToMarkdown(song: Song): string {
+export function songToMarkdown(song: Song): string {
   const fields = [
     ['title', song.title],
     ['artist', song.artist],

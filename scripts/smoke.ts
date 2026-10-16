@@ -145,6 +145,15 @@ assert(broken.sections[0]?.lines[0]?.chords[0]?.raw === 'D5', 'broken tag keeps 
 assert(!brokenTags.includes('<b'), 'broken tags are not left in the chart')
 assert(broken.sections.some((section) => section.lines.some((line) => line.lyric === 'Hola')), 'broken tag keeps the lyric')
 
+const storedAsCho = parseChart(
+  '---\ntitle: Glorioso Día\nartist: Passion\nkey: D\n---\n\n## Intro {#intro}\n[D5]\nMi vergüenza me sepultó\n',
+  'local-1792099446450.cho',
+)
+assert(storedAsCho.title === 'Glorioso Día', `stored title ${storedAsCho.title}`)
+assert(storedAsCho.artist === 'Passion', 'stored artist')
+assert(!storedAsCho.lyricsText.includes('title:'), 'front matter stays out of the chart')
+assert(storedAsCho.sections[0]?.lines[0]?.chords[0]?.raw === 'D5', 'stored markdown keeps the chord')
+
 const songMd = chartToSongMd(cho, imported.source)
 assert(songMd.startsWith('---\ntitle: Bienvenido Espíritu Santo'), 'link becomes display markdown')
 const fromMd = parseChart(songMd, 'bienvenido.song.md')
