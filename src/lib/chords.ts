@@ -120,19 +120,21 @@ export function formatChord(
   const rootPc = pitchClass(chord.root)
   if (rootPc == null) return chord.raw
 
-  if (spelling === 'degrees') {
-    const number = DEGREE[mod12(rootPc - parsed.pc)] ?? '1'
-    let text = withDigitQuality(number, degreeQuality(chord.quality))
-    if (chord.bass) {
-      const bassPc = pitchClass(chord.bass)
-      text +=
-        bassPc == null
-          ? `/${chord.bass}`
-          : `/${withDigitQuality(DEGREE[mod12(bassPc - parsed.pc)] ?? '1', chord.bassQuality)}`
-    }
-    return text
-  }
+  const letters = letterChord(chord, semitones, flats)
+  if (spelling === 'letters') return letters
+  if (spelling === 'degrees') return degreeChord(chord, parsed.pc)
 
+  const bassPc = chord.bass ? pitchClass(chord.bass) : null
+  const prefix =
+    bassPc == null
+      ? (DEGREE[mod12(rootPc - parsed.pc)] ?? '1')
+      : `${DEGREE[mod12(rootPc - parsed.pc)] ?? '1'}/${DEGREE[mod12(bassPc - parsed.pc)] ?? '1'}`
+  return `${prefix}(${letters})`
+}
+
+function letterChord(chord: SplitChord, semitones: number, flats: boolean): string {
+  const rootPc = pitchClass(chord.root)
+  if (rootPc == null) return chord.raw
   const root = spellPitch(mod12(rootPc + semitones), flats)
   let text = `${root}${chord.quality}`
   if (chord.bass) {
@@ -141,6 +143,21 @@ export function formatChord(
       bassPc == null
         ? `/${chord.bass}`
         : `/${spellPitch(mod12(bassPc + semitones), flats)}${chord.bassQuality}`
+  }
+  return text
+}
+
+function degreeChord(chord: SplitChord, tonic: number): string {
+  const rootPc = pitchClass(chord.root)
+  if (rootPc == null) return chord.raw
+  const number = DEGREE[mod12(rootPc - tonic)] ?? '1'
+  let text = withDigitQuality(number, degreeQuality(chord.quality))
+  if (chord.bass) {
+    const bassPc = pitchClass(chord.bass)
+    text +=
+      bassPc == null
+        ? `/${chord.bass}`
+        : `/${withDigitQuality(DEGREE[mod12(bassPc - tonic)] ?? '1', chord.bassQuality)}`
   }
   return text
 }

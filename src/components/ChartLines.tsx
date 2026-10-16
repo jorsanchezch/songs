@@ -98,14 +98,14 @@ export function ChartRow({
         onToggle={onToggle}
       />
       {showChords && placed.items.length > 0 && (
-        <div className="relative h-[1.35em]" style={{ width: `${width}ch` }}>
+        <div className="relative mb-[0.42em] h-[1.7em]" style={{ width: `${width}ch` }}>
           {placed.items.map((item, index) => {
             const note = item.chord.notes.find((entry) => visible.includes(entry.type))
             const key = `${block.id}:${lineIndex}:c${index}:${note?.id ?? ''}`
             const open = note ? openNote === key : false
             return (
               <span key={key} className="absolute top-0" style={{ left: `${item.left}ch` }}>
-                <span className="text-[0.72em] leading-none font-semibold whitespace-nowrap text-chart-chord">
+                <span className="-ml-[0.28em] inline-block rounded-[0.3em] bg-chart-chord/15 px-[0.28em] py-[0.14em] text-[0.72em] leading-none font-semibold whitespace-nowrap text-chart-chord">
                   {item.name}
                   {note && (
                     <button
@@ -150,7 +150,7 @@ export function placeChords(
   const items = chords.map((chord) => {
     const extra = chord.notes.length ? 1.4 : 0
     const left = Math.max(chord.column, cursor)
-    cursor = left + chord.name.length * 0.72 + extra + 0.35
+    cursor = left + chord.name.length * 0.72 + extra + 0.55
     return { chord, name: chord.name, left }
   })
   return { items, cursor }

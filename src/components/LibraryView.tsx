@@ -1,11 +1,16 @@
-import { useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
-import { Loader2, Music, Plus, RefreshCw, Search } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
+import { ListMusic, Loader2, Music, Plus, RefreshCw, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { UserBadge } from '@/components/UserBadge'
 import { useSongs } from '@/hooks/useSongs'
+import { useUser } from '@/hooks/useUser'
+import { can } from '@/lib/access'
 
 export function LibraryView() {
+  const navigate = useNavigate()
+  const user = useUser()
   const { state, reload, revealHidden } = useSongs()
   const [query, setQuery] = useState('')
   const [artist, setArtist] = useState('')
@@ -30,10 +35,25 @@ export function LibraryView() {
     return haystack.includes(needle)
   })
 
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!event.metaKey || event.altKey || event.ctrlKey || event.shiftKey) return
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+      if (event.target instanceof HTMLElement && event.target.closest('input, textarea, select')) return
+      if (!visible.length) return
+      event.preventDefault()
+      const song = event.key === 'ArrowRight' ? visible[0] : visible[visible.length - 1]
+      if (!song) return
+      navigate(`/c/${encodeURIComponent(song.id)}`)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [navigate, visible])
+
   return (
     <div className="min-h-svh pb-10">
       <header className="border-b bg-card/80 backdrop-blur">
-        <div className="mx-auto flex max-w-3xl items-center gap-3 px-4 py-4">
+        <div className="mx-auto flex w-full max-w-[52.8rem] items-center gap-3 px-4 py-4">
           <div className="flex size-10 items-center justify-center rounded-xl bg-primary/15 text-primary">
             <Music className="size-5" />
           </div>
@@ -43,16 +63,27 @@ export function LibraryView() {
               {state.status === 'ready' ? `${songs.length} canciones` : 'Acordes para cantar'}
             </p>
           </div>
-          <Button asChild className="ml-auto">
-            <Link to="/nueva">
-              <Plus className="size-4" />
-              Agregar
-            </Link>
-          </Button>
+          <div className="ml-auto flex items-center gap-2">
+            <UserBadge />
+            <Button asChild variant="outline">
+              <Link to="/listas">
+                <ListMusic className="size-4" />
+                Listas
+              </Link>
+            </Button>
+            {can(user, 'create') && (
+              <Button asChild>
+                <Link to="/nueva">
+                  <Plus className="size-4" />
+                  Agregar
+                </Link>
+              </Button>
+            )}
+          </div>
         </div>
       </header>
 
-      <main className="mx-auto max-w-3xl px-4 py-4">
+      <main className="mx-auto w-full max-w-[52.8rem] px-4 py-4">
         {state.status === 'loading' && (
           <div className="flex flex-col items-center gap-3 py-24 text-muted-foreground" role="status">
             <Loader2 className="size-8 animate-spin" />
@@ -83,7 +114,7 @@ export function LibraryView() {
                 aria-label="Buscar canciones"
               />
             </div>
-            {state.hiddenCount > 0 && (
+            {state.hiddenCount > 0 && can(user, 'update') && (
               <div className="mb-3">
                 <Button variant="outline" size="sm" onClick={revealHidden}>
                   Mostrar ocultas ({state.hiddenCount})

@@ -5,6 +5,8 @@ import { formatChord, transposeKeyName } from '../src/lib/chords.ts'
 import { blocksFor } from '../src/lib/display.ts'
 import { diagramFor, shapesFor } from '../src/lib/guitar.ts'
 import { chartToCho, chartToSongMd, isBlockedPage, isPlainChordLine, wrapPlainChordLine } from '../src/lib/importChart.ts'
+import { nextServiceDate, planEvergreenAdd, serviceListName } from '../src/lib/setlists.ts'
+import { can, currentUser, roleLabel } from '../src/lib/access.ts'
 import { parseChart } from '../src/lib/parseChart.ts'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -36,6 +38,13 @@ assert(formatChord('E', 'E', 2, 'letters') === 'F#', 'transpose E up 2')
 assert(transposeKeyName('E', 2) === 'F#', 'key E up 2')
 assert(transposeKeyName('F', -1) === 'E', 'key F down 1')
 assert(formatChord('E/G#', 'E', 2, 'degrees') === '1/3', 'degrees stay when transposed')
+assert(formatChord('D5', 'D', 0, 'both') === '1(D5)', 'both shows degree(chord)')
+assert(formatChord('G', 'D', 0, 'both') === '4(G)', 'both fourth')
+assert(formatChord('E/G#', 'E', 0, 'both') === '1/3(E/G#)', 'both slash')
+assert(formatChord('C#m7(11)', 'E', 0, 'both') === '6(C#m7(11))', 'both keeps the chord quality')
+assert(formatChord('C9', 'G', 0, 'both') === '4(C9)', 'both leaves a numbered quality on the chord')
+assert(formatChord('E', 'E', 2, 'both') === '1(F#)', 'both keeps the degree and transposes the chord')
+assert(formatChord('E/G#', 'E', 2, 'both') === '1/3(F#/A#)', 'both slash transposes only the chord')
 
 const santo = parseChart(
   await readFile(path.join(charts, 'Santo Por Siempre.chopro'), 'utf8'),
@@ -153,6 +162,32 @@ assert(storedAsCho.title === 'Glorioso Día', `stored title ${storedAsCho.title}
 assert(storedAsCho.artist === 'Passion', 'stored artist')
 assert(!storedAsCho.lyricsText.includes('title:'), 'front matter stays out of the chart')
 assert(storedAsCho.sections[0]?.lines[0]?.chords[0]?.raw === 'D5', 'stored markdown keeps the chord')
+
+const friday = new Date(2026, 9, 16)
+const saturday = new Date(2026, 9, 17)
+const sunday = new Date(2026, 9, 18)
+const laterSaturday = new Date(2026, 9, 24)
+assert(nextServiceDate(friday, 6) === '2026-10-17', 'next Saturday from Friday is the 17th')
+assert(nextServiceDate(saturday, 6) === '2026-10-17', 'Saturday service is that same Saturday')
+assert(serviceListName(3) === 'Servicio del próximo miércoles', 'wednesday service name')
+assert(serviceListName(0) === 'Servicio del próximo domingo', 'sunday service name')
+let planned = planEvergreenAdd({ weekday: 6, serviceDate: null }, [], 'a', friday)
+assert(planned.evergreen.serviceDate === '2026-10-17' && planned.items.length === 1, 'first add targets Saturday')
+planned = planEvergreenAdd(planned.evergreen, planned.items, 'b', friday)
+assert(planned.items.map((item) => item.songId).join() === 'a,b', 'adds keep accumulating before the service')
+planned = planEvergreenAdd(planned.evergreen, planned.items, 'c', saturday)
+assert(planned.items.length === 3 && planned.evergreen.serviceDate === '2026-10-17', 'adding on the service day keeps the list')
+planned = planEvergreenAdd(planned.evergreen, planned.items, 'd', sunday)
+assert(planned.items.length === 1 && planned.items[0]?.songId === 'd', 'adding after the service clears the list')
+assert(planned.evergreen.serviceDate === '2026-10-24', 'the new service is the following Saturday')
+planned = planEvergreenAdd({ weekday: 6, serviceDate: '2026-10-17' }, [{ songId: 'a', semitones: 0 }], 'e', laterSaturday)
+assert(planned.items.length === 1 && planned.evergreen.serviceDate === '2026-10-24', 'a later Saturday starts that Saturday')
+assert(currentUser.role === 'owner' && roleLabel('owner') === 'Dueño', 'the only account is the owner')
+assert(can(currentUser, 'create') && can(currentUser, 'update') && can(currentUser, 'delete'), 'the owner can change songs and lists')
+assert(!can({ ...currentUser, role: 'viewer' }, 'create'), 'a reader cannot create')
+assert(!can({ ...currentUser, role: 'viewer' }, 'update'), 'a reader cannot edit')
+assert(!can({ ...currentUser, role: 'viewer' }, 'delete'), 'a reader cannot delete')
+assert(can({ ...currentUser, role: 'admin' }, 'delete'), 'an admin can delete')
 
 const songMd = chartToSongMd(cho, imported.source)
 assert(songMd.startsWith('---\ntitle: Bienvenido Espíritu Santo'), 'link becomes display markdown')

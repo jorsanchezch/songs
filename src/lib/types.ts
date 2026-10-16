@@ -1,6 +1,6 @@
 export type NoteType = 'cue' | 'how' | 'repeat' | 'arrange' | 'free'
 
-export type Spelling = 'letters' | 'degrees'
+export type Spelling = 'letters' | 'degrees' | 'both'
 
 export type SongNote = {
   id: string

@@ -1,5 +1,9 @@
-import { BrowserRouter, Route, Routes } from 'react-router-dom'
+import { useEffect } from 'react'
+import { BrowserRouter, Route, Routes, useNavigate } from 'react-router-dom'
 import { LibraryView } from '@/components/LibraryView'
+import { ServiceDaysView } from '@/components/ServiceDaysView'
+import { SetlistView } from '@/components/SetlistView'
+import { SetlistsView } from '@/components/SetlistsView'
 import { SongEditor } from '@/components/SongEditor'
 import { SongView } from '@/components/SongView'
 
@@ -11,10 +15,14 @@ export default function App() {
     <BrowserRouter basename={basename}>
       <Routes>
         <Route path="/" element={<LibraryView />} />
+        <Route path="/listas" element={<SetlistsView />} />
+        <Route path="/listas/dias" element={<ServiceDaysView />} />
+        <Route path="/listas/:setlistId" element={<SetlistView />} />
         <Route path="/nueva" element={<SongEditor />} />
         <Route path="/c/:songId" element={<SongView />} />
         <Route path="/editar/:songId" element={<SongEditor />} />
       </Routes>
+      <EscapeFallback />
       <footer className="fixed inset-x-0 bottom-0 z-30 flex h-8 items-center justify-center border-t bg-background/95 text-[11px] text-muted-foreground">
         {commit ? (
           <a
@@ -31,4 +39,31 @@ export default function App() {
       </footer>
     </BrowserRouter>
   )
+}
+
+function EscapeFallback() {
+  const navigate = useNavigate()
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return
+      if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
+      const target = event.target
+      if (
+        target instanceof HTMLElement &&
+        (target.isContentEditable || target.closest('input, textarea, select'))
+      ) {
+        return
+      }
+      const here = `${window.location.pathname}${window.location.search}`
+      window.setTimeout(() => {
+        if (`${window.location.pathname}${window.location.search}` !== here) return
+        const index = window.history.state?.idx
+        if (typeof index === 'number' && index > 0) navigate(-1)
+        else navigate('/')
+      }, 0)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [navigate])
+  return null
 }

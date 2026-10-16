@@ -1,13 +1,14 @@
 import { useMemo, useState } from 'react'
 import { ChartRow, NoteRow } from '@/components/ChartLines'
+import { SpellingToggle } from '@/components/SpellingToggle'
 import { Button } from '@/components/ui/button'
 import { formatChord, transposeKeyName } from '@/lib/chords'
 import { blocksFor, chordSequence } from '@/lib/display'
-import { NOTE_LABEL, NOTE_TYPES, type NoteType, type Song } from '@/lib/types'
+import { NOTE_LABEL, NOTE_TYPES, type NoteType, type Song, type Spelling } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
 export function ChartPreview({ song }: { song: Song }) {
-  const [spelling, setSpelling] = useState<'letters' | 'degrees'>('letters')
+  const [spelling, setSpelling] = useState<Spelling>('letters')
   const [showChords, setShowChords] = useState(true)
   const [concise, setConcise] = useState(false)
   const [visibleNotes, setVisibleNotes] = useState<NoteType[]>([...NOTE_TYPES])
@@ -30,9 +31,7 @@ export function ChartPreview({ song }: { song: Song }) {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap gap-1.5">
-        <Button size="sm" variant={spelling === 'degrees' ? 'default' : 'outline'} onClick={() => setSpelling(spelling === 'letters' ? 'degrees' : 'letters')}>
-          {spelling === 'letters' ? 'Letras' : 'Grados'}
-        </Button>
+        <SpellingToggle size="sm" value={spelling} onChange={setSpelling} />
         <Button size="sm" variant="outline" onClick={() => setSemitones((value) => (value <= -11 ? 0 : value - 1))} aria-label="Bajar un semitono">
           −1
         </Button>

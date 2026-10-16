@@ -13,7 +13,10 @@ import {
 import { ChartPreview } from '@/components/ChartPreview'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { UserBadge } from '@/components/UserBadge'
 import { useSongs } from '@/hooks/useSongs'
+import { useUser } from '@/hooks/useUser'
+import { can } from '@/lib/access'
 import { chartToSongMd, fetchChartPage, isBlockedPage, songToMarkdown } from '@/lib/importChart'
 import { parseChart } from '@/lib/parseChart'
 import {
@@ -32,7 +35,8 @@ import { NOTE_LABEL, NOTE_TYPES, type NoteType, type Song, type SongNote, type S
 export function SongEditor() {
   const { songId = '' } = useParams()
   const navigate = useNavigate()
-  const { state, saveSong, removeSong, restoreSong } = useSongs()
+  const user = useUser()
+  const { state, saveSong, restoreSong } = useSongs()
   const song = state.status === 'ready' ? state.songs.find((item) => item.id === songId) : undefined
   const [draft, setDraft] = useState<Song>(blankSong)
   const [url, setUrl] = useState('')
@@ -41,7 +45,6 @@ export function SongEditor() {
   const [status, setStatus] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
-  const [leaving, setLeaving] = useState(false)
   const hydrated = useRef('')
   const ready = state.status === 'ready'
   const missing = Boolean(songId) && ready && !song
@@ -92,15 +95,6 @@ export function SongEditor() {
     }
   }
 
-  const remove = () => {
-    if (!song) return
-    const label = song.origin === 'local' ? '¿Eliminar esta canción?' : '¿Ocultar esta canción en este navegador?'
-    if (!window.confirm(label)) return
-    setLeaving(true)
-    removeSong(song)
-    navigate('/')
-  }
-
   const download = () => {
     const markdown = songToMarkdown(draft)
     const title = draft.title.trim() || 'cancion'
@@ -114,7 +108,7 @@ export function SongEditor() {
     URL.revokeObjectURL(href)
   }
 
-  if (state.status === 'loading' || leaving) {
+  if (state.status === 'loading') {
     return (
       <div className="flex flex-col items-center gap-3 py-24 text-muted-foreground" role="status">
         <Loader2 className="size-8 animate-spin" />
@@ -134,10 +128,21 @@ export function SongEditor() {
     )
   }
 
+  if (!(songId ? can(user, 'update') : can(user, 'create'))) {
+    return (
+      <div className="mx-auto max-w-md px-4 py-16 text-center">
+        <p className="mb-4">Esta cuenta no puede cambiar canciones.</p>
+        <Button asChild>
+          <Link to={song ? `/c/${encodeURIComponent(song.id)}` : '/'}>Volver</Link>
+        </Button>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-svh pb-32">
       <header className="sticky top-0 z-20 border-b bg-background/95 backdrop-blur">
-        <div className="mx-auto flex max-w-5xl items-center gap-3 px-4 py-3">
+        <div className="mx-auto flex max-w-[70.4rem] items-center gap-3 px-4 py-3">
           <Button variant="ghost" size="icon" asChild aria-label="Volver">
             <Link to={song ? `/c/${encodeURIComponent(song.id)}` : '/'}>
               <ArrowLeft />
@@ -146,6 +151,7 @@ export function SongEditor() {
           <h1 className="min-w-0 flex-1 truncate text-lg font-semibold">
             {draft.title.trim() || (song ? 'Editar canción' : 'Nueva canción')}
           </h1>
+          <UserBadge />
           <div className="flex rounded-lg border p-0.5">
             <Button size="sm" variant={mode === 'edit' ? 'default' : 'ghost'} onClick={() => setMode('edit')}>
               Editar
@@ -157,7 +163,7 @@ export function SongEditor() {
         </div>
       </header>
 
-      <main className="mx-auto flex max-w-5xl flex-col gap-4 px-4 py-4">
+      <main className="mx-auto flex max-w-[70.4rem] flex-col gap-4 px-4 py-4">
         {status && <p className="text-sm text-primary">{status}</p>}
         {error && <p className="text-sm text-destructive">{error}</p>}
 
@@ -254,7 +260,7 @@ export function SongEditor() {
 
             <VersionsEditor song={draft} onChange={setDraft} />
 
-            {song?.overridden && song.origin === 'catalog' && (
+            {song?.overridden && song.origin === 'catalog' && can(user, 'update') && (
               <Button
                 variant="outline"
                 onClick={() => {
@@ -270,16 +276,11 @@ export function SongEditor() {
       </main>
 
       <footer className="fixed inset-x-0 bottom-8 z-20 border-t bg-background/95 px-4 py-3 backdrop-blur">
-        <div className="mx-auto flex max-w-5xl flex-wrap gap-2">
-          <Button onClick={save}>Guardar</Button>
+        <div className="mx-auto flex max-w-[70.4rem] flex-wrap gap-2">
+          {(songId ? can(user, 'update') : can(user, 'create')) && <Button onClick={save}>Guardar</Button>}
           <Button variant="outline" onClick={download}>
             Descargar .song.md
           </Button>
-          {song && (
-            <Button variant="outline" onClick={remove}>
-              {song.origin === 'local' ? 'Eliminar' : 'Ocultar'}
-            </Button>
-          )}
         </div>
       </footer>
     </div>

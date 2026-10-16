@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   ArrowLeft,
   ChevronLeft,
@@ -11,25 +11,38 @@ import {
   Pencil,
   Plus,
   Sun,
+  Trash2,
 } from 'lucide-react'
 import { ChartRow, NoteRow } from '@/components/ChartLines'
+import { SpellingToggle } from '@/components/SpellingToggle'
 import { ChordStrip } from '@/components/ChordDiagrams'
 import { Button } from '@/components/ui/button'
+import { UserBadge } from '@/components/UserBadge'
 import { formatChord, transposeKeyName } from '@/lib/chords'
 import { blocksFor, chordSequence } from '@/lib/display'
 import { loadSettings, saveSettings, type ViewSettings } from '@/lib/settings'
 import { NOTE_LABEL, NOTE_TYPES } from '@/lib/types'
+import { useSetlists } from '@/hooks/useSetlists'
 import { useSongs } from '@/hooks/useSongs'
+import { useUser } from '@/hooks/useUser'
+import { can } from '@/lib/access'
+import { neighborSong, setSetlistSemitones, songPath } from '@/lib/setlists'
 import { cn } from '@/lib/utils'
 
 export function SongView() {
   const { songId = '' } = useParams()
-  const { state, reload, restoreSong } = useSongs()
+  const [searchParams] = useSearchParams()
+  const navigate = useNavigate()
+  const user = useUser()
+  const { state, reload, removeSong, restoreSong } = useSongs()
+  const setlists = useSetlists()
+  const listaId = searchParams.get('lista')
   const [settings, setSettings] = useState<ViewSettings>(() => loadSettings())
   const [openNote, setOpenNote] = useState<string | null>(null)
   const [current, setCurrent] = useState<string | null>(null)
   const [versionId, setVersionId] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<string[]>([])
+  const [headerOpen, setHeaderOpen] = useState(false)
   const pendingScroll = useRef<string | null>(null)
 
   const song =
@@ -38,6 +51,7 @@ export function SongView() {
   useEffect(() => {
     setOpenNote(null)
     setExpanded([])
+    setHeaderOpen(false)
     setVersionId(null)
     setCurrent(null)
   }, [songId])
@@ -73,10 +87,20 @@ export function SongView() {
     })
   }
 
-  const semitones = song ? (settings.semitones[song.id] ?? 0) : 0
+  const activeList = listaId ? setlists.find((list) => list.id === listaId) : undefined
+  const setlistItemIndex = activeList?.items.findIndex((item) => item.songId === songId) ?? -1
+  const setlistItem = setlistItemIndex >= 0 ? activeList?.items[setlistItemIndex] : undefined
+
+  const semitones = song
+    ? (setlistItem && can(user, 'update') ? setlistItem.semitones : (settings.semitones[song.id] ?? 0))
+    : 0
   const setSemitones = (value: number) => {
     if (!song) return
     const wrapped = value > 11 ? value - 12 : value < -11 ? value + 12 : value
+    if (listaId && setlistItemIndex >= 0 && can(user, 'update')) {
+      setSetlistSemitones(listaId, setlistItemIndex, wrapped)
+      return
+    }
     update({ semitones: { ...settings.semitones, [song.id]: wrapped } })
   }
 
@@ -108,6 +132,19 @@ export function SongView() {
       ) {
         return
       }
+      if (event.key === ' ' || event.code === 'Space') {
+        event.preventDefault()
+        setHeaderOpen((open) => !open)
+        return
+      }
+      const partNumber = Number(event.key)
+      if (event.key.length === 1 && partNumber >= 1 && partNumber <= 9) {
+        const block = blocks[partNumber - 1]
+        if (!block) return
+        event.preventDefault()
+        go(block.id)
+        return
+      }
       if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
       event.preventDefault()
       stepSection(event.key === 'ArrowLeft' ? -1 : 1)
@@ -115,6 +152,37 @@ export function SongView() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [blocks, activeId])
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!event.metaKey || event.altKey || event.ctrlKey || event.shiftKey) return
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+      if (typing(event.target)) return
+      if (state.status !== 'ready') return
+      const direction = event.key === 'ArrowLeft' ? -1 : 1
+      const ids = listaId
+        ? (setlists.find((list) => list.id === listaId)?.items.map((item) => item.songId) ?? [])
+        : state.songs.map((item) => item.id)
+      const playable = ids.filter((id) => state.songs.some((item) => item.id === id))
+      const next = neighborSong(playable, songId, direction)
+      if (!next) return
+      event.preventDefault()
+      navigate(songPath(next, listaId))
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [listaId, navigate, setlists, songId, state])
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
+      if (typing(event.target)) return
+      event.preventDefault()
+      navigate(listaId ? `/listas/${encodeURIComponent(listaId)}` : '/')
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [listaId, navigate])
 
   if (state.status === 'loading') {
     return (
@@ -163,25 +231,62 @@ export function SongView() {
   return (
     <div className="min-h-svh pb-32">
       <header className="sticky top-0 z-20 border-b bg-background/95 backdrop-blur">
-        <div className="mx-auto flex max-w-5xl flex-col gap-3 px-4 py-3">
-          <div className="flex items-start gap-3">
+        <div className="mx-auto flex max-w-[70.4rem] flex-col gap-3 px-4 py-2">
+          <div className="flex items-center gap-3">
+            <h1 className="min-w-0 flex-1 truncate text-lg font-semibold">{song.title}</h1>
+            {activeList && (
+              <Link
+                to={`/listas/${encodeURIComponent(activeList.id)}`}
+                className="shrink-0 text-sm text-muted-foreground hover:underline"
+              >
+                {setlistItemIndex + 1}/{activeList.items.length} {activeList.name}
+              </Link>
+            )}
+            <p className="shrink-0 text-sm font-semibold text-primary">{partLabel}</p>
+            <UserBadge />
+            <Button
+              size="sm"
+              variant="ghost"
+              aria-expanded={headerOpen}
+              onClick={() => setHeaderOpen((open) => !open)}
+            >
+              {headerOpen ? 'Ocultar' : 'Controles'}
+            </Button>
+          </div>
+          {headerOpen && (
+          <>
+          <div className="flex items-center gap-3">
             <Button variant="ghost" size="icon" asChild aria-label="Volver">
               <Link to="/">
                 <ArrowLeft />
               </Link>
             </Button>
-            <div className="min-w-0 flex-1">
-              <h1 className="truncate text-xl font-semibold">{song.title}</h1>
-              <p className="truncate text-sm text-muted-foreground">
-                {song.artist || 'Sin artista'}
-                {song.composer ? ` · ${song.composer}` : ''}
-              </p>
-            </div>
-            <Button variant="outline" size="icon" asChild aria-label="Editar">
-              <Link to={`/editar/${encodeURIComponent(song.id)}`}>
-                <Pencil />
-              </Link>
-            </Button>
+            <p className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
+              {song.artist || 'Sin artista'}
+              {song.composer ? ` · ${song.composer}` : ''}
+            </p>
+            {can(user, 'update') && (
+              <Button variant="outline" size="icon" asChild aria-label="Editar">
+                <Link to={`/editar/${encodeURIComponent(song.id)}`}>
+                  <Pencil />
+                </Link>
+              </Button>
+            )}
+            {can(user, 'delete') && (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  const label =
+                    song.origin === 'local' ? '¿Eliminar esta canción?' : '¿Ocultar esta canción en este navegador?'
+                  if (!window.confirm(label)) return
+                  removeSong(song)
+                  navigate(listaId ? `/listas/${encodeURIComponent(listaId)}` : '/')
+                }}
+              >
+                <Trash2 />
+                {song.origin === 'local' ? 'Eliminar' : 'Ocultar canción'}
+              </Button>
+            )}
             <Button
               variant="outline"
               size="icon"
@@ -191,7 +296,7 @@ export function SongView() {
               {settings.theme === 'dark' ? <Sun /> : <Moon />}
             </Button>
           </div>
-          {song.overridden && song.origin === 'catalog' && (
+          {song.overridden && song.origin === 'catalog' && can(user, 'update') && (
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-primary/40 bg-primary/10 px-3 py-2 text-sm">
               <p>Este navegador guarda una copia anterior y tapa el archivo.</p>
               <Button size="sm" onClick={() => restoreSong(song.id)}>
@@ -216,14 +321,7 @@ export function SongView() {
               </Button>
             </div>
 
-            <Button
-              variant={settings.spelling === 'degrees' ? 'default' : 'outline'}
-              onClick={() =>
-                update({ spelling: settings.spelling === 'letters' ? 'degrees' : 'letters' })
-              }
-            >
-              {settings.spelling === 'letters' ? 'Letras' : 'Grados'}
-            </Button>
+            <SpellingToggle value={settings.spelling} onChange={(spelling) => update({ spelling })} />
             <Button variant="outline" onClick={() => update({ fontSize: Math.max(16, settings.fontSize - 2) })}>
               A−
             </Button>
@@ -313,11 +411,13 @@ export function SongView() {
               </button>
             ))}
           </div>
+          </>
+          )}
         </div>
       </header>
 
-      <main className="mx-auto max-w-5xl px-4 py-4">
-        {settings.showDiagrams && diagramNames.length > 0 && (
+      <main className="mx-auto max-w-[70.4rem] px-4 py-4">
+        {headerOpen && settings.showDiagrams && diagramNames.length > 0 && (
           <ChordStrip
             names={diagramNames}
             choices={settings.chordShapes[song.id] ?? {}}
@@ -331,7 +431,7 @@ export function SongView() {
             }}
           />
         )}
-        {uniqueNames.length > 0 && (
+        {headerOpen && uniqueNames.length > 0 && (
           <p className="mb-4 text-sm leading-6 text-chart-chord">
             <span className="mr-2 font-medium text-muted-foreground">Acordes</span>
             {uniqueNames.join('  ·  ')}
@@ -351,7 +451,7 @@ export function SongView() {
               <section
                 key={block.id}
                 id={`sec-${block.id}`}
-                className={cn('scroll-mt-36', active && 'border-l-2 border-primary pl-3')}
+                className={cn(headerOpen ? 'scroll-mt-64' : 'scroll-mt-14', active && 'border-l-2 border-primary pl-3')}
               >
                 <div className="mb-2 flex flex-wrap items-baseline gap-2">
                   <h2 className="font-sans text-[0.7em] font-semibold tracking-wide text-primary uppercase">
@@ -422,7 +522,7 @@ export function SongView() {
       </main>
 
       <footer className="fixed inset-x-0 bottom-8 z-20 border-t bg-background/95 px-4 py-3 backdrop-blur">
-        <div className="mx-auto flex max-w-5xl items-center gap-2">
+        <div className="mx-auto flex max-w-[70.4rem] items-center gap-2">
           <Button
             size="lg"
             variant="secondary"
@@ -446,5 +546,12 @@ export function SongView() {
         </div>
       </footer>
     </div>
+  )
+}
+
+function typing(target: EventTarget | null): boolean {
+  return (
+    target instanceof HTMLElement &&
+    (target.isContentEditable || Boolean(target.closest('input, textarea, select')))
   )
 }
