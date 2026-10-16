@@ -31,7 +31,7 @@ export function LibraryView() {
   })
 
   return (
-    <div className="min-h-svh">
+    <div className="min-h-svh pb-10">
       <header className="border-b bg-card/80 backdrop-blur">
         <div className="mx-auto flex max-w-3xl items-center gap-3 px-4 py-4">
           <div className="flex size-10 items-center justify-center rounded-xl bg-primary/15 text-primary">

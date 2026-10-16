@@ -135,7 +135,7 @@ export function SongEditor() {
   }
 
   return (
-    <div className="min-h-svh pb-24">
+    <div className="min-h-svh pb-32">
       <header className="sticky top-0 z-20 border-b bg-background/95 backdrop-blur">
         <div className="mx-auto flex max-w-5xl items-center gap-3 px-4 py-3">
           <Button variant="ghost" size="icon" asChild aria-label="Volver">
@@ -269,7 +269,7 @@ export function SongEditor() {
         )}
       </main>
 
-      <footer className="fixed inset-x-0 bottom-0 z-20 border-t bg-background/95 px-4 py-3 backdrop-blur">
+      <footer className="fixed inset-x-0 bottom-8 z-20 border-t bg-background/95 px-4 py-3 backdrop-blur">
         <div className="mx-auto flex max-w-5xl flex-wrap gap-2">
           <Button onClick={save}>Guardar</Button>
           <Button variant="outline" onClick={download}>

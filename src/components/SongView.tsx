@@ -24,7 +24,7 @@ import { cn } from '@/lib/utils'
 
 export function SongView() {
   const { songId = '' } = useParams()
-  const { state, reload } = useSongs()
+  const { state, reload, restoreSong } = useSongs()
   const [settings, setSettings] = useState<ViewSettings>(() => loadSettings())
   const [openNote, setOpenNote] = useState<string | null>(null)
   const [current, setCurrent] = useState<string | null>(null)
@@ -161,7 +161,7 @@ export function SongView() {
   ]
 
   return (
-    <div className="min-h-svh pb-24">
+    <div className="min-h-svh pb-32">
       <header className="sticky top-0 z-20 border-b bg-background/95 backdrop-blur">
         <div className="mx-auto flex max-w-5xl flex-col gap-3 px-4 py-3">
           <div className="flex items-start gap-3">
@@ -191,6 +191,14 @@ export function SongView() {
               {settings.theme === 'dark' ? <Sun /> : <Moon />}
             </Button>
           </div>
+          {song.overridden && song.origin === 'catalog' && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-primary/40 bg-primary/10 px-3 py-2 text-sm">
+              <p>Este navegador guarda una copia anterior y tapa el archivo.</p>
+              <Button size="sm" onClick={() => restoreSong(song.id)}>
+                Restaurar archivo
+              </Button>
+            </div>
+          )}
 
           <div className="flex flex-wrap items-center gap-2">
             <div className="flex items-center gap-1 rounded-md border bg-card px-1 py-1">
@@ -413,7 +421,7 @@ export function SongView() {
         )}
       </main>
 
-      <footer className="fixed inset-x-0 bottom-0 z-20 border-t bg-background/95 px-4 py-3 backdrop-blur">
+      <footer className="fixed inset-x-0 bottom-8 z-20 border-t bg-background/95 px-4 py-3 backdrop-blur">
         <div className="mx-auto flex max-w-5xl items-center gap-2">
           <Button
             size="lg"

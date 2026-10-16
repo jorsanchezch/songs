@@ -78,7 +78,7 @@ function emit() {
 
 async function loadCatalog(): Promise<Song[]> {
   const base = import.meta.env.BASE_URL
-  const manifestRes = await fetch(`${base}songs/manifest.json`)
+  const manifestRes = await fetch(`${base}songs/manifest.json`, { cache: 'no-store' })
   if (!manifestRes.ok) throw new Error(`No se pudo cargar el índice (${manifestRes.status})`)
   const manifest = (await manifestRes.json()) as Manifest
   if (!manifest.files?.length) throw new Error('El índice de canciones está vacío')
@@ -86,7 +86,9 @@ async function loadCatalog(): Promise<Song[]> {
   const songs: Song[] = []
   await Promise.all(
     manifest.files.map(async (file) => {
-      const res = await fetch(`${base}songs/${file.split('/').map(encodeURIComponent).join('/')}`)
+      const res = await fetch(`${base}songs/${file.split('/').map(encodeURIComponent).join('/')}`, {
+        cache: 'no-store',
+      })
       if (!res.ok) return
       const text = await res.text()
       try {

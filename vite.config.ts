@@ -1,3 +1,4 @@
+import { execSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -6,6 +7,23 @@ import react from '@vitejs/plugin-react'
 import { defineConfig, type Plugin } from 'vite'
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url))
+
+function git(args: string): string {
+  try {
+    return execSync(`git ${args}`, { cwd: rootDir, encoding: 'utf8' }).trim()
+  } catch {
+    return ''
+  }
+}
+
+function versionStamp(): { label: string; commit: string } {
+  const commit = process.env.GITHUB_SHA || git('rev-parse HEAD')
+  const short = commit ? commit.slice(0, 7) : 'dev'
+  const date = git('log -1 --format=%cs')
+  return { label: date ? `${short} · ${date}` : short, commit }
+}
+
+const appVersion = versionStamp()
 const repoName = process.env.GITHUB_REPOSITORY?.split('/')[1] ?? 'songs'
 const defaultBase = process.env.NODE_ENV === 'production' ? `/${repoName}/` : '/'
 
@@ -96,6 +114,10 @@ function importChart(): Plugin {
 
 export default defineConfig({
   base: process.env.VITE_BASE_PATH ?? defaultBase,
+  define: {
+    'import.meta.env.VITE_APP_VERSION': JSON.stringify(appVersion.label),
+    'import.meta.env.VITE_APP_COMMIT': JSON.stringify(appVersion.commit),
+  },
   plugins: [react(), tailwindcss(), importChart(), spaFallback()],
   resolve: {
     alias: {
