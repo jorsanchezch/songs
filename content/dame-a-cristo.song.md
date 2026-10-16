@@ -6,7 +6,7 @@ key: C
 source: "https://www.cifraclub.com/marcos-brunet/dame-a-cristo/"
 ---
 
-## Canción {#cancion}
+## Estrofa {#estrofa}
 [C]
 No quiero a nadie más que a Ti
 
@@ -31,6 +31,7 @@ Quiero por siempre estar
           [F]
 Perdido en el placer de tú mirar
 
+## Coro {#coro}
      [C]
 Dame a Cristo
 
@@ -43,6 +44,7 @@ Dejo todo por Él
      [F]      [G]
 Dejo todo por Él
 
+## Estrofa {#estrofa-2}
           [C]
 Más que la plata y oro es
 
@@ -55,18 +57,9 @@ Ahora que he probado tu bondad
          [F]    [G]
 Nada más me saciará
 
-     [C]
-Dame a Cristo
+## Coro {#coro-2 same=coro}
 
-     [G]
-Solo a Cristo
-
-     [Dm]      [Am]
-Dejo todo por Él
-
-     [F]      [G]
-Dejo todo por Él
-
+## Estrofa {#estrofa-3}
 [C/E]
 No quiero a nadie más
 
@@ -79,6 +72,7 @@ Eres mi todo
 [G]
 Eres mi todo
 
+## Tag {#tag}
 Solo una cosa
 
 Yo buscaré
