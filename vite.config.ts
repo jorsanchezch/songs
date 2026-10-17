@@ -16,11 +16,36 @@ function git(args: string): string {
   }
 }
 
+function formatStamp(iso: string): string {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return ''
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(date)
+  const get = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? ''
+  const year = get('year')
+  const month = get('month')
+  const day = get('day')
+  const hour = get('hour')
+  const minute = get('minute')
+  if (!year || !month || !day || !hour || !minute) return ''
+  return `${year}-${month}-${day} ${hour}:${minute}`
+}
+
 function versionStamp(): { label: string; commit: string } {
   const commit = process.env.GITHUB_SHA || git('rev-parse HEAD')
   const short = commit ? commit.slice(0, 7) : 'dev'
-  const date = git('log -1 --format=%cs')
-  return { label: date ? `${short} · ${date}` : short, commit }
+  // GitHub stores when the push arrived. That is a moment after it was launched.
+  const pushed = process.env.GITHUB_PUSHED_AT ? formatStamp(process.env.GITHUB_PUSHED_AT) : ''
+  const committed = formatStamp(git('log -1 --format=%cI'))
+  const when = pushed || committed
+  return { label: when ? `${short} · ${when}` : short, commit }
 }
 
 const appVersion = versionStamp()
