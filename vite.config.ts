@@ -4,7 +4,8 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
-import { defineConfig, type Plugin } from 'vite'
+import { defineConfig, loadEnv, type Plugin } from 'vite'
+import { songbookApi } from './server/vitePlugin.ts'
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url))
 
@@ -137,13 +138,17 @@ function importChart(): Plugin {
   }
 }
 
-export default defineConfig({
-  base: process.env.VITE_BASE_PATH ?? defaultBase,
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, rootDir, '')
+  const dbMode = env.SONGBOOK_DB || process.env.SONGBOOK_DB || 'sqlite'
+  const d1Url = env.SONGBOOK_D1_URL || process.env.SONGBOOK_D1_URL || ''
+  return {
+  base: env.VITE_BASE_PATH || process.env.VITE_BASE_PATH || defaultBase,
   define: {
     'import.meta.env.VITE_APP_VERSION': JSON.stringify(appVersion.label),
     'import.meta.env.VITE_APP_COMMIT': JSON.stringify(appVersion.commit),
   },
-  plugins: [react(), tailwindcss(), importChart(), spaFallback()],
+  plugins: [react(), tailwindcss(), songbookApi({ mode: dbMode, d1Url, rootDir }), importChart(), spaFallback()],
   resolve: {
     alias: {
       '@': path.resolve(rootDir, './src'),
@@ -153,10 +158,14 @@ export default defineConfig({
     host: '127.0.0.1',
     port: 4322,
     strictPort: true,
+    watch: {
+      ignored: ['**/data/**'],
+    },
   },
   preview: {
     host: '127.0.0.1',
     port: 4322,
     strictPort: true,
   },
+}
 })
