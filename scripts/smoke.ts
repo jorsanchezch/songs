@@ -4,7 +4,8 @@ import { fileURLToPath } from 'node:url'
 import { formatChord, transposeKeyName } from '../src/lib/chords.ts'
 import { blocksFor } from '../src/lib/display.ts'
 import { diagramFor, shapesFor } from '../src/lib/guitar.ts'
-import { chartToCho, chartToSongMd, isBlockedPage, isPlainChordLine, wrapPlainChordLine } from '../src/lib/importChart.ts'
+import { chartToCho, chartToSongMd, isBlockedPage, isPlainChordLine, songToMarkdown, wrapPlainChordLine } from '../src/lib/importChart.ts'
+import { shareLyrics } from '../server/lyrics.ts'
 import { nextServiceDate, planEvergreenAdd, serviceListName } from '../src/lib/setlists.ts'
 import { can, currentUser, roleLabel } from '../src/lib/access.ts'
 import { parseChart } from '../src/lib/parseChart.ts'
@@ -182,7 +183,7 @@ assert(planned.items.length === 1 && planned.items[0]?.songId === 'd', 'adding a
 assert(planned.evergreen.serviceDate === '2026-10-24', 'the new service is the following Saturday')
 planned = planEvergreenAdd({ weekday: 6, serviceDate: '2026-10-17' }, [{ songId: 'a', semitones: 0 }], 'e', laterSaturday)
 assert(planned.items.length === 1 && planned.evergreen.serviceDate === '2026-10-24', 'a later Saturday starts that Saturday')
-assert(currentUser.role === 'owner' && roleLabel('owner') === 'Dueño', 'the only account is the owner')
+assert(currentUser.role === 'owner' && roleLabel('owner') === 'Dueño', 'the seeded owner stays the owner')
 assert(can(currentUser, 'create') && can(currentUser, 'update') && can(currentUser, 'delete'), 'the owner can change songs and lists')
 assert(!can({ ...currentUser, role: 'viewer' }, 'create'), 'a reader cannot create')
 assert(!can({ ...currentUser, role: 'viewer' }, 'update'), 'a reader cannot edit')
@@ -207,5 +208,23 @@ for (const name of files) {
   assert(song.title.trim(), `${name} title`)
   assert(lines > 0, `${name} has no lines`)
 }
+
+const hosannaText = await readFile(path.join(charts, 'Hosanna - Hillsong en Español.cho'), 'utf8')
+const hosannaSong = parseChart(hosannaText, 'Hosanna.cho')
+const targetLine = hosannaSong.sections
+  .flatMap((section) => section.lines)
+  .find((line) => line.lyric?.includes('Veo al rey'))
+const keptChord = targetLine?.chords[0]?.raw
+assert(targetLine?.lyric && keptChord, 'hosanna line to share')
+targetLine.lyric = 'Letra de prueba unica'
+targetLine.chords[0]!.raw = 'Xy9'
+hosannaSong.key = 'C'
+const merged = shareLyrics(hosannaText, songToMarkdown(hosannaSong))
+assert(merged.includes('Letra de prueba unica'), 'shared lyric lands on the other chart')
+assert(!merged.includes('Veo al rey de Gloria'), 'the old lyric is replaced')
+assert(!merged.includes('[Xy9]'), 'the other chart does not take the chord edit')
+assert(merged.includes(`[${keptChord}]`), 'the other chart keeps its chord')
+assert(/\{key:\s*C\}/.test(merged), 'key stays the song key')
+assert(shareLyrics(hosannaText, hosannaText) === hosannaText, 'identical lyrics do not rewrite the chart')
 
 console.log(`Parsed ${files.length} charts`)

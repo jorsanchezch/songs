@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { BrowserRouter, Route, Routes, useNavigate } from 'react-router-dom'
 import { LibraryView } from '@/components/LibraryView'
+import { SessionProvider } from '@/hooks/SessionProvider'
 import { ServiceDaysView } from '@/components/ServiceDaysView'
 import { SetlistView } from '@/components/SetlistView'
 import { SetlistsView } from '@/components/SetlistsView'
@@ -13,6 +14,7 @@ export default function App() {
   const commit = import.meta.env.VITE_APP_COMMIT
   return (
     <BrowserRouter basename={basename}>
+      <SessionProvider>
       <Routes>
         <Route path="/" element={<LibraryView />} />
         <Route path="/listas" element={<SetlistsView />} />
@@ -37,6 +39,7 @@ export default function App() {
           <span>Versión {version}</span>
         )}
       </footer>
+      </SessionProvider>
     </BrowserRouter>
   )
 }

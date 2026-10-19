@@ -1,181 +1,348 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
-  forgetOverride,
-  forgetSong,
-  loadLibrary,
-  rememberCreated,
-  rememberOverride,
-  showHidden,
-} from '@/lib/libraryStore'
+  copySong as copySongApi,
+  createSong,
+  deleteSong,
+  getSong,
+  listSongs,
+  restoreSong as restoreSongApi,
+  revealSongs,
+  saveSong as saveSongApi,
+  shareSong as shareSongApi,
+  type ApiSong,
+} from '@/lib/api'
+import { INSTRUMENTS, isInstrument, type InstrumentId } from '@/lib/instruments'
 import { parseChart } from '@/lib/parseChart'
-import type { Song } from '@/lib/types'
+import type { Song, SongOrigin } from '@/lib/types'
+import { useUser } from '@/hooks/useUser'
 
 type LoadState =
   | { status: 'loading' }
   | { status: 'error'; message: string }
-  | { status: 'ready'; songs: Song[]; hiddenCount: number }
+  | { status: 'ready'; songs: Song[]; hiddenCount: number; needsSeed: boolean }
 
-type Manifest = {
-  files: string[]
-  count: number
+type Entry = {
+  id: string
+  origin: SongOrigin
+  ownerId: string
+  ownerName: string
+  shared: boolean
+  catalogId: string | null
+  editable: boolean
+  removable: boolean
+  diverged: boolean
+  shares: string[]
+  hasCopy: boolean
+  revision: number
+  partRevisions: Partial<Record<InstrumentId, number>>
+  parts: Partial<Record<InstrumentId, string>>
+  missing?: boolean
 }
 
-let catalog: Song[] | null = null
-let catalogPromise: Promise<Song[]> | null = null
-const listeners = new Set<(state: LoadState) => void>()
-
-function decorate(
-  song: Song,
-  sourceText: string,
-  origin: 'catalog' | 'local',
-  overridden: boolean,
-  id = song.id,
-): Song {
-  return { ...song, id, sourceText, origin, overridden }
-}
-
-function readStored(id: string, cho: string, origin: 'catalog' | 'local'): Song | null {
-  try {
-    return decorate(parseChart(cho, `${id}.cho`), cho, origin, true, id)
-  } catch (error) {
-    console.error(id, error)
-    return null
-  }
-}
-
-function merge(base: Song[]): Song[] {
-  const library = loadLibrary()
-  const hidden = new Set(library.hidden)
-  const songs: Song[] = []
-  for (const song of base) {
-    if (hidden.has(song.id)) continue
-    const cho = library.overrides[song.id]
-    if (cho) {
-      const parsed = readStored(song.id, cho, 'catalog')
-      if (parsed) songs.push(parsed)
-    } else {
-      songs.push(song)
-    }
-  }
-  for (const [id, cho] of Object.entries(library.created)) {
-    if (hidden.has(id)) continue
-    const parsed = readStored(id, cho, 'local')
-    if (parsed) songs.push(parsed)
-  }
-  songs.sort((a, b) => a.title.localeCompare(b.title, 'es'))
-  return songs
-}
+let entries: Entry[] = []
+let hiddenCount = 0
+let needsSeed = false
+let loadToken = 0
+const listeners = new Set<() => void>()
 
 function emit() {
-  if (!catalog) return
-  const state: LoadState = {
-    status: 'ready',
-    songs: merge(catalog),
-    hiddenCount: loadLibrary().hidden.length,
-  }
-  listeners.forEach((listener) => listener(state))
+  listeners.forEach((listener) => listener())
 }
 
-async function loadCatalog(): Promise<Song[]> {
-  const base = import.meta.env.BASE_URL
-  const manifestRes = await fetch(`${base}songs/manifest.json`, { cache: 'no-store' })
-  if (!manifestRes.ok) throw new Error(`No se pudo cargar el índice (${manifestRes.status})`)
-  const manifest = (await manifestRes.json()) as Manifest
-  if (!manifest.files?.length) throw new Error('El índice de canciones está vacío')
-
-  const songs: Song[] = []
-  await Promise.all(
-    manifest.files.map(async (file) => {
-      const res = await fetch(`${base}songs/${file.split('/').map(encodeURIComponent).join('/')}`, {
-        cache: 'no-store',
-      })
-      if (!res.ok) return
-      const text = await res.text()
-      try {
-        songs.push(decorate(parseChart(text, file), text, 'catalog', false))
-      } catch (error) {
-        console.error(file, error)
-      }
-    }),
-  )
-  if (!songs.length) throw new Error('No se pudieron leer las canciones')
-  return songs
+function upsert(row: ApiSong) {
+  if (!isInstrument(row.instrument)) return
+  let entry = entries.find((item) => item.id === row.id)
+  if (!entry) {
+    entry = {
+      id: row.id,
+      origin: row.origin,
+      ownerId: row.ownerId,
+      ownerName: row.ownerName,
+      shared: row.shared,
+      catalogId: row.catalogId,
+      editable: row.editable,
+      removable: row.removable,
+      diverged: row.diverged,
+      shares: row.shares ?? [],
+      hasCopy: row.hasCopy,
+      revision: row.revision,
+      partRevisions: {},
+      parts: {},
+    }
+    entries.push(entry)
+  }
+  entry.origin = row.origin
+  entry.ownerId = row.ownerId
+  entry.ownerName = row.ownerName
+  entry.shared = row.shared
+  entry.catalogId = row.catalogId
+  entry.editable = row.editable
+  entry.removable = row.removable
+  entry.diverged = row.diverged
+  entry.shares = row.shares ?? []
+  entry.hasCopy = row.hasCopy
+  entry.revision = row.revision
+  entry.missing = false
+  entry.parts[row.instrument] = row.sourceText
+  entry.partRevisions[row.instrument] = row.partRevision
 }
 
-function fail(error: unknown) {
-  catalogPromise = null
-  const state: LoadState = {
-    status: 'error',
-    message: error instanceof Error ? error.message : 'Error al cargar',
+function materialize(entry: Entry, instrument: InstrumentId): Song | null {
+  const sourceText = entry.parts[instrument]
+  if (sourceText == null) return null
+  const ext = sourceText.trimStart().startsWith('---') ? 'song.md' : 'cho'
+  let parsed: Song
+  try {
+    parsed = parseChart(sourceText, `${entry.id}.${ext}`)
+  } catch (error) {
+    console.error(entry.id, error)
+    parsed = {
+      id: entry.id,
+      title: entry.id,
+      artist: '',
+      composer: '',
+      key: '',
+      source: '',
+      sections: [],
+      versions: [],
+      lyricsText: '',
+      sourceText,
+    }
   }
-  listeners.forEach((listener) => listener(state))
+  return {
+    ...parsed,
+    id: entry.id,
+    sourceText,
+    origin: entry.origin,
+    overridden: entry.diverged,
+    ownerId: entry.ownerId,
+    ownerName: entry.ownerName,
+    shared: entry.shared,
+    catalogId: entry.catalogId,
+    editable: entry.editable,
+    removable: entry.removable,
+    shares: entry.shares,
+    hasCopy: entry.hasCopy,
+    instrument,
+  }
+}
+
+function librarySongs(): Song[] {
+  return entries
+    .flatMap((entry) => {
+      const song = materialize(entry, 'guitar')
+      return song ? [song] : []
+    })
+    .sort((a, b) => a.title.localeCompare(b.title, 'es'))
+}
+
+async function loadAll() {
+  const token = ++loadToken
+  const data = await listSongs('guitar')
+  if (token !== loadToken) return
+  entries = []
+  for (const row of data.songs) upsert(row)
+  hiddenCount = data.hiddenCount
+  needsSeed = data.needsSeed
+  emit()
+}
+
+function readyState(): LoadState {
+  return { status: 'ready', songs: librarySongs(), hiddenCount, needsSeed }
 }
 
 export function useSongs() {
-  const [state, setState] = useState<LoadState>(
-    catalog
-      ? { status: 'ready', songs: merge(catalog), hiddenCount: loadLibrary().hidden.length }
-      : { status: 'loading' },
-  )
+  const user = useUser()
+  const [version, setVersion] = useState(0)
+  const [state, setState] = useState<LoadState>({ status: 'loading' })
+
+  useEffect(() => {
+    const listener = () => {
+      setState(readyState())
+      setVersion((value) => value + 1)
+    }
+    listeners.add(listener)
+    return () => {
+      listeners.delete(listener)
+    }
+  }, [])
 
   const reload = useCallback(async () => {
     setState({ status: 'loading' })
-    catalog = null
-    catalogPromise = loadCatalog()
     try {
-      catalog = await catalogPromise
-      emit()
+      await loadAll()
     } catch (error) {
-      fail(error)
+      setState({ status: 'error', message: error instanceof Error ? error.message : 'Error al cargar' })
     }
   }, [])
 
   useEffect(() => {
-    listeners.add(setState)
-    if (catalog) emit()
-    else {
-      if (!catalogPromise) catalogPromise = loadCatalog()
-      catalogPromise
-        .then((songs) => {
-          catalog = songs
-          emit()
+    void reload()
+  }, [reload, user.id])
+
+  const songById = useCallback(
+    (id: string, instrument: InstrumentId) => {
+      const entry = entries.find((item) => item.id === id)
+      if (!entry || entry.missing) return null
+      return materialize(entry, instrument)
+    },
+    [version],
+  )
+
+  const knowsSong = useCallback(
+    (id: string) => entries.some((item) => item.id === id && !item.missing),
+    [version],
+  )
+
+  const hasPart = useCallback(
+    (id: string, instrument: InstrumentId) => {
+      const entry = entries.find((item) => item.id === id)
+      return entry?.parts[instrument] != null
+    },
+    [version],
+  )
+
+  const ensurePart = useCallback(async (id: string, instrument: InstrumentId) => {
+    const entry = entries.find((item) => item.id === id)
+    if (entry?.missing || entry?.parts[instrument] != null) return
+    try {
+      const data = await getSong(id, instrument)
+      upsert(data.song)
+    } catch (error) {
+      const status = error instanceof Error && 'status' in error ? Number(error.status) : 0
+      if (status === 404 && !entries.some((item) => item.id === id)) {
+        entries.push({
+          id,
+          origin: 'local',
+          ownerId: '',
+          ownerName: '',
+          shared: false,
+          catalogId: null,
+          editable: false,
+          removable: false,
+          diverged: false,
+          shares: [],
+          hasCopy: false,
+          revision: 0,
+          partRevisions: {},
+          parts: {},
+          missing: true,
         })
-        .catch(fail)
+      } else if (status !== 404) {
+        throw error
+      }
     }
-    return () => {
-      listeners.delete(setState)
-    }
+    emit()
   }, [])
 
-  const saveSong = (cho: string, id?: string) => {
-    const songId = id || `local-${Date.now()}`
+  const saveSong = async (cho: string, id: string | undefined, instrument: InstrumentId) => {
     const ext = cho.trimStart().startsWith('---') ? 'song.md' : 'cho'
-    const parsed = parseChart(cho, `${songId}.${ext}`)
+    const parsed = parseChart(cho, `${id || 'nueva'}.${ext}`)
     const lines = parsed.sections.reduce((sum, section) => sum + section.lines.length, 0)
     if (!parsed.title.trim() || lines === 0) {
       throw new Error('El archivo necesita un título y al menos una línea.')
     }
-    const local = songId.startsWith('local-')
-    if (local) rememberCreated(songId, cho)
-    else rememberOverride(songId, cho)
+    if (!id) {
+      const data = await createSong(cho)
+      upsert(data.song)
+      const created = entries.find((item) => item.id === data.song.id)
+      if (created) {
+        for (const item of INSTRUMENTS) {
+          created.parts[item.id] = cho
+          created.partRevisions[item.id] = data.song.partRevision
+        }
+      }
+      emit()
+      return data.song.id
+    }
+    const entry = entries.find((item) => item.id === id)
+    const revision = entry?.revision
+    const partRevision = entry?.partRevisions[instrument]
+    if (revision == null || partRevision == null) {
+      throw new Error('Recarga la canción antes de guardar.')
+    }
+    const data = await saveSongApi(id, cho, instrument, revision, partRevision)
+    upsert(data.song)
+    const saved = entries.find((item) => item.id === id)
+    if (saved && data.parts) {
+      for (const [name, part] of Object.entries(data.parts)) {
+        if (!isInstrument(name)) continue
+        saved.parts[name] = part.sourceText
+        saved.partRevisions[name] = part.revision
+      }
+    }
     emit()
-    return songId
+    return id
   }
 
-  const removeSong = (song: Song) => {
-    forgetSong(song.id, song.origin === 'local')
+  const removeSong = async (song: Song) => {
+    await deleteSong(song.id)
+    entries = entries.filter((item) => item.id !== song.id)
+    if (song.origin === 'copy' && song.catalogId) {
+      const catalog = entries.find((item) => item.id === song.catalogId)
+      if (catalog) catalog.hasCopy = false
+    }
+    if (song.origin === 'catalog') hiddenCount += 1
     emit()
   }
 
-  const restoreSong = (id: string) => {
-    forgetOverride(id)
+  const restoreSong = async (id: string) => {
+    const data = await restoreSongApi(id)
+    const entry = entries.find((item) => item.id === id)
+    if (entry) {
+      entry.diverged = false
+      entry.revision = data.song.revision
+      entry.hasCopy = data.song.hasCopy
+      for (const item of INSTRUMENTS) {
+        if (item.id === 'guitar') {
+          entry.parts.guitar = data.song.sourceText
+          entry.partRevisions.guitar = data.song.partRevision
+        } else {
+          delete entry.parts[item.id]
+          delete entry.partRevisions[item.id]
+        }
+      }
+    } else {
+      upsert(data.song)
+    }
     emit()
   }
 
-  const revealHidden = () => {
-    showHidden()
+  const revealHidden = async () => {
+    await revealSongs()
+    await loadAll()
+  }
+
+  const copySong = async (id: string) => {
+    const data = await copySongApi(id)
+    upsert(data.song)
+    const catalogId = data.song.catalogId
+    if (catalogId) {
+      const catalog = entries.find((item) => item.id === catalogId)
+      if (catalog) catalog.hasCopy = true
+    }
+    emit()
+    return data.song.id
+  }
+
+  const shareSong = async (id: string, body: { shared?: boolean; userId?: string; include?: boolean }) => {
+    const data = await shareSongApi(id, body)
+    upsert(data.song)
     emit()
   }
 
-  return { state, reload, saveSong, removeSong, restoreSong, revealHidden }
+  return {
+    state,
+    reload,
+    saveSong,
+    removeSong,
+    restoreSong,
+    revealHidden,
+    copySong,
+    shareSong,
+    songById,
+    knowsSong,
+    hasPart,
+    ensurePart,
+  }
 }

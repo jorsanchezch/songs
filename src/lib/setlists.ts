@@ -1,3 +1,5 @@
+import { getSetlists, putSetlists } from '@/lib/api'
+
 export type SetlistItem = {
   songId: string
   semitones: number
@@ -26,8 +28,6 @@ export const WEEKDAYS = [
 ] as const
 
 export const DEFAULT_SERVICE_DAYS = [3, 6, 0]
-
-const SERVICES_KEY = 'songbook-services-v1'
 
 export function serviceListName(weekday: number): string {
   const name = WEEKDAYS.find((day) => day.id === weekday)?.name ?? 'día'
@@ -82,26 +82,22 @@ export function planEvergreenAdd(
   }
 }
 
-const KEY = 'songbook-setlists-v1'
 const listeners = new Set<() => void>()
+let snapshot: { lists: Setlist[]; days: number[] } = { lists: [], days: [...DEFAULT_SERVICE_DAYS] }
+let ready = false
+let hydrating: Promise<void> | null = null
+let persistChain: Promise<void> = Promise.resolve()
 
 function weekRank(day: number): number {
   return day === 0 ? 7 : day
 }
 
 function read(): Setlist[] {
-  try {
-    const raw = localStorage.getItem(KEY)
-    if (!raw) return []
-    const parsed = JSON.parse(raw) as Setlist[]
-    if (!Array.isArray(parsed)) return []
-    return parsed.flatMap((list) => {
-      const normalized = normalizeSetlist(list)
-      return normalized ? [normalized] : []
-    })
-  } catch {
-    return []
-  }
+  return snapshot.lists
+}
+
+function emitLists() {
+  listeners.forEach((listener) => listener())
 }
 
 function normalizeSetlist(list: Setlist): Setlist | null {
@@ -120,25 +116,34 @@ function normalizeSetlist(list: Setlist): Setlist | null {
 }
 
 function write(lists: Setlist[]) {
-  localStorage.setItem(KEY, JSON.stringify(lists))
-  listeners.forEach((listener) => listener())
+  snapshot = { ...snapshot, lists }
+  emitLists()
+  if (ready) void persist()
+}
+
+function persist() {
+  const run = persistChain.then(async () => {
+    if (!ready) return
+    const current = snapshot
+    try {
+      await putSetlists(current.days, current.lists)
+    } catch (error) {
+      console.error(error)
+    }
+  })
+  persistChain = run.then(
+    () => undefined,
+    () => undefined,
+  )
 }
 
 export function loadServiceDays(): number[] {
-  try {
-    const raw = localStorage.getItem(SERVICES_KEY)
-    if (!raw) return [...DEFAULT_SERVICE_DAYS]
-    const parsed = JSON.parse(raw) as unknown
-    if (!Array.isArray(parsed)) return [...DEFAULT_SERVICE_DAYS]
-    return [...new Set(parsed.filter((day) => typeof day === 'number' && day >= 0 && day <= 6))]
-  } catch {
-    return [...DEFAULT_SERVICE_DAYS]
-  }
+  return snapshot.days
 }
 
 export function saveServiceDays(days: number[]) {
   const unique = [...new Set(days.filter((day) => day >= 0 && day <= 6))]
-  localStorage.setItem(SERVICES_KEY, JSON.stringify(unique))
+  snapshot = { ...snapshot, days: unique }
   syncEvergreen(unique)
 }
 
@@ -157,20 +162,37 @@ function syncEvergreen(days: number[]) {
   })
   const custom = current.filter((list) => !list.evergreen)
   const next = [...evergreen, ...custom]
-  if (JSON.stringify(next) === JSON.stringify(current)) return
+  if (JSON.stringify(next) === JSON.stringify(current)) {
+    emitLists()
+    if (ready) void persist()
+    return
+  }
   write(next)
 }
 
-function ensureServices() {
-  if (!localStorage.getItem(SERVICES_KEY)) {
-    localStorage.setItem(SERVICES_KEY, JSON.stringify(DEFAULT_SERVICE_DAYS))
-  }
-  syncEvergreen(loadServiceDays())
+export function loadSetlists(): Setlist[] {
+  return read()
 }
 
-export function loadSetlists(): Setlist[] {
-  ensureServices()
-  return read()
+export async function hydrateSetlists(): Promise<void> {
+  if (ready) return
+  if (hydrating) return hydrating
+  hydrating = (async () => {
+    const remote = await getSetlists()
+    const lists = remote.setlists.flatMap((list) => {
+      const normalized = normalizeSetlist(list)
+      return normalized ? [normalized] : []
+    })
+    const days = remote.days.length ? remote.days : [...DEFAULT_SERVICE_DAYS]
+    snapshot = { lists, days }
+    ready = true
+    emitLists()
+  })()
+  try {
+    await hydrating
+  } finally {
+    hydrating = null
+  }
 }
 
 export function subscribeSetlists(listener: () => void): () => void {

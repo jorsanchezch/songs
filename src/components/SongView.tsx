@@ -14,18 +14,21 @@ import {
   Trash2,
 } from 'lucide-react'
 import { ChartRow, NoteRow } from '@/components/ChartLines'
+import { InstrumentCharts } from '@/components/InstrumentCharts'
+import { InstrumentSwitch } from '@/components/InstrumentSwitch'
 import { SpellingToggle } from '@/components/SpellingToggle'
-import { ChordStrip } from '@/components/ChordDiagrams'
 import { Button } from '@/components/ui/button'
 import { UserBadge } from '@/components/UserBadge'
 import { formatChord, transposeKeyName } from '@/lib/chords'
 import { blocksFor, chordSequence } from '@/lib/display'
+import { instrumentLabel, type InstrumentId } from '@/lib/instruments'
+import { putPrefs } from '@/lib/api'
 import { loadSettings, saveSettings, type ViewSettings } from '@/lib/settings'
 import { NOTE_LABEL, NOTE_TYPES } from '@/lib/types'
 import { useSetlists } from '@/hooks/useSetlists'
+import { useSession, useUser } from '@/hooks/useUser'
 import { useSongs } from '@/hooks/useSongs'
-import { useUser } from '@/hooks/useUser'
-import { can } from '@/lib/access'
+import { can, isStaff } from '@/lib/access'
 import { neighborSong, setSetlistSemitones, songPath } from '@/lib/setlists'
 import { cn } from '@/lib/utils'
 
@@ -34,7 +37,8 @@ export function SongView() {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const user = useUser()
-  const { state, reload, removeSong, restoreSong } = useSongs()
+  const { people } = useSession()
+  const { state, reload, removeSong, restoreSong, copySong, shareSong, songById, ensurePart } = useSongs()
   const setlists = useSetlists()
   const listaId = searchParams.get('lista')
   const [settings, setSettings] = useState<ViewSettings>(() => loadSettings())
@@ -45,8 +49,19 @@ export function SongView() {
   const [headerOpen, setHeaderOpen] = useState(false)
   const pendingScroll = useRef<string | null>(null)
 
-  const song =
-    state.status === 'ready' ? state.songs.find((item) => item.id === songId) : undefined
+  const instrument = settings.instrument
+
+  useEffect(() => {
+    setSettings(loadSettings())
+  }, [user.id])
+  const guitar = state.status === 'ready' ? songById(songId, 'guitar') : undefined
+  const chart = state.status === 'ready' ? songById(songId, instrument) : undefined
+  const song = chart ?? guitar
+
+  useEffect(() => {
+    if (!songId || state.status !== 'ready') return
+    void ensurePart(songId, instrument).catch((error) => console.error(error))
+  }, [ensurePart, instrument, songId, state.status])
 
   useEffect(() => {
     setOpenNote(null)
@@ -56,10 +71,10 @@ export function SongView() {
     setCurrent(null)
   }, [songId])
 
-  const version = song?.versions.find((item) => item.id === versionId) ?? song?.versions[0]
+  const version = chart?.versions.find((item) => item.id === versionId) ?? chart?.versions[0]
   const blocks = useMemo(
-    () => (song ? blocksFor(song, version?.flow ?? null) : []),
-    [song, version],
+    () => (chart ? blocksFor(chart, version?.flow ?? null) : []),
+    [chart, version],
   )
 
   const activeId =
@@ -83,6 +98,9 @@ export function SongView() {
     setSettings((prev) => {
       const next = { ...prev, ...patch }
       saveSettings(next)
+      if (patch.semitones || patch.chordShapes) {
+        void putPrefs({ semitones: next.semitones, chordShapes: next.chordShapes }).catch((error) => console.error(error))
+      }
       return next
     })
   }
@@ -213,17 +231,17 @@ export function SongView() {
     )
   }
 
-  const soundingKey = transposeKeyName(song.key, semitones)
+  const soundingKey = transposeKeyName((chart ?? song).key, semitones)
   const partIndex = blocks.findIndex((block) => block.id === activeId)
   const partLabel = blocks[partIndex]?.label ?? ''
   const names = chordSequence(blocks.flatMap((block) => block.section.lines)).map((raw) =>
-    formatChord(raw, song.key, semitones, settings.spelling),
+    formatChord(raw, (chart ?? song).key, semitones, settings.spelling),
   )
   const uniqueNames = [...new Set(names)]
   const diagramNames = [
     ...new Set(
       chordSequence(blocks.flatMap((block) => block.section.lines)).map((raw) =>
-        formatChord(raw, song.key, semitones, 'letters'),
+        formatChord(raw, (chart ?? song).key, semitones, 'letters'),
       ),
     ),
   ]
@@ -253,6 +271,20 @@ export function SongView() {
               {headerOpen ? 'Ocultar' : 'Controles'}
             </Button>
           </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <InstrumentSwitch value={instrument} onChange={(next: InstrumentId) => update({ instrument: next })} />
+            {!song.editable && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  void copySong(song.id).then((id) => navigate(`/c/${encodeURIComponent(id)}`))
+                }}
+              >
+                Crear mi copia
+              </Button>
+            )}
+          </div>
           {headerOpen && (
           <>
           <div className="flex items-center gap-3">
@@ -265,26 +297,37 @@ export function SongView() {
               {song.artist || 'Sin artista'}
               {song.composer ? ` · ${song.composer}` : ''}
             </p>
-            {can(user, 'update') && (
+            {song.editable && (
               <Button variant="outline" size="icon" asChild aria-label="Editar">
-                <Link to={`/editar/${encodeURIComponent(song.id)}`}>
+                <Link to={`/editar/${encodeURIComponent(song.id)}?inst=${instrument}`}>
                   <Pencil />
                 </Link>
               </Button>
             )}
-            {can(user, 'delete') && (
+            {(song.origin === 'catalog' || (song.ownerId && song.ownerId !== user.id)) && (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  void copySong(song.id).then((id) => navigate(`/c/${encodeURIComponent(id)}`))
+                }}
+              >
+                Crear mi copia
+              </Button>
+            )}
+            {song.removable && (
               <Button
                 variant="outline"
                 onClick={() => {
                   const label =
-                    song.origin === 'local' ? '¿Eliminar esta canción?' : '¿Ocultar esta canción en este navegador?'
+                    song.origin === 'catalog'
+                      ? '¿Ocultar esta canción del catálogo?'
+                      : '¿Eliminar esta canción?'
                   if (!window.confirm(label)) return
-                  removeSong(song)
-                  navigate(listaId ? `/listas/${encodeURIComponent(listaId)}` : '/')
+                  void removeSong(song).then(() => navigate(listaId ? `/listas/${encodeURIComponent(listaId)}` : '/'))
                 }}
               >
                 <Trash2 />
-                {song.origin === 'local' ? 'Eliminar' : 'Ocultar canción'}
+                {song.origin === 'catalog' ? 'Ocultar canción' : 'Eliminar'}
               </Button>
             )}
             <Button
@@ -296,12 +339,57 @@ export function SongView() {
               {settings.theme === 'dark' ? <Sun /> : <Moon />}
             </Button>
           </div>
-          {song.overridden && song.origin === 'catalog' && can(user, 'update') && (
+          {song.overridden && song.origin === 'catalog' && song.editable && (
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-primary/40 bg-primary/10 px-3 py-2 text-sm">
-              <p>Este navegador guarda una copia anterior y tapa el archivo.</p>
-              <Button size="sm" onClick={() => restoreSong(song.id)}>
+              <p>El catálogo en la base difiere del archivo. El archivo no se toca.</p>
+              <Button size="sm" onClick={() => void restoreSong(song.id)}>
                 Restaurar archivo
               </Button>
+            </div>
+          )}
+          {song.origin !== 'catalog' && (song.ownerId === user.id || isStaff(user)) && (
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <Button
+                size="sm"
+                variant={song.shared ? 'default' : 'outline'}
+                aria-pressed={song.shared}
+                onClick={() => void shareSong(song.id, { shared: !song.shared })}
+              >
+                Compartida
+              </Button>
+              {isStaff(user) && (
+                <select
+                  className="h-8 rounded-md border bg-background px-2 text-xs"
+                  aria-label="Compartir con"
+                  value=""
+                  onChange={(event) => {
+                    const userId = event.target.value
+                    if (userId) void shareSong(song.id, { userId, include: true })
+                  }}
+                >
+                  <option value="">Compartir con…</option>
+                  {people
+                    .filter((person) => person.id !== song.ownerId)
+                    .map((person) => (
+                      <option key={person.id} value={person.id}>
+                        {person.name}
+                      </option>
+                    ))}
+                </select>
+              )}
+              {song.shares?.map((userId) => {
+                const person = people.find((item) => item.id === userId)
+                return (
+                  <button
+                    key={userId}
+                    type="button"
+                    className="rounded-full border px-2 py-1 text-xs"
+                    onClick={() => void shareSong(song.id, { userId, include: false })}
+                  >
+                    {person?.name ?? userId} ×
+                  </button>
+                )
+              })}
             </div>
           )}
 
@@ -312,8 +400,8 @@ export function SongView() {
               </Button>
               <span className="min-w-16 text-center text-sm font-semibold">
                 {soundingKey || '—'}
-                {semitones !== 0 && song.key ? (
-                  <span className="block text-xs font-normal text-muted-foreground">orig. {song.key}</span>
+                {semitones !== 0 && (chart ?? song).key ? (
+                  <span className="block text-xs font-normal text-muted-foreground">orig. {(chart ?? song).key}</span>
                 ) : null}
               </span>
               <Button variant="ghost" size="icon" aria-label="Subir un semitono" onClick={() => setSemitones(semitones + 1)}>
@@ -417,8 +505,10 @@ export function SongView() {
       </header>
 
       <main className="mx-auto max-w-[70.4rem] px-4 py-4">
-        {headerOpen && settings.showDiagrams && diagramNames.length > 0 && (
-          <ChordStrip
+        {!chart && <p className="mb-4 text-sm text-muted-foreground">Cargando {instrumentLabel(instrument)}…</p>}
+        {chart && settings.showDiagrams && (instrument === 'drums' || diagramNames.length > 0) && (
+          <InstrumentCharts
+            instrument={instrument}
             names={diagramNames}
             choices={settings.chordShapes[song.id] ?? {}}
             onChoose={(name, shapeId) => {
@@ -488,7 +578,7 @@ export function SongView() {
                         showChords={settings.showChords || line.lyric == null}
                         spelling={settings.spelling}
                         semitones={semitones}
-                        songKey={song.key}
+                        songKey={(chart ?? song).key}
                         visible={settings.visibleNotes}
                         openNote={openNote}
                         onToggle={setOpenNote}

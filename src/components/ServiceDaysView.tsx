@@ -1,12 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { ArrowLeft } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { UserBadge } from '@/components/UserBadge'
-import { useSetlists } from '@/hooks/useSetlists'
+import { useServiceDays, useSetlists } from '@/hooks/useSetlists'
 import { useUser } from '@/hooks/useUser'
 import { can } from '@/lib/access'
-import { loadServiceDays, saveServiceDays, WEEKDAYS } from '@/lib/setlists'
+import { saveServiceDays, WEEKDAYS } from '@/lib/setlists'
 
 const page = 'mx-auto w-full max-w-[52.8rem] px-4'
 
@@ -14,7 +14,7 @@ export function ServiceDaysView() {
   const navigate = useNavigate()
   const user = useUser()
   const setlists = useSetlists()
-  const [days, setDays] = useState<number[]>(() => loadServiceDays())
+  const days = useServiceDays()
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -31,14 +31,10 @@ export function ServiceDaysView() {
     if (selected) {
       const list = setlists.find((item) => item.evergreen?.weekday === weekday)
       if (list && list.items.length > 0 && !window.confirm(`¿Quitar ${name}? Se borra esa lista.`)) return
-      const next = days.filter((day) => day !== weekday)
-      saveServiceDays(next)
-      setDays(next)
+      saveServiceDays(days.filter((day) => day !== weekday))
       return
     }
-    const next = [...days, weekday]
-    saveServiceDays(next)
-    setDays(next)
+    saveServiceDays([...days, weekday])
   }
 
   return (

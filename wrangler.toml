@@ -1,0 +1,13 @@
+name = "songbook"
+main = "worker/index.ts"
+compatibility_date = "2026-10-01"
+
+# Free Cloudflare D1. It does not pause for inactivity.
+# After `npx wrangler d1 create songbook`, paste the database_id here.
+[[d1_databases]]
+binding = "DB"
+database_name = "songbook"
+database_id = "a3f3f9f3-33d7-4f07-a94f-cd44a64f483b"
+
+[vars]
+SONGBOOK_ORIGIN = "*"

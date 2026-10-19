@@ -7,6 +7,7 @@ import { UserBadge } from '@/components/UserBadge'
 import { useSongs } from '@/hooks/useSongs'
 import { useUser } from '@/hooks/useUser'
 import { can } from '@/lib/access'
+import type { Song } from '@/lib/types'
 
 export function LibraryView() {
   const navigate = useNavigate()
@@ -71,14 +72,12 @@ export function LibraryView() {
                 Listas
               </Link>
             </Button>
-            {can(user, 'create') && (
-              <Button asChild>
-                <Link to="/nueva">
-                  <Plus className="size-4" />
-                  Agregar
-                </Link>
-              </Button>
-            )}
+            <Button asChild>
+              <Link to="/nueva">
+                <Plus className="size-4" />
+                Agregar
+              </Link>
+            </Button>
           </div>
         </div>
       </header>
@@ -114,9 +113,14 @@ export function LibraryView() {
                 aria-label="Buscar canciones"
               />
             </div>
+            {state.needsSeed && (
+              <p className="mb-3 text-sm text-muted-foreground">
+                La base no tiene canciones. En local se cargan solas. Con D1, sigue la carga única del README.
+              </p>
+            )}
             {state.hiddenCount > 0 && can(user, 'update') && (
               <div className="mb-3">
-                <Button variant="outline" size="sm" onClick={revealHidden}>
+                <Button variant="outline" size="sm" onClick={() => void revealHidden()}>
                   Mostrar ocultas ({state.hiddenCount})
                 </Button>
               </div>
@@ -160,11 +164,16 @@ export function LibraryView() {
                       to={`/c/${encodeURIComponent(song.id)}`}
                       className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-accent/60"
                     >
-                      <span>
-                        <span className="block font-medium">{song.title}</span>
-                        <span className="block text-sm text-muted-foreground">
-                          {song.artist || 'Sin artista'}
+                      <span className="min-w-0">
+                        <span className="flex flex-wrap items-center gap-2">
+                          <span className="font-medium">{song.title}</span>
+                          {song.origin === 'catalog' && song.hasCopy ? (
+                            <span className="rounded-full bg-primary/15 px-2 py-0.5 text-xs font-semibold text-primary">
+                              Tienes copia
+                            </span>
+                          ) : null}
                         </span>
+                        <span className="block text-sm text-muted-foreground">{songNote(song, user.id)}</span>
                       </span>
                       {song.key && (
                         <span className="rounded-md bg-primary/10 px-2 py-1 text-sm font-semibold text-primary">
@@ -181,4 +190,15 @@ export function LibraryView() {
       </main>
     </div>
   )
+}
+
+function songNote(song: Song, userId: string): string {
+  const artist = song.artist || 'Sin artista'
+  if (song.origin === 'catalog' || !song.origin) return artist
+  if (song.ownerId === userId) {
+    const kind = song.origin === 'copy' ? 'Tu copia' : 'Tuya'
+    return song.shared ? `${artist} · ${kind} · Compartida` : `${artist} · ${kind}`
+  }
+  if (song.shared) return `${artist} · Compartida · ${song.ownerName || 'otra persona'}`
+  return `${artist} · Copia de ${song.ownerName || 'otra persona'}`
 }

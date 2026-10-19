@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   ArrowLeft,
   ChevronDown,
@@ -11,12 +11,13 @@ import {
   Trash2,
 } from 'lucide-react'
 import { ChartPreview } from '@/components/ChartPreview'
+import { InstrumentSwitch } from '@/components/InstrumentSwitch'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { UserBadge } from '@/components/UserBadge'
 import { useSongs } from '@/hooks/useSongs'
-import { useUser } from '@/hooks/useUser'
-import { can } from '@/lib/access'
+import { isInstrument, type InstrumentId } from '@/lib/instruments'
+import { loadSettings, saveSettings } from '@/lib/settings'
 import { chartToSongMd, fetchChartPage, isBlockedPage, songToMarkdown } from '@/lib/importChart'
 import { parseChart } from '@/lib/parseChart'
 import {
@@ -34,10 +35,12 @@ import { NOTE_LABEL, NOTE_TYPES, type NoteType, type Song, type SongNote, type S
 
 export function SongEditor() {
   const { songId = '' } = useParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const navigate = useNavigate()
-  const user = useUser()
-  const { state, saveSong, restoreSong } = useSongs()
-  const song = state.status === 'ready' ? state.songs.find((item) => item.id === songId) : undefined
+  const { state, saveSong, restoreSong, copySong, songById, knowsSong, ensurePart } = useSongs()
+  const requested = searchParams.get('inst')
+  const instrument: InstrumentId = isInstrument(requested) ? requested : loadSettings().instrument
+  const song = state.status === 'ready' && songId ? songById(songId, instrument) : undefined
   const [draft, setDraft] = useState<Song>(blankSong)
   const [url, setUrl] = useState('')
   const [mode, setMode] = useState<'edit' | 'preview'>('edit')
@@ -47,12 +50,18 @@ export function SongEditor() {
   const [busy, setBusy] = useState(false)
   const hydrated = useRef('')
   const ready = state.status === 'ready'
-  const missing = Boolean(songId) && ready && !song
+  const missing = Boolean(songId) && ready && !knowsSong(songId)
+  const waiting = Boolean(songId) && ready && !missing && !song
   const version = draft.versions[0]
 
   useEffect(() => {
+    if (!songId || state.status !== 'ready') return
+    void ensurePart(songId, instrument).catch((error) => console.error(error))
+  }, [ensurePart, instrument, songId, state.status])
+
+  useEffect(() => {
     if (state.status !== 'ready') return
-    const key = songId || '__new__'
+    const key = `${songId || '__new__'}:${instrument}`
     if (hydrated.current === key) return
     if (songId && !song) return
     hydrated.current = key
@@ -62,7 +71,7 @@ export function SongEditor() {
     setUrl(source.startsWith('http') ? source : '')
     setMode('edit')
     setFolded([])
-  }, [state.status, song, songId])
+  }, [instrument, song, songId, state.status])
 
   const convert = async () => {
     setError('')
@@ -87,12 +96,26 @@ export function SongEditor() {
 
   const save = () => {
     setError('')
-    try {
-      const id = saveSong(songToMarkdown(draft), songId || undefined)
-      navigate(`/c/${encodeURIComponent(id)}`)
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'No se pudo guardar.')
+    void (async () => {
+      try {
+        const id = await saveSong(songToMarkdown(draft), songId || undefined, instrument)
+        const settings = loadSettings()
+        saveSettings({ ...settings, instrument })
+        navigate(`/c/${encodeURIComponent(id)}`)
+      } catch (reason) {
+        setError(reason instanceof Error ? reason.message : 'No se pudo guardar.')
+      }
+    })()
+  }
+
+  const chooseInstrument = (next: InstrumentId) => {
+    if (song && songToMarkdown(draft).trim() !== (song.sourceText ?? '').trim()) {
+      if (!window.confirm('Hay cambios sin guardar. ¿Cambiar de instrumento y descartarlos?')) return
     }
+    const settings = loadSettings()
+    saveSettings({ ...settings, instrument: next })
+    hydrated.current = ''
+    setSearchParams({ inst: next })
   }
 
   const download = () => {
@@ -108,7 +131,7 @@ export function SongEditor() {
     URL.revokeObjectURL(href)
   }
 
-  if (state.status === 'loading') {
+  if (state.status === 'loading' || waiting) {
     return (
       <div className="flex flex-col items-center gap-3 py-24 text-muted-foreground" role="status">
         <Loader2 className="size-8 animate-spin" />
@@ -128,13 +151,26 @@ export function SongEditor() {
     )
   }
 
-  if (!(songId ? can(user, 'update') : can(user, 'create'))) {
+  if (song && !song.editable) {
     return (
       <div className="mx-auto max-w-md px-4 py-16 text-center">
-        <p className="mb-4">Esta cuenta no puede cambiar canciones.</p>
-        <Button asChild>
-          <Link to={song ? `/c/${encodeURIComponent(song.id)}` : '/'}>Volver</Link>
-        </Button>
+        <p className="mb-4">
+          {song.origin === 'catalog'
+            ? 'El catálogo solo lo cambia el dueño o un admin.'
+            : 'Esta copia no es tuya.'}
+        </p>
+        <div className="flex justify-center gap-2">
+          <Button
+            onClick={() => {
+              void copySong(song.id).then((id) => navigate(`/c/${encodeURIComponent(id)}`))
+            }}
+          >
+            Crear mi copia
+          </Button>
+          <Button variant="outline" asChild>
+            <Link to={`/c/${encodeURIComponent(song.id)}`}>Volver</Link>
+          </Button>
+        </div>
       </div>
     )
   }
@@ -152,6 +188,9 @@ export function SongEditor() {
             {draft.title.trim() || (song ? 'Editar canción' : 'Nueva canción')}
           </h1>
           <UserBadge />
+          {songId ? (
+            <InstrumentSwitch value={instrument} onChange={chooseInstrument} />
+          ) : null}
           <div className="flex rounded-lg border p-0.5">
             <Button size="sm" variant={mode === 'edit' ? 'default' : 'ghost'} onClick={() => setMode('edit')}>
               Editar
@@ -164,6 +203,11 @@ export function SongEditor() {
       </header>
 
       <main className="mx-auto flex max-w-[70.4rem] flex-col gap-4 px-4 py-4">
+        <p className="text-sm text-muted-foreground">
+          {songId
+            ? 'La letra se copia a los otros instrumentos. Los acordes y las notas de ejecución se quedan en este.'
+            : 'Al guardar, los cuatro instrumentos empiezan con esta cifra.'}
+        </p>
         {status && <p className="text-sm text-primary">{status}</p>}
         {error && <p className="text-sm text-destructive">{error}</p>}
 
@@ -260,11 +304,11 @@ export function SongEditor() {
 
             <VersionsEditor song={draft} onChange={setDraft} />
 
-            {song?.overridden && song.origin === 'catalog' && can(user, 'update') && (
+            {song?.overridden && song.origin === 'catalog' && song.editable && (
               <Button
                 variant="outline"
                 onClick={() => {
-                  restoreSong(song.id)
+                  void restoreSong(song.id)
                   navigate(`/c/${encodeURIComponent(song.id)}`)
                 }}
               >
@@ -277,7 +321,7 @@ export function SongEditor() {
 
       <footer className="fixed inset-x-0 bottom-8 z-20 border-t bg-background/95 px-4 py-3 backdrop-blur">
         <div className="mx-auto flex max-w-[70.4rem] flex-wrap gap-2">
-          {(songId ? can(user, 'update') : can(user, 'create')) && <Button onClick={save}>Guardar</Button>}
+          {(!songId || song?.editable) && <Button onClick={save}>Guardar</Button>}
           <Button variant="outline" onClick={download}>
             Descargar .song.md
           </Button>

@@ -13,4 +13,44 @@ Abre http://127.0.0.1:4322/
 
 ## Publicar
 
-El workflow de GitHub Actions publica `dist` en GitHub Pages al empujar a `main`.
+El workflow de GitHub Actions publica `dist` en GitHub Pages al empujar a `main`. El sitio sigue siendo estático. La base no vive en el navegador ni en Pages.
+
+## Base de datos
+
+Por defecto Songbook usa un archivo SQLite en `data/songbook.sqlite` (gitignored). No hace falta cuenta ni variables. `npm run dev` crea el archivo, siembra a Jorge Sanchez como dueño y copia el catálogo de `public/songs/` en cuatro instrumentos: guitarra acústica, bajo, batería y piano.
+
+`SONGBOOK_DB` cambia el mismo programa:
+
+| Valor | Qué usa |
+| --- | --- |
+| `sqlite` (omisión) | El archivo local. Cero configuración. |
+| `d1` | Un Worker de Cloudflare con D1. Hace falta `SONGBOOK_D1_URL`. |
+
+Con `d1`, Vite solo reenvía `/api` al Worker. El navegador no ve credenciales de D1: el binding `DB` queda en el Worker. GitHub Pages llama al Worker con `VITE_SONGBOOK_API` (la misma URL, sin secreto) en el build.
+
+D1 es el plan gratuito de SQLite de Cloudflare. A diferencia de Neon o Supabase, el proyecto gratuito no se pausa ni caduca por inactividad. El plan tiene cupos diarios que se renuevan; el uso de una persona cabe en ellos. Los números actuales están en [los precios de D1](https://developers.cloudflare.com/d1/platform/pricing/).
+
+### Alta única en Cloudflare
+
+1. Crea una cuenta gratuita en [dash.cloudflare.com/sign-up](https://dash.cloudflare.com/sign-up).
+2. En esta carpeta: `npx wrangler login`.
+3. `npx wrangler d1 create songbook` y pega el `database_id` en `wrangler.toml` (hoy dice `replace-me`).
+4. `npm run db:export-seed` escribe `data/seed.sql` desde los archivos del catálogo.
+5. `npx wrangler d1 execute songbook --remote --file=data/seed.sql`
+6. `npx wrangler deploy`. Anota la URL `*.workers.dev`.
+7. Para desarrollar contra D1: `SONGBOOK_DB=d1` y `SONGBOOK_D1_URL=https://songbook.<tu-subdominio>.workers.dev`.
+8. Para Pages, construye con `VITE_SONGBOOK_API` igual a esa URL. Opcional: en el Worker cambia `SONGBOOK_ORIGIN` de `*` al origen de Pages.
+
+Entrar es por nombre. Jorge Sanchez queda como dueño. Un nombre nuevo entra como lectura: puede crear su copia y sus canciones, y no puede cambiar el catálogo. No pongas la URL del Worker en público si no quieres que cualquiera entre con un nombre.
+
+El workflow de Pages construye con `VITE_SONGBOOK_API=https://songbook.jorsanchezch.workers.dev`, así el sitio publicado llama a D1. GitHub Pages sigue sirviendo solo el frontend.
+
+### Copia de seguridad
+
+Después de un cambio importante:
+
+```bash
+npm run db:backup
+```
+
+Escribe un `.sql` en `data/` (esa carpeta no entra en git). Con la base local lee `data/songbook.sqlite`. Con `SONGBOOK_DB=d1` exporta la base remota usando la sesión de Wrangler que ya tienes. No hay un cron: corre el comando a mano cuando quieras guardar una copia.

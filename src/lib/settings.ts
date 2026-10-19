@@ -1,3 +1,4 @@
+import { isInstrument, type InstrumentId } from '@/lib/instruments'
 import type { NoteType, Spelling } from '@/lib/types'
 import { NOTE_TYPES } from '@/lib/types'
 
@@ -14,6 +15,7 @@ export type ViewSettings = {
   visibleNotes: NoteType[]
   semitones: Record<string, number>
   chordShapes: Record<string, Record<string, string>>
+  instrument: InstrumentId
 }
 
 const DEFAULTS: ViewSettings = {
@@ -26,6 +28,7 @@ const DEFAULTS: ViewSettings = {
   visibleNotes: [...NOTE_TYPES],
   semitones: {},
   chordShapes: {},
+  instrument: 'guitar',
 }
 
 export function loadSettings(): ViewSettings {
@@ -44,6 +47,7 @@ export function loadSettings(): ViewSettings {
       visibleNotes: parsed.visibleNotes?.length ? parsed.visibleNotes : [...NOTE_TYPES],
       semitones: parsed.semitones ?? {},
       chordShapes: parsed.chordShapes ?? {},
+      instrument: isInstrument(parsed.instrument) ? parsed.instrument : 'guitar',
     }
   } catch {
     return { ...DEFAULTS, visibleNotes: [...NOTE_TYPES], semitones: {}, chordShapes: {} }

@@ -36,6 +36,8 @@ export type SongVersion = {
   openNotes: NoteType[]
 }
 
+export type SongOrigin = 'catalog' | 'local' | 'copy'
+
 export type Song = {
   id: string
   title: string
@@ -47,8 +49,17 @@ export type Song = {
   versions: SongVersion[]
   lyricsText: string
   sourceText?: string
-  origin?: 'catalog' | 'local'
+  origin?: SongOrigin
   overridden?: boolean
+  ownerId?: string
+  ownerName?: string
+  shared?: boolean
+  catalogId?: string | null
+  editable?: boolean
+  removable?: boolean
+  shares?: string[]
+  instrument?: string
+  hasCopy?: boolean
 }
 
 export const NOTE_TYPES: NoteType[] = [

@@ -8,7 +8,7 @@ export type Account = {
   role: Role
 }
 
-/** The only account. Owner includes every admin control. */
+/** Seeded owner. Other people sign in by name and start as viewers. */
 export const currentUser: Account = {
   id: 'jorge',
   name: 'Jorge Sanchez',
@@ -24,6 +24,10 @@ const allowed: Record<Crud, readonly Role[]> = {
 
 export function can(user: Account, action: Crud): boolean {
   return allowed[action].includes(user.role)
+}
+
+export function isStaff(user: Account): boolean {
+  return user.role === 'owner' || user.role === 'admin'
 }
 
 export function roleLabel(role: Role): string {

@@ -9,7 +9,10 @@
     "prebuild": "node scripts/generate-song-manifest.mjs",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "check": "tsx --tsconfig tsconfig.app.json scripts/smoke.ts"
+    "check": "tsx --tsconfig tsconfig.app.json scripts/smoke.ts",
+    "db:check": "tsx scripts/db-check.ts",
+    "db:export-seed": "tsx scripts/export-seed.ts",
+    "db:backup": "tsx scripts/db-backup.ts"
   },
   "dependencies": {
     "class-variance-authority": "^0.7.1",
