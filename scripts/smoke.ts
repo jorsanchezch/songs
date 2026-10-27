@@ -11,7 +11,13 @@ import { can, currentUser, roleLabel } from '../src/lib/access.ts'
 import { parseChart } from '../src/lib/parseChart.ts'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const charts = path.resolve(root, '..')
+const parentCharts = path.resolve(root, '..')
+const bundledCharts = path.join(root, 'public', 'songs', 'charts')
+const charts = (await readdir(parentCharts).catch(() => [] as string[])).some((name) =>
+  /\.(cho|chopro)$/i.test(name),
+)
+  ? parentCharts
+  : bundledCharts
 
 function assert(condition: unknown, message: string) {
   if (!condition) throw new Error(message)
@@ -67,7 +73,7 @@ assert(
 )
 
 const welcome = parseChart(
-  await readFile(path.join(charts, 'Bienvenido Espíritu Santo.chopro'), 'utf8'),
+  await readFile(path.join(charts, 'Bienvenido Espíritu Santo.chopro'), 'utf8'),
   'Bienvenido.chopro',
 )
 const verso = welcome.sections.find((section) => section.label === 'VERSO')
@@ -78,6 +84,20 @@ const markdown = parseChart(
   'content/_plantilla.song.md',
 )
 assert(markdown.versions.length === 2, 'markdown versions')
+assert(markdown.sources.length >= 1, 'plantilla sources list')
+assert(markdown.sources[0]?.url.includes('youtube.com'), 'plantilla youtube source')
+
+for (const name of ['raise-a-hallelujah', 'living-hope', 'digno-es-el-senor']) {
+  const song = parseChart(
+    await readFile(path.join(root, `content/${name}.song.md`), 'utf8'),
+    `content/${name}.song.md`,
+  )
+  assert(song.title.trim(), `${name} title`)
+  assert(song.key.trim(), `${name} key`)
+  assert(song.sources.length >= 1, `${name} sources`)
+  assert(song.sources.every((item) => item.url.startsWith('http')), `${name} source urls`)
+  assert(song.sections.length >= 2, `${name} sections`)
+}
 const blocks = blocksFor(markdown, markdown.versions[0]?.flow ?? null)
 assert(blocks.some((block) => block.repeat >= 2) || markdown.sections.some((section) => section.sameAs), 'same section')
 const only = blocksFor(markdown, ['estribillo-2'])

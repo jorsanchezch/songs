@@ -38,6 +38,11 @@ export type SongVersion = {
 
 export type SongOrigin = 'catalog' | 'local' | 'copy'
 
+export type SongSource = {
+  url: string
+  label: string
+}
+
 export type Song = {
   id: string
   title: string
@@ -45,6 +50,7 @@ export type Song = {
   composer: string
   key: string
   source: string
+  sources: SongSource[]
   sections: SongSection[]
   versions: SongVersion[]
   lyricsText: string

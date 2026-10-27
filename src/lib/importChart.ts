@@ -32,21 +32,35 @@ export function chartToSongMd(raw: string, sourceUrl = ''): string {
   if (isBlockedPage(text)) throw new Error(BLOCKED_PAGE)
   if (text.trimStart().startsWith('---')) {
     const song = parseChart(text, 'import.song.md')
-    if (sourceUrl && !song.source) song.source = sourceUrl
+    if (sourceUrl && !song.sources.some((item) => item.url === sourceUrl)) {
+      song.sources = [{ url: sourceUrl, label: 'Fuente' }, ...song.sources]
+      song.source = song.sources[0]?.url ?? sourceUrl
+    }
     return songToMarkdown(song)
   }
   return songToMarkdown(parseChart(chartToCho(text, sourceUrl), 'import.cho'))
 }
 
 export function songToMarkdown(song: Song): string {
+  const sources = song.sources.length
+    ? song.sources
+    : song.source.trim()
+      ? [{ url: song.source.trim(), label: 'Fuente' }]
+      : []
   const fields = [
     ['title', song.title],
     ['artist', song.artist],
     ['composer', song.composer],
     ['key', song.key],
-    ['source', song.source],
+    ['source', sources[0]?.url ?? ''],
   ].filter(([, value]) => value.trim())
-  const front = fields.map(([key, value]) => `${key}: ${yaml(value)}`).join('\n')
+  const sourceLines = sources.length
+    ? [
+        'sources:',
+        ...sources.map((item) => `  - ${item.url}${item.label ? ` | ${item.label}` : ''}`),
+      ]
+    : []
+  const front = [...fields.map(([key, value]) => `${key}: ${yaml(value)}`), ...sourceLines].join('\n')
   const body = song.sections.map(sectionToMarkdown).filter(Boolean).join('\n\n')
   const versions = versionsToMarkdown(song)
   return `---\n${front}\n---\n\n${[body, versions].filter(Boolean).join('\n\n')}\n`

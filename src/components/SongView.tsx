@@ -596,18 +596,30 @@ export function SongView() {
           })}
         </div>
 
-        {song.source && (
-          <p className="mt-8 font-sans text-sm">
-            <a
-              href={song.source}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-1 text-primary underline-offset-2 hover:underline"
-            >
-              Ver fuente
-              <ExternalLink className="size-3.5" />
-            </a>
-          </p>
+        {(song.sources.length > 0 || song.source) && (
+          <section className="mt-8 font-sans text-sm">
+            <h2 className="mb-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+              Referencias y tutoriales
+            </h2>
+            <ul className="flex flex-col gap-1.5">
+              {(song.sources.length
+                ? song.sources
+                : [{ url: song.source, label: 'Fuente' }]
+              ).map((item) => (
+                <li key={item.url}>
+                  <a
+                    href={item.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 text-primary underline-offset-2 hover:underline"
+                  >
+                    {item.label || item.url}
+                    <ExternalLink className="size-3.5" />
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </section>
         )}
       </main>
 

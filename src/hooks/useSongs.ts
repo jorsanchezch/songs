@@ -103,6 +103,7 @@ function materialize(entry: Entry, instrument: InstrumentId): Song | null {
       composer: '',
       key: '',
       source: '',
+      sources: [],
       sections: [],
       versions: [],
       lyricsText: '',

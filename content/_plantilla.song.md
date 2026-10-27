@@ -3,6 +3,8 @@ title: Título
 artist: Artista
 key: G
 source:
+sources:
+  - https://www.youtube.com/watch?v=ejemplo | Tutorial
 ---
 
 ## Intro {#intro}

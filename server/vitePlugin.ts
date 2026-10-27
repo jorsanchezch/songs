@@ -52,6 +52,7 @@ function isApi(url: string): boolean {
     pathname === '/api/users' ||
     pathname === '/api/songs' ||
     pathname.startsWith('/api/songs/') ||
+    pathname === '/api/catalog' ||
     pathname === '/api/setlists' ||
     pathname === '/api/import-local' ||
     pathname === '/api/prefs'

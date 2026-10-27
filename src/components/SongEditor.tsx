@@ -228,13 +228,90 @@ export function SongEditor() {
               <Field label="Tonalidad">
                 <Input value={draft.key} onChange={(event) => setDraft({ ...draft, key: event.target.value })} className="uppercase" />
               </Field>
-              <Field label="Fuente" className="sm:col-span-2">
-                <Input
-                  value={draft.source}
-                  onChange={(event) => setDraft({ ...draft, source: event.target.value })}
-                  placeholder="https://"
-                />
-              </Field>
+              <div className="sm:col-span-2 flex flex-col gap-2">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm font-medium">Referencias y tutoriales</p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() =>
+                      setDraft((current) => ({
+                        ...current,
+                        sources: [...current.sources, { url: '', label: '' }],
+                      }))
+                    }
+                  >
+                    <Plus /> Enlace
+                  </Button>
+                </div>
+                {(draft.sources.length ? draft.sources : [{ url: draft.source, label: '' }]).map(
+                  (item, index) => (
+                    <div key={`source-${index}`} className="grid gap-2 sm:grid-cols-[1fr_12rem_auto]">
+                      <Input
+                        value={item.url}
+                        onChange={(event) => {
+                          const url = event.target.value
+                          setDraft((current) => {
+                            const sources = (current.sources.length
+                              ? current.sources
+                              : [{ url: current.source, label: '' }]
+                            ).map((entry, entryIndex) =>
+                              entryIndex === index ? { ...entry, url } : entry,
+                            )
+                            return {
+                              ...current,
+                              sources,
+                              source: sources[0]?.url ?? '',
+                            }
+                          })
+                        }}
+                        placeholder="https://youtube.com/... o cifra"
+                        inputMode="url"
+                        aria-label={`URL de referencia ${index + 1}`}
+                      />
+                      <Input
+                        value={item.label}
+                        onChange={(event) => {
+                          const label = event.target.value
+                          setDraft((current) => {
+                            const sources = (current.sources.length
+                              ? current.sources
+                              : [{ url: current.source, label: '' }]
+                            ).map((entry, entryIndex) =>
+                              entryIndex === index ? { ...entry, label } : entry,
+                            )
+                            return { ...current, sources, source: sources[0]?.url ?? '' }
+                          })
+                        }}
+                        placeholder="Tutorial, cifra…"
+                        aria-label={`Etiqueta de referencia ${index + 1}`}
+                      />
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        aria-label={`Quitar referencia ${index + 1}`}
+                        onClick={() =>
+                          setDraft((current) => {
+                            const sources = (current.sources.length
+                              ? current.sources
+                              : [{ url: current.source, label: '' }]
+                            ).filter((_, entryIndex) => entryIndex !== index)
+                            return {
+                              ...current,
+                              sources,
+                              source: sources[0]?.url ?? '',
+                            }
+                          })
+                        }
+                      >
+                        <Trash2 />
+                      </Button>
+                    </div>
+                  ),
+                )}
+              </div>
             </section>
 
             <details className="rounded-xl border bg-card px-3 py-2">

@@ -4,6 +4,7 @@ import type {
   Song,
   SongNote,
   SongSection,
+  SongSource,
   SongVersion,
 } from '@/lib/types'
 import { NOTE_TYPES } from '@/lib/types'
@@ -34,6 +35,7 @@ export function parseChart(text: string, filePath: string): Song {
 function parseChordPro(text: string, filePath: string): Song {
   const lines = text.split('\n')
   const meta: Record<string, string> = {}
+  const sourceEntries: SongSource[] = []
   const usesDirectives = lines.some((line) =>
     /^\{start_of_[a-z0-9_-]+/i.test(line.trim()),
   )
@@ -101,8 +103,12 @@ function parseChordPro(text: string, filePath: string): Song {
         pending.push(notes(classifyComment(value, false), value))
         continue
       }
-      if (['title', 'artist', 'composer', 'key', 'source'].includes(name)) {
+      if (['title', 'artist', 'composer', 'key'].includes(name)) {
         meta[name] = value
+      }
+      if (name === 'source' && value) {
+        const parsed = parseSourceEntry(value)
+        if (parsed) sourceEntries.push(parsed)
       }
       continue
     }
@@ -149,11 +155,11 @@ function parseChordPro(text: string, filePath: string): Song {
     sections[0].id = 'cancion'
   }
 
-  return finishSong(filePath, meta, sections.filter(hasBody), [])
+  return finishSong(filePath, meta, sourceEntries, sections.filter(hasBody), [])
 }
 
 function parseMarkdown(text: string, filePath: string): Song {
-  const { meta, body } = frontMatter(text)
+  const { meta, sources, body } = frontMatter(text)
   const lines = body.split('\n')
   const notes = noteFactory()
   const usedIds = new Set<string>()
@@ -281,6 +287,7 @@ function parseMarkdown(text: string, filePath: string): Song {
   return finishSong(
     filePath,
     meta,
+    sources,
     sections.filter((section) => section.sameAs || hasBody(section)),
     versions,
   )
@@ -289,6 +296,7 @@ function parseMarkdown(text: string, filePath: string): Song {
 function finishSong(
   filePath: string,
   meta: Record<string, string>,
+  sourceEntries: SongSource[],
   sections: SongSection[],
   versions: SongVersion[],
 ): Song {
@@ -301,13 +309,15 @@ function finishSong(
     .flatMap((section) => section.lines.map((line) => line.lyric ?? ''))
     .join('\n')
     .replace(/_+/g, ' ')
+  const sources = mergeSources(sourceEntries, meta.source ?? '')
   return {
     id: filePath.replace(/\.(song\.md|chopro|cho)$/i, ''),
     title,
     artist,
     composer: meta.composer ?? '',
     key: (meta.key ?? '').trim(),
-    source: meta.source ?? '',
+    source: sources[0]?.url ?? '',
+    sources,
     sections,
     versions,
     lyricsText,
@@ -333,15 +343,68 @@ function hasBody(section: SongSection): boolean {
   return section.lines.length > 0 || section.notes.length > 0
 }
 
-function frontMatter(text: string): { meta: Record<string, string>; body: string } {
+function frontMatter(text: string): {
+  meta: Record<string, string>
+  sources: SongSource[]
+  body: string
+} {
   const match = text.match(/^---\n([\s\S]*?)\n---\n?/)
-  if (!match) return { meta: {}, body: text }
+  if (!match) return { meta: {}, sources: [], body: text }
   const meta: Record<string, string> = {}
-  for (const line of (match[1] ?? '').split('\n')) {
+  const sources: SongSource[] = []
+  const lines = (match[1] ?? '').split('\n')
+  let inSources = false
+  for (const line of lines) {
+    if (/^sources:\s*$/i.test(line.trim())) {
+      inSources = true
+      continue
+    }
+    if (inSources) {
+      const item = line.match(/^\s*-\s+(.+)$/)
+      if (item) {
+        const parsed = parseSourceEntry(item[1] ?? '')
+        if (parsed) sources.push(parsed)
+        continue
+      }
+      if (/^\s/.test(line) && line.trim()) continue
+      inSources = false
+    }
     const pair = line.match(/^([A-Za-z0-9_]+):\s*(.*)$/)
     if (pair) meta[pair[1]!.toLowerCase()] = unquote(pair[2] ?? '')
   }
-  return { meta, body: text.slice(match[0].length) }
+  return { meta, sources, body: text.slice(match[0].length) }
+}
+
+function parseSourceEntry(raw: string): SongSource | null {
+  const text = unquote(raw.trim())
+  if (!text) return null
+  const split = text.match(/^(https?:\/\/\S+)\s*\|\s*(.+)$/i) || text.match(/^(\S+)\s*\|\s*(.+)$/)
+  if (split) {
+    return { url: (split[1] ?? '').trim(), label: (split[2] ?? '').trim() }
+  }
+  if (/^https?:\/\//i.test(text) || text.includes('.')) {
+    return { url: text, label: defaultSourceLabel(text) }
+  }
+  return null
+}
+
+function mergeSources(entries: SongSource[], legacy: string): SongSource[] {
+  const out: SongSource[] = []
+  const seen = new Set<string>()
+  const add = (item: SongSource | null) => {
+    if (!item?.url || seen.has(item.url)) return
+    seen.add(item.url)
+    out.push(item)
+  }
+  for (const entry of entries) add(entry)
+  add(parseSourceEntry(legacy))
+  return out
+}
+
+function defaultSourceLabel(url: string): string {
+  if (/youtu(\.be|be\.com)/i.test(url)) return 'YouTube'
+  if (/\.pdf($|\?)/i.test(url)) return 'Cifra PDF'
+  return 'Fuente'
 }
 
 function unquote(value: string): string {

@@ -52,6 +52,7 @@ export async function handleApi(sql: Sql, request: Request): Promise<Response> {
     if (pathname === '/api/users' && request.method === 'GET') return listUsers(sql)
     if (pathname === '/api/songs' && request.method === 'GET') return listSongs(sql, user, url)
     if (pathname === '/api/songs' && request.method === 'POST') return createSong(sql, user, request)
+    if (pathname === '/api/catalog' && request.method === 'POST') return upsertCatalog(sql, user, request)
     if (pathname === '/api/songs/reveal' && request.method === 'POST') return revealSongs(sql, user)
     if (pathname === '/api/setlists' && request.method === 'GET') return listSetlists(sql)
     if (pathname === '/api/setlists' && request.method === 'PUT') return saveSetlists(sql, user, request)
@@ -163,6 +164,25 @@ async function createSong(sql: Sql, user: User, request: Request): Promise<Respo
   const row = await oneSong(sql, id, 'guitar')
   if (!row) return json({ error: 'No pude crear la canción.' }, 500)
   return json({ song: toDto(user, row, 'guitar', false) }, 201)
+}
+
+async function upsertCatalog(sql: Sql, user: User, request: Request): Promise<Response> {
+  if (user.role !== 'owner') return json({ error: 'Solo el dueño actualiza el catálogo.' }, 403)
+  const body = await readJson<{ songs?: { id?: string; sourceText?: string }[] }>(request)
+  const songs = Array.isArray(body.songs) ? body.songs : []
+  if (!songs.length) return json({ error: 'No hay canciones.' }, 400)
+  const now = new Date().toISOString()
+  const ids: string[] = []
+  await sql.transaction(async (tx) => {
+    for (const song of songs) {
+      const sourceText = song.sourceText ?? ''
+      const id = (song.id ?? '').trim()
+      if (!usableId(id) || !sourceText.trim()) continue
+      await writeCatalogChart(tx, user.id, id, sourceText, now)
+      ids.push(id)
+    }
+  })
+  return json({ ok: true, ids })
 }
 
 async function updateSong(sql: Sql, user: User, id: string, request: Request): Promise<Response> {

@@ -29,11 +29,28 @@ function frontMatter(body: string): Record<string, string> {
   const end = body.indexOf('\n---', 4)
   if (end < 0) return {}
   const meta: Record<string, string> = {}
+  const sources: string[] = []
+  let inSources = false
   for (const line of body.slice(4, end).split('\n')) {
+    if (/^sources:\s*$/i.test(line.trim())) {
+      inSources = true
+      continue
+    }
+    if (inSources) {
+      const item = line.match(/^\s*-\s+(.+)$/)
+      if (item) {
+        const url = sourceUrl(item[1] ?? '')
+        if (url) sources.push(url)
+        continue
+      }
+      if (/^\s/.test(line) && line.trim()) continue
+      inSources = false
+    }
     const match = line.match(/^([A-Za-z_]+):\s*(.*)$/)
     if (!match?.[1]) continue
     meta[match[1].toLowerCase()] = match[2] ?? ''
   }
+  if (!clean(meta.source) && sources[0]) meta.source = sources[0]
   return meta
 }
 
@@ -42,9 +59,22 @@ function chordProMeta(body: string): Record<string, string> {
   for (const line of body.split('\n')) {
     const match = line.trim().match(/^\{(title|artist|composer|key|source):\s*([^}]*)\}/i)
     if (!match?.[1]) continue
-    meta[match[1].toLowerCase()] = match[2] ?? ''
+    const key = match[1].toLowerCase()
+    const value = match[2] ?? ''
+    if (key === 'source') {
+      const url = sourceUrl(value)
+      if (url && !meta.source) meta.source = url
+      continue
+    }
+    meta[key] = value
   }
   return meta
+}
+
+function sourceUrl(raw: string): string {
+  const text = clean(raw)
+  const split = text.split('|')[0]?.trim() ?? ''
+  return split
 }
 
 function stripLyrics(body: string): string {
