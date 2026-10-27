@@ -16,6 +16,7 @@ import {
 import { ChartRow, NoteRow } from '@/components/ChartLines'
 import { InstrumentCharts } from '@/components/InstrumentCharts'
 import { InstrumentSwitch } from '@/components/InstrumentSwitch'
+import { Kbd, ShortcutLegend } from '@/components/KeyHint'
 import { SpellingToggle } from '@/components/SpellingToggle'
 import { Button } from '@/components/ui/button'
 import { UserBadge } from '@/components/UserBadge'
@@ -255,9 +256,13 @@ export function SongView() {
             {activeList && (
               <Link
                 to={`/listas/${encodeURIComponent(activeList.id)}`}
-                className="shrink-0 text-sm text-muted-foreground hover:underline"
+                aria-keyshortcuts="Escape"
+                className="inline-flex shrink-0 items-center gap-1.5 text-sm text-muted-foreground hover:underline"
               >
-                {setlistItemIndex + 1}/{activeList.items.length} {activeList.name}
+                <span>
+                  {setlistItemIndex + 1}/{activeList.items.length} {activeList.name}
+                </span>
+                {headerOpen && <Kbd>Esc</Kbd>}
               </Link>
             )}
             <p className="shrink-0 text-sm font-semibold text-primary">{partLabel}</p>
@@ -266,9 +271,11 @@ export function SongView() {
               size="sm"
               variant="ghost"
               aria-expanded={headerOpen}
+              aria-keyshortcuts="Space"
               onClick={() => setHeaderOpen((open) => !open)}
             >
               {headerOpen ? 'Ocultar' : 'Controles'}
+              <Kbd>Espacio</Kbd>
             </Button>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -288,11 +295,20 @@ export function SongView() {
           {headerOpen && (
           <>
           <div className="flex items-center gap-3">
-            <Button variant="ghost" size="icon" asChild aria-label="Volver">
-              <Link to="/">
-                <ArrowLeft />
-              </Link>
-            </Button>
+            <span className="inline-flex items-center gap-1">
+              <Button
+                variant="ghost"
+                size="icon"
+                asChild
+                aria-label="Volver"
+                aria-keyshortcuts={listaId ? undefined : 'Escape'}
+              >
+                <Link to="/">
+                  <ArrowLeft />
+                </Link>
+              </Button>
+              {!listaId && <Kbd>Esc</Kbd>}
+            </span>
             <p className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
               {song.artist || 'Sin artista'}
               {song.composer ? ` · ${song.composer}` : ''}
@@ -482,23 +498,57 @@ export function SongView() {
           )}
 
           <div className="flex gap-1.5 overflow-x-auto pb-1">
-            {blocks.map((block) => (
+            {blocks.map((block, index) => (
               <button
                 key={block.id}
                 type="button"
+                aria-keyshortcuts={index < 9 ? String(index + 1) : undefined}
                 onClick={() => go(block.id)}
                 className={cn(
-                  'shrink-0 rounded-full border px-3 py-1 text-sm',
+                  'inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-sm',
                   block.id === activeId
                     ? 'border-primary bg-primary text-primary-foreground'
                     : 'bg-card',
                 )}
               >
+                {index < 9 && <Kbd>{index + 1}</Kbd>}
                 {block.label}
                 {block.repeat > 1 ? ` ×${block.repeat}` : ''}
               </button>
             ))}
           </div>
+          <ShortcutLegend
+            className="border-t pt-2"
+            items={[
+              { id: 'space', keys: <Kbd>Espacio</Kbd>, label: 'Controles' },
+              {
+                id: 'part',
+                keys: (
+                  <>
+                    <Kbd>←</Kbd>
+                    <Kbd>→</Kbd>
+                  </>
+                ),
+                label: 'Parte anterior o siguiente',
+              },
+              { id: 'jump', keys: <Kbd>1–9</Kbd>, label: 'Ir a esa parte' },
+              {
+                id: 'song',
+                keys: (
+                  <>
+                    <Kbd>⌘←</Kbd>
+                    <Kbd>⌘→</Kbd>
+                  </>
+                ),
+                label: listaId ? 'Canción en la lista' : 'Canción en la biblioteca',
+              },
+              {
+                id: 'leave',
+                keys: <Kbd>Esc</Kbd>,
+                label: listaId ? 'Volver a la lista' : 'Volver a las canciones',
+              },
+            ]}
+          />
           </>
           )}
         </div>
@@ -629,19 +679,23 @@ export function SongView() {
             size="lg"
             variant="secondary"
             aria-label="Parte anterior"
+            aria-keyshortcuts="ArrowLeft"
             disabled={partIndex <= 0}
             onClick={() => stepSection(-1)}
           >
             <ChevronLeft />
             Anterior
+            {headerOpen && <Kbd>←</Kbd>}
           </Button>
           <p className="min-w-0 flex-1 truncate text-center text-sm font-semibold">{partLabel}</p>
           <Button
             size="lg"
             aria-label="Parte siguiente"
+            aria-keyshortcuts="ArrowRight"
             disabled={partIndex >= blocks.length - 1}
             onClick={() => stepSection(1)}
           >
+            {headerOpen && <Kbd>→</Kbd>}
             Siguiente
             <ChevronRight />
           </Button>

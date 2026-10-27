@@ -25,7 +25,10 @@ export function InstrumentCharts({
   if (!names.length) return null
   if (instrument === 'piano') return <PianoStrip names={names} />
   if (instrument === 'bass') return <BassStrip names={names} />
-  return <ChordStrip names={names} choices={choices} onChoose={onChoose} />
+  if (instrument === 'guitar' || instrument === 'electric_guitar') {
+    return <ChordStrip names={names} choices={choices} onChoose={onChoose} />
+  }
+  return null
 }
 
 function PianoStrip({ names }: { names: string[] }) {

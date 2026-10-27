@@ -71,6 +71,16 @@ const guitar = await call(sql, owner.token, 'GET', `/api/songs/${encodeURICompon
 const guitarSong = guitar.data.song as { sourceText: string; diverged: boolean }
 assert(guitarSong.sourceText.includes('solo guitar'), 'guitar kept the edit')
 assert(guitarSong.diverged === true, 'catalog edit is marked diverged')
+const electric = await call(sql, owner.token, 'GET', `/api/songs/${encodeURIComponent(catalog.id)}?instrument=electric_guitar`)
+const electricSong = electric.data.song as { sourceText: string; instrument: string }
+assert(electric.status === 200, 'electric guitar get')
+assert(electricSong.instrument === 'electric_guitar', 'electric guitar id')
+assert(electricSong.sourceText === original, 'electric guitar starts from the acoustic chart and keeps its own notes')
+const openedDefault = await call(sql, owner.token, 'GET', `/api/songs/${encodeURIComponent(catalog.id)}`)
+assert(
+  (openedDefault.data.song as { instrument: string }).instrument === 'electric_guitar',
+  'opening without an instrument uses electric guitar',
+)
 
 const ana = await signIn(sql, 'Ana Ruiz')
 assert(ana.user.role === 'viewer', 'ana is a viewer')
@@ -127,7 +137,7 @@ const parts = await sql.all<{ n: number }>(
   `SELECT COUNT(*) AS n FROM instrument_parts WHERE song_id = ?`,
   [catalog.id],
 )
-assert(Number(parts[0]?.n) === 4, `four instruments, got ${parts[0]?.n}`)
+assert(Number(parts[0]?.n) === 5, `five instruments, got ${parts[0]?.n}`)
 
 const anaList = await call(sql, ana.token, 'GET', '/api/songs?instrument=guitar')
 const anaCatalog = (anaList.data.songs as { id: string; hasCopy: boolean }[]).find((song) => song.id === catalog.id)
@@ -162,6 +172,16 @@ const sharedBassText = (sharedBass.data.song as { sourceText: string }).sourceTe
 assert(sharedBassText.includes('Letra compartida de prueba'), 'bass received the lyric')
 assert(sharedBassText.includes(chord!), 'bass kept its chord')
 assert(!sharedBassText.includes('[Xy9]'), 'the guitar chord did not leak onto bass')
+const sharedElectric = await call(
+  sql,
+  owner.token,
+  'GET',
+  `/api/songs/${encodeURIComponent(other.id)}?instrument=electric_guitar`,
+)
+const sharedElectricText = (sharedElectric.data.song as { sourceText: string }).sourceText
+assert(sharedElectricText.includes('Letra compartida de prueba'), 'electric guitar received the lyric')
+assert(sharedElectricText.includes(chord!), 'electric guitar kept its chord')
+assert(!sharedElectricText.includes('[Xy9]'), 'the guitar chord did not leak onto electric guitar')
 const sharedGuitar = await call(sql, owner.token, 'GET', `/api/songs/${encodeURIComponent(other.id)}?instrument=guitar`)
 const sharedGuitarText = (sharedGuitar.data.song as { sourceText: string }).sourceText
 assert(sharedGuitarText.includes('[Xy9]') && sharedGuitarText.includes('Letra compartida de prueba'), 'guitar kept both edits')
@@ -179,6 +199,7 @@ assert(keptText.includes('[Xy9]') && !keptText.includes('viejo'), 'the stale sav
 
 await checkImport(files)
 await checkSeedLists(files)
+await checkPasswords(files)
 
 console.log(`SQL ok: ${songs.length} catalog songs, copies and instruments checked`)
 
@@ -255,4 +276,152 @@ async function checkSeedLists(files: { id: string; sourceText: string }[]) {
   const lists = await call(db, boss.token, 'GET', '/api/setlists')
   const days = lists.data.days as number[]
   assert(days.includes(1) && days.includes(5) && !days.includes(3), `seed lists replaced ${days.join()}`)
+}
+
+async function checkPasswords(files: { id: string; sourceText: string }[]) {
+  const migrated = openSqlite(':memory:')
+  await migrated.exec(
+    `CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE COLLATE NOCASE, role TEXT NOT NULL)`,
+  )
+  await seedCatalog(migrated, files)
+  const columns = await migrated.all<{ name: string }>(`PRAGMA table_info(users)`)
+  assert(columns.some((column) => column.name === 'password_hash'), 'old databases gain password_hash')
+
+  const db = openSqlite(':memory:')
+  await seedCatalog(db, files)
+  const entered = await enter(db, 'Jorge Sanchez')
+  assert(entered.status === 200, 'jorge still enters by name')
+  const jorge = entered.data.user as { id: string; hasPassword: boolean; role: string }
+  const token = entered.data.token as string
+  assert(jorge.role === 'owner' && jorge.hasPassword === false, 'jorge has no password')
+
+  const alone = await enter(db, 'Nila Prueba', 'se-ignora')
+  assert(alone.status === 200, 'a new name still enters')
+  const nila = alone.data.user as { id: string; role: string; hasPassword: boolean }
+  assert(nila.role === 'viewer' && nila.hasPassword === false, 'signup ignores a password and stays a viewer')
+  const nilaToken = alone.data.token as string
+  const again = await enter(db, 'Nila Prueba')
+  assert(again.status === 200, 'the new account still enters by name')
+
+  const panel = await call(db, nilaToken, 'GET', '/api/admin')
+  assert(panel.status === 403, `viewer admin ${panel.status}`)
+  assert(String(panel.data.error).includes('dueño'), 'the refusal names the owner')
+
+  const saved = await call(db, nilaToken, 'PUT', '/api/profile/password', { password: 'secreto-nila' })
+  assert(saved.status === 200, `set password ${saved.status} ${JSON.stringify(saved.data)}`)
+  assert((saved.data.user as { hasPassword: boolean }).hasPassword === true, 'profile reports a password')
+  const stored = await db.get<{ password_hash: string }>(`SELECT password_hash FROM users WHERE id = ?`, [nila.id])
+  assert(stored?.password_hash.startsWith('pbkdf2$'), 'password is stored as a hash')
+  assert(!stored.password_hash.includes('secreto-nila'), 'the plain password is not stored')
+
+  const missing = await enter(db, 'Nila Prueba')
+  assert(missing.status === 401 && String(missing.data.error).includes('contraseña'), 'name alone is refused')
+  const wrong = await enter(db, 'Nila Prueba', 'no-es')
+  assert(wrong.status === 401 && String(wrong.data.error).includes('no es correcta'), 'a wrong password is refused')
+  const right = await enter(db, 'Nila Prueba', 'secreto-nila')
+  assert(right.status === 200, 'the password enters')
+  const cleared = await call(db, right.data.token as string, 'PUT', '/api/profile/password', { password: null })
+  assert(cleared.status === 200 && (cleared.data.user as { hasPassword: boolean }).hasPassword === false, 'clear password')
+  assert((await enter(db, 'Nila Prueba')).status === 200, 'name alone works after clearing')
+
+  const stuck = await call(db, token, 'PUT', '/api/admin/users/jorge', { role: 'admin' })
+  assert(stuck.status === 400, `only owner stays ${stuck.status} ${JSON.stringify(stuck.data)}`)
+
+  const made = await call(db, token, 'POST', '/api/admin/users', { name: 'Ivo Admin', role: 'admin' })
+  assert(made.status === 200, `create admin ${made.status} ${JSON.stringify(made.data.error ?? '')}`)
+  const ivo = await enter(db, 'Ivo Admin')
+  const ivoToken = ivo.data.token as string
+  assert((ivo.data.user as { role: string }).role === 'admin', 'ivo is admin')
+  const roleBlocked = await call(db, ivoToken, 'PUT', '/api/admin/users/jorge', { role: 'viewer' })
+  const passBlocked = await call(db, ivoToken, 'PUT', '/api/admin/users/jorge', { password: 'tomada' })
+  const dropBlocked = await call(db, ivoToken, 'DELETE', '/api/admin/users/jorge')
+  const crownBlocked = await call(db, ivoToken, 'POST', '/api/admin/users', { name: 'Falso Dueño', role: 'owner' })
+  assert(roleBlocked.status === 403 && passBlocked.status === 403 && dropBlocked.status === 403, 'admin cannot touch the owner')
+  assert(crownBlocked.status === 403, 'admin cannot name an owner')
+  const jorgeStill = await db.get<{ role: string; password_hash: string | null }>(
+    `SELECT role, password_hash FROM users WHERE id = 'jorge'`,
+  )
+  assert(jorgeStill?.role === 'owner' && !jorgeStill.password_hash, 'jorge stays owner without a password')
+
+  const luz = await call(db, token, 'POST', '/api/admin/users', {
+    name: 'Luz Lector',
+    role: 'viewer',
+    password: 'luz-clave',
+  })
+  assert(luz.status === 200, 'create with password')
+  const overview = JSON.stringify(luz.data)
+  assert(!overview.includes('pbkdf2') && !overview.includes('luz-clave') && !overview.includes('password_hash'), 'panel hides secrets')
+  const people = await call(db, token, 'GET', '/api/users')
+  const peopleJson = JSON.stringify(people.data)
+  assert(!peopleJson.includes('pbkdf2') && !peopleJson.includes('luz-clave'), 'the people list hides secrets')
+  assert((await enter(db, 'Luz Lector')).status === 401, 'created password is required')
+  assert((await enter(db, 'Luz Lector', 'luz-clave')).status === 200, 'created password works')
+
+  const catalogBefore = await db.get<{ n: number }>(`SELECT COUNT(*) AS n FROM songs WHERE origin = 'catalog'`)
+  const songs = await call(db, nilaToken, 'GET', '/api/songs?instrument=guitar')
+  const catalog = (songs.data.songs as { id: string; origin: string }[]).find((song) => song.origin === 'catalog')
+  assert(catalog, 'catalog song for copies')
+  const privateCopy = await call(db, nilaToken, 'POST', `/api/songs/${encodeURIComponent(catalog.id)}/copy`)
+  await new Promise((resolve) => setTimeout(resolve, 5))
+  const sharedCopy = await call(db, nilaToken, 'POST', `/api/songs/${encodeURIComponent(catalog.id)}/copy`)
+  assert(privateCopy.status === 201 && sharedCopy.status === 201, 'nila has two copies')
+  const privateId = (privateCopy.data.song as { id: string }).id
+  const sharedId = (sharedCopy.data.song as { id: string }).id
+  assert(privateId !== sharedId, 'the copies are distinct')
+  const shared = await call(db, nilaToken, 'POST', `/api/songs/${encodeURIComponent(sharedId)}/share`, { shared: true })
+  assert(shared.status === 200, 'share the second copy')
+  const created = await call(db, nilaToken, 'POST', '/api/songs', {
+    sourceText: '{title: Propia de Nila}\n\n[C]\nHola\n',
+  })
+  assert(created.status === 201, `own song ${created.status}`)
+  const createdId = (created.data.song as { id: string }).id
+  const lists = await call(db, token, 'PUT', '/api/setlists', {
+    days: [0],
+    setlists: [{ id: 'lista-nila', name: 'Nila', items: [{ songId: privateId, semitones: 0 }] }],
+  })
+  assert(lists.status === 200, 'private copy can sit on a list')
+
+  const removed = await call(db, token, 'DELETE', `/api/admin/users/${encodeURIComponent(nila.id)}`)
+  assert(removed.status === 200, `remove nila ${removed.status} ${JSON.stringify(removed.data.error ?? '')}`)
+  const catalogAfter = await db.get<{ n: number }>(`SELECT COUNT(*) AS n FROM songs WHERE origin = 'catalog'`)
+  assert(Number(catalogBefore?.n) === Number(catalogAfter?.n) && Number(catalogAfter?.n) >= 30, 'catalog songs stay')
+  assert(!(await db.get(`SELECT id FROM songs WHERE id = ?`, [privateId])), 'private copy is deleted')
+  assert(!(await db.get(`SELECT id FROM songs WHERE id = ?`, [createdId])), 'private song is deleted')
+  const kept = await db.get<{ owner_id: string; shared: number }>(`SELECT owner_id, shared FROM songs WHERE id = ?`, [sharedId])
+  assert(kept?.owner_id === 'jorge' && Number(kept.shared) === 1, 'shared copy moves to the owner')
+  const item = await db.get<{ n: number }>(`SELECT COUNT(*) AS n FROM setlist_items WHERE song_id = ?`, [privateId])
+  assert(Number(item?.n) === 0, 'a deleted copy leaves the lists')
+  const opened = await call(db, token, 'GET', `/api/songs/${encodeURIComponent(sharedId)}?instrument=guitar`)
+  assert(opened.status === 200, 'the kept copy still opens')
+
+  const ottoMade = await call(db, token, 'POST', '/api/admin/users', { name: 'Otto Duenio', role: 'owner' })
+  assert(ottoMade.status === 200, 'a second owner can be created')
+  const demoted = await call(db, token, 'PUT', '/api/admin/users/jorge', { role: 'admin' })
+  assert(demoted.status === 200, `owner can step down when another remains ${demoted.status}`)
+  const otto = await enter(db, 'Otto Duenio')
+  const restored = await call(db, otto.data.token as string, 'PUT', '/api/admin/users/jorge', { role: 'owner' })
+  assert(restored.status === 200, 'the other owner can restore jorge')
+  const stillOwner = await call(db, token, 'DELETE', `/api/admin/users/${encodeURIComponent((otto.data.user as { id: string }).id)}`)
+  assert(stillOwner.status === 403, 'an owner is not deleted')
+  const stepped = await call(db, token, 'PUT', `/api/admin/users/${encodeURIComponent((otto.data.user as { id: string }).id)}`, {
+    role: 'viewer',
+  })
+  assert(stepped.status === 200, 'the extra owner can be demoted')
+  const dropped = await call(db, token, 'DELETE', `/api/admin/users/${encodeURIComponent((otto.data.user as { id: string }).id)}`)
+  assert(dropped.status === 200, 'a demoted owner can be removed')
+
+  for (const name of ['Ivo Admin', 'Luz Lector']) {
+    const row = await db.get<{ id: string }>(`SELECT id FROM users WHERE name = ?`, [name])
+    assert(row, name)
+    const gone = await call(db, token, 'DELETE', `/api/admin/users/${encodeURIComponent(row.id)}`)
+    assert(gone.status === 200, `remove ${name}`)
+  }
+  const left = await db.all<{ name: string }>(`SELECT name FROM users`)
+  assert(left.length === 1 && left[0]?.name === 'Jorge Sanchez', `only jorge remains, got ${left.map((row) => row.name).join(', ')}`)
+  const finalHash = await db.get<{ password_hash: string | null }>(`SELECT password_hash FROM users WHERE id = 'jorge'`)
+  assert(!finalHash?.password_hash, 'jorge still has no password')
+}
+
+async function enter(sql: Sql, name: string, password?: string) {
+  return call(sql, '', 'POST', '/api/session', password ? { name, password } : { name })
 }

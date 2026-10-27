@@ -6,6 +6,7 @@ export type Account = {
   id: string
   name: string
   role: Role
+  hasPassword: boolean
 }
 
 /** Seeded owner. Other people sign in by name and start as viewers. */
@@ -13,6 +14,7 @@ export const currentUser: Account = {
   id: 'jorge',
   name: 'Jorge Sanchez',
   role: 'owner',
+  hasPassword: false,
 }
 
 const allowed: Record<Crud, readonly Role[]> = {
@@ -31,7 +33,7 @@ export function isStaff(user: Account): boolean {
 }
 
 export function roleLabel(role: Role): string {
-  if (role === 'owner') return 'Dueño'
-  if (role === 'admin') return 'Admin'
+  if (role === 'owner') return 'Admin'
+  if (role === 'admin') return 'Ayudante'
   return 'Lectura'
 }

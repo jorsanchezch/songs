@@ -50,6 +50,10 @@ function isApi(url: string): boolean {
   return (
     pathname === '/api/session' ||
     pathname === '/api/users' ||
+    pathname === '/api/profile/password' ||
+    pathname === '/api/admin' ||
+    pathname.startsWith('/api/admin/') ||
+    pathname === '/api/search-charts' ||
     pathname === '/api/songs' ||
     pathname.startsWith('/api/songs/') ||
     pathname === '/api/catalog' ||

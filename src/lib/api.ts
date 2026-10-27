@@ -1,4 +1,4 @@
-import type { Account } from '@/lib/access'
+import type { Account, Role } from '@/lib/access'
 import { SESSION_KEY, setCurrentUser } from '@/lib/currentSession'
 import type { InstrumentId } from '@/lib/instruments'
 
@@ -64,10 +64,11 @@ export async function me(): Promise<Account> {
   return data.user
 }
 
-export async function signIn(name: string): Promise<Account> {
+export async function signIn(name: string, password?: string): Promise<Account> {
+  const secret = password?.trim()
   const data = await request<{ token: string; user: Account }>('/api/session', {
     method: 'POST',
-    body: { name },
+    body: secret ? { name, password: secret } : { name },
     auth: false,
   })
   localStorage.setItem(SESSION_KEY, data.token)
@@ -75,9 +76,81 @@ export async function signIn(name: string): Promise<Account> {
   return data.user
 }
 
+export async function signOut(): Promise<void> {
+  try {
+    await request('/api/session', { method: 'DELETE' })
+  } finally {
+    localStorage.removeItem(SESSION_KEY)
+    setCurrentUser(null)
+  }
+}
+
+export async function putPassword(password: string | null): Promise<Account> {
+  const data = await request<{ user: Account }>('/api/profile/password', {
+    method: 'PUT',
+    body: { password },
+  })
+  setCurrentUser(data.user)
+  return data.user
+}
+
+export type AdminSongRef = {
+  id: string
+  title: string
+  shared: boolean
+}
+
+export type AdminPerson = Account & {
+  copies: AdminSongRef[]
+  created: AdminSongRef[]
+  catalogCount: number
+}
+
+export type AdminInventory = {
+  users: number
+  catalogSongs: number
+  personalCopies: number
+  sharedCopies: number
+  createdSongs: number
+  setlists: number
+  serviceDays: number
+}
+
+export type AdminOverview = {
+  me: Account
+  users: AdminPerson[]
+  inventory: AdminInventory
+}
+
+export function getAdmin(): Promise<AdminOverview> {
+  return request('/api/admin')
+}
+
+export function createPerson(body: { name: string; role: Role; password?: string }): Promise<AdminOverview> {
+  return request('/api/admin/users', { method: 'POST', body })
+}
+
+export function updatePerson(id: string, body: { role?: Role; password?: string | null }): Promise<AdminOverview> {
+  return request(`/api/admin/users/${encodeURIComponent(id)}`, { method: 'PUT', body })
+}
+
+export function removePerson(id: string): Promise<AdminOverview> {
+  return request(`/api/admin/users/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
 export async function listUsers(): Promise<Account[]> {
   const data = await request<{ users: Account[] }>('/api/users')
   return data.users
+}
+
+export type ChartSearch = {
+  found: boolean
+  title?: string
+  url?: string
+}
+
+export function searchCharts(query: string): Promise<ChartSearch> {
+  return request(`/api/search-charts?q=${encodeURIComponent(query)}`)
 }
 
 export function listSongs(instrument: InstrumentId): Promise<SongList> {

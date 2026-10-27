@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { ListMusic, Loader2, Music, Plus, RefreshCw, Search } from 'lucide-react'
+import { ListMusic, Loader2, Music, Plus, RefreshCw, Search, Shield } from 'lucide-react'
+import { Kbd, ShortcutLegend } from '@/components/KeyHint'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { UserBadge } from '@/components/UserBadge'
 import { useSongs } from '@/hooks/useSongs'
 import { useUser } from '@/hooks/useUser'
-import { can } from '@/lib/access'
+import { can, isStaff } from '@/lib/access'
 import type { Song } from '@/lib/types'
 
 export function LibraryView() {
@@ -53,7 +54,7 @@ export function LibraryView() {
 
   return (
     <div className="min-h-svh pb-10">
-      <header className="border-b bg-card/80 backdrop-blur">
+      <header className="relative z-40 overflow-visible border-b bg-card/80 backdrop-blur">
         <div className="mx-auto flex w-full max-w-[52.8rem] items-center gap-3 px-4 py-4">
           <div className="flex size-10 items-center justify-center rounded-xl bg-primary/15 text-primary">
             <Music className="size-5" />
@@ -66,6 +67,14 @@ export function LibraryView() {
           </div>
           <div className="ml-auto flex items-center gap-2">
             <UserBadge />
+            {isStaff(user) && (
+              <Button asChild variant="outline">
+                <Link to="/admin">
+                  <Shield className="size-4" />
+                  Admin
+                </Link>
+              </Button>
+            )}
             <Button asChild variant="outline">
               <Link to="/listas">
                 <ListMusic className="size-4" />
@@ -83,6 +92,14 @@ export function LibraryView() {
       </header>
 
       <main className="mx-auto w-full max-w-[52.8rem] px-4 py-4">
+        <div className="mb-4 flex flex-wrap gap-2">
+          <Button asChild variant="outline" size="sm">
+            <Link to="/agregar/enlaces">Varios enlaces</Link>
+          </Button>
+          <Button asChild variant="outline" size="sm">
+            <Link to="/agregar/sugerencias">Sugerir cifras</Link>
+          </Button>
+        </div>
         {state.status === 'loading' && (
           <div className="flex flex-col items-center gap-3 py-24 text-muted-foreground" role="status">
             <Loader2 className="size-8 animate-spin" />
@@ -153,6 +170,24 @@ export function LibraryView() {
                 ))}
               </select>
             </div>
+
+            {visible.length > 0 && (
+              <ShortcutLegend
+                className="mb-3"
+                items={[
+                  {
+                    id: 'last',
+                    keys: <Kbd>⌘←</Kbd>,
+                    label: query.trim() || artist || keyName ? 'Última visible' : 'Última canción',
+                  },
+                  {
+                    id: 'first',
+                    keys: <Kbd>⌘→</Kbd>,
+                    label: query.trim() || artist || keyName ? 'Primera visible' : 'Primera canción',
+                  },
+                ]}
+              />
+            )}
 
             {visible.length === 0 ? (
               <p className="py-16 text-center text-muted-foreground">Ninguna canción coincide.</p>

@@ -1,6 +1,10 @@
 import { useEffect } from 'react'
 import { BrowserRouter, Route, Routes, useNavigate } from 'react-router-dom'
+import { AdminView } from '@/components/AdminView'
+import { BulkLinksView } from '@/components/BulkLinksView'
 import { LibraryView } from '@/components/LibraryView'
+import { SuggestChartsView } from '@/components/SuggestChartsView'
+import { ProfileView } from '@/components/ProfileView'
 import { SessionProvider } from '@/hooks/SessionProvider'
 import { ServiceDaysView } from '@/components/ServiceDaysView'
 import { SetlistView } from '@/components/SetlistView'
@@ -17,10 +21,14 @@ export default function App() {
       <SessionProvider>
       <Routes>
         <Route path="/" element={<LibraryView />} />
+        <Route path="/admin" element={<AdminView />} />
+        <Route path="/perfil" element={<ProfileView />} />
         <Route path="/listas" element={<SetlistsView />} />
         <Route path="/listas/dias" element={<ServiceDaysView />} />
         <Route path="/listas/:setlistId" element={<SetlistView />} />
         <Route path="/nueva" element={<SongEditor />} />
+        <Route path="/agregar/enlaces" element={<BulkLinksView />} />
+        <Route path="/agregar/sugerencias" element={<SuggestChartsView />} />
         <Route path="/c/:songId" element={<SongView />} />
         <Route path="/editar/:songId" element={<SongEditor />} />
       </Routes>

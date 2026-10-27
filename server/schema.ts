@@ -2,7 +2,8 @@ export const SCHEMA = `
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL UNIQUE COLLATE NOCASE,
-  role TEXT NOT NULL CHECK (role IN ('owner', 'admin', 'viewer'))
+  role TEXT NOT NULL CHECK (role IN ('owner', 'admin', 'viewer')),
+  password_hash TEXT
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
@@ -32,7 +33,7 @@ CREATE TABLE IF NOT EXISTS songs (
 
 CREATE TABLE IF NOT EXISTS instrument_parts (
   song_id TEXT NOT NULL REFERENCES songs(id) ON DELETE CASCADE,
-  instrument TEXT NOT NULL CHECK (instrument IN ('guitar', 'bass', 'drums', 'piano')),
+  instrument TEXT NOT NULL CHECK (instrument IN ('electric_guitar', 'guitar', 'bass', 'drums', 'piano')),
   source_text TEXT NOT NULL,
   revision INTEGER NOT NULL DEFAULT 1,
   PRIMARY KEY (song_id, instrument)

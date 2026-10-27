@@ -4,7 +4,10 @@ import type { Account } from '@/lib/access'
 export type SessionValue = {
   user: Account
   people: Account[]
-  signIn: (name: string) => Promise<void>
+  signIn: (name: string, password?: string) => Promise<void>
+  signOut: () => Promise<void>
+  reloadPeople: () => Promise<void>
+  adopt: (next: Account) => void
 }
 
 export const SessionContext = createContext<SessionValue | null>(null)

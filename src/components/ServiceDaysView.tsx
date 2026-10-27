@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { ArrowLeft } from 'lucide-react'
+import { Kbd } from '@/components/KeyHint'
 import { Button } from '@/components/ui/button'
 import { UserBadge } from '@/components/UserBadge'
 import { useServiceDays, useSetlists } from '@/hooks/useSetlists'
@@ -41,11 +42,14 @@ export function ServiceDaysView() {
     <div className="min-h-svh pb-12">
       <header className="border-b bg-card/80">
         <div className={`${page} flex items-center gap-3 py-4`}>
-          <Button variant="ghost" size="icon" asChild aria-label="Volver">
-            <Link to="/listas">
-              <ArrowLeft />
-            </Link>
-          </Button>
+          <span className="inline-flex items-center gap-1">
+            <Button variant="ghost" size="icon" asChild aria-label="Volver" aria-keyshortcuts="Escape">
+              <Link to="/listas">
+                <ArrowLeft />
+              </Link>
+            </Button>
+            <Kbd>Esc</Kbd>
+          </span>
           <h1 className="text-lg font-semibold">Días de servicio</h1>
           <div className="ml-auto">
             <UserBadge />

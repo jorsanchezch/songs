@@ -1,12 +1,14 @@
-import { INSTRUMENTS, isInstrument, type InstrumentId } from './instruments.ts'
+import { findPublicChart } from './chartSearch.ts'
+import { DEFAULT_INSTRUMENT, INSTRUMENTS, isInstrument, type InstrumentId } from './instruments.ts'
 import { shareLyrics } from './lyrics.ts'
 import { chartMeta } from './meta.ts'
+import { hashPassword, verifyPassword } from './password.ts'
 import type { Sql } from './sql.ts'
 
 type Role = 'owner' | 'admin' | 'viewer'
 type Origin = 'catalog' | 'local' | 'copy'
 
-type User = { id: string; name: string; role: Role }
+type User = { id: string; name: string; role: Role; has_password: number }
 
 type SongRecord = {
   id: string
@@ -50,6 +52,7 @@ export async function handleApi(sql: Sql, request: Request): Promise<Response> {
     if (pathname === '/api/session' && request.method === 'GET') return json({ user: publicUser(user) })
     if (pathname === '/api/session' && request.method === 'DELETE') return sessionDelete(sql, request)
     if (pathname === '/api/users' && request.method === 'GET') return listUsers(sql)
+    if (pathname === '/api/search-charts' && request.method === 'GET') return searchCharts(url)
     if (pathname === '/api/songs' && request.method === 'GET') return listSongs(sql, user, url)
     if (pathname === '/api/songs' && request.method === 'POST') return createSong(sql, user, request)
     if (pathname === '/api/catalog' && request.method === 'POST') return upsertCatalog(sql, user, request)
@@ -59,6 +62,15 @@ export async function handleApi(sql: Sql, request: Request): Promise<Response> {
     if (pathname === '/api/import-local' && request.method === 'POST') return importLocal(sql, user, request)
     if (pathname === '/api/prefs' && request.method === 'GET') return getPrefs(sql, user)
     if (pathname === '/api/prefs' && request.method === 'PUT') return putPrefs(sql, user, request)
+    if (pathname === '/api/profile/password' && request.method === 'PUT') return setOwnPassword(sql, user, request)
+    if (pathname === '/api/admin' && request.method === 'GET') return adminOverview(sql, user)
+    if (pathname === '/api/admin/users' && request.method === 'POST') return adminCreateUser(sql, user, request)
+    const adminUserPath = pathname.match(/^\/api\/admin\/users\/([^/]+)$/)
+    if (adminUserPath) {
+      const id = decodeURIComponent(adminUserPath[1] ?? '')
+      if (request.method === 'PUT') return adminUpdateUser(sql, user, id, request)
+      if (request.method === 'DELETE') return adminRemoveUser(sql, user, id)
+    }
     const songPath = pathname.match(/^\/api\/songs\/([^/]+)(?:\/(copy|share|restore))?$/)
     if (songPath) {
       const id = decodeURIComponent(songPath[1] ?? '')
@@ -80,14 +92,28 @@ export async function handleApi(sql: Sql, request: Request): Promise<Response> {
 }
 
 async function sessionCreate(sql: Sql, request: Request): Promise<Response> {
-  const body = await readJson<{ name?: string }>(request)
+  const body = await readJson<{ name?: string; password?: string }>(request)
   const name = body.name?.trim() ?? ''
   if (!name || name.length > 80) return json({ error: 'Escribe un nombre.' }, 400)
-  let user = await sql.get<User>(`SELECT id, name, role FROM users WHERE name = ? COLLATE NOCASE`, [name])
-  if (!user) {
+  const row = await sql.get<{ id: string; name: string; role: Role; password_hash: string | null }>(
+    `SELECT id, name, role, password_hash FROM users WHERE name = ? COLLATE NOCASE`,
+    [name],
+  )
+  let user: { id: string; name: string; role: Role; has_password: number }
+  if (!row) {
     const id = await freshUserId(sql, name)
+    // A new name stays without a password until that person sets one.
     await sql.run(`INSERT INTO users (id, name, role) VALUES (?, ?, 'viewer')`, [id, name])
-    user = { id, name, role: 'viewer' }
+    user = { id, name, role: 'viewer', has_password: 0 }
+  } else {
+    if (row.password_hash) {
+      const password = typeof body.password === 'string' ? body.password.trim() : ''
+      if (!password) return json({ error: 'Esta cuenta tiene contraseña. Escríbela para entrar.' }, 401)
+      if (!(await verifyPassword(password, row.password_hash))) {
+        return json({ error: 'La contraseña no es correcta.' }, 401)
+      }
+    }
+    user = { id: row.id, name: row.name, role: row.role, has_password: row.password_hash ? 1 : 0 }
   }
   const token = crypto.randomUUID()
   await sql.run(`INSERT INTO sessions (token, user_id, created_at) VALUES (?, ?, ?)`, [
@@ -105,7 +131,7 @@ async function sessionDelete(sql: Sql, request: Request): Promise<Response> {
 }
 
 async function listUsers(sql: Sql): Promise<Response> {
-  const users = await sql.all<User>(`SELECT id, name, role FROM users ORDER BY name COLLATE NOCASE`)
+  const users = await sql.all<User>(`${userColumns()} ORDER BY name COLLATE NOCASE`)
   return json({ users: users.map(publicUser) })
 }
 
@@ -195,7 +221,7 @@ async function updateSong(sql: Sql, user: User, id: string, request: Request): P
   }>(request)
   const sourceText = body.sourceText ?? ''
   if (!sourceText.trim()) return json({ error: 'La canción está vacía.' }, 400)
-  const instrument = body.instrument && isInstrument(body.instrument) ? body.instrument : 'guitar'
+  const instrument = body.instrument && isInstrument(body.instrument) ? body.instrument : DEFAULT_INSTRUMENT
   const row = await oneSong(sql, id, instrument)
   if (!row || !canSee(user, row)) return json({ error: 'No está esta canción.' }, 404)
   if (!canEdit(user, row)) {
@@ -701,7 +727,7 @@ function isStaff(user: User): boolean {
 
 function instrumentFrom(url: URL): InstrumentId {
   const value = url.searchParams.get('instrument')
-  if (!value) return 'guitar'
+  if (!value) return DEFAULT_INSTRUMENT
   if (!isInstrument(value)) throw json({ error: 'Ese instrumento no está.' }, 400)
   return value
 }
@@ -710,7 +736,7 @@ async function userFrom(sql: Sql, request: Request): Promise<User | undefined> {
   const token = bearer(request)
   if (!token) return undefined
   return sql.get<User>(
-    `SELECT u.id, u.name, u.role FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ?`,
+    `SELECT u.id, u.name, u.role, ${hasPasswordSql('u')} FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ?`,
     [token],
   )
 }
@@ -721,7 +747,202 @@ function bearer(request: Request): string {
 }
 
 function publicUser(user: User) {
-  return { id: user.id, name: user.name, role: user.role }
+  return { id: user.id, name: user.name, role: user.role, hasPassword: Number(user.has_password) === 1 }
+}
+
+function userColumns(): string {
+  return `SELECT id, name, role, ${hasPasswordSql()} FROM users`
+}
+
+function hasPasswordSql(alias = ''): string {
+  const column = alias ? `${alias}.password_hash` : 'password_hash'
+  return `CASE WHEN ${column} IS NOT NULL AND ${column} != '' THEN 1 ELSE 0 END AS has_password`
+}
+
+function staffOnly(user: User): Response | null {
+  if (isStaff(user)) return null
+  return json({ error: 'Solo el dueño o un admin abre el panel.' }, 403)
+}
+
+function parseRole(value: unknown): Role | undefined {
+  if (value === 'owner' || value === 'admin' || value === 'viewer') return value
+  return undefined
+}
+
+async function storedPassword(password: string | null): Promise<string | null | Response> {
+  if (password == null) return null
+  const trimmed = password.trim()
+  if (!trimmed) return null
+  if (trimmed.length > 200) return json({ error: 'La contraseña es demasiado larga.' }, 400)
+  return hashPassword(trimmed)
+}
+
+async function count(sql: Sql, statement: string): Promise<number> {
+  const row = await sql.get<{ n: number }>(statement)
+  return Number(row?.n ?? 0)
+}
+
+async function setOwnPassword(sql: Sql, user: User, request: Request): Promise<Response> {
+  const body = await readJson<{ password?: string | null }>(request)
+  if (!Object.prototype.hasOwnProperty.call(body, 'password')) return json({ error: 'Falta la contraseña.' }, 400)
+  const next = await storedPassword(body.password ?? null)
+  if (next instanceof Response) return next
+  await sql.run(`UPDATE users SET password_hash = ? WHERE id = ?`, [next, user.id])
+  return json({ user: publicUser({ ...user, has_password: next ? 1 : 0 }) })
+}
+
+async function adminOverview(sql: Sql, actor: User): Promise<Response> {
+  const denied = staffOnly(actor)
+  if (denied) return denied
+  const me = await sql.get<User>(`${userColumns()} WHERE id = ?`, [actor.id])
+  if (!me) return json({ error: 'No está tu cuenta.' }, 401)
+  const people = await sql.all<User>(`${userColumns()} ORDER BY name COLLATE NOCASE`)
+  const songs = await sql.all<{
+    id: string
+    title: string
+    origin: Origin
+    owner_id: string
+    shared: number
+    listed: number
+  }>(
+    `SELECT id, title, origin, owner_id, shared,
+       CASE WHEN EXISTS (SELECT 1 FROM song_shares sh WHERE sh.song_id = songs.id) THEN 1 ELSE 0 END AS listed
+     FROM songs
+     ORDER BY title COLLATE NOCASE`,
+  )
+  const [users, catalogSongs, personalCopies, sharedCopies, createdSongs, setlists, serviceDays] = await Promise.all([
+    count(sql, `SELECT COUNT(*) AS n FROM users`),
+    count(sql, `SELECT COUNT(*) AS n FROM songs WHERE origin = 'catalog'`),
+    count(
+      sql,
+      `SELECT COUNT(*) AS n FROM songs WHERE origin = 'copy' AND shared = 0 AND NOT EXISTS (SELECT 1 FROM song_shares sh WHERE sh.song_id = songs.id)`,
+    ),
+    count(
+      sql,
+      `SELECT COUNT(*) AS n FROM songs WHERE origin = 'copy' AND (shared = 1 OR EXISTS (SELECT 1 FROM song_shares sh WHERE sh.song_id = songs.id))`,
+    ),
+    count(sql, `SELECT COUNT(*) AS n FROM songs WHERE origin = 'local'`),
+    count(sql, `SELECT COUNT(*) AS n FROM setlists`),
+    count(sql, `SELECT COUNT(*) AS n FROM service_days`),
+  ])
+  return json({
+    me: publicUser(me),
+    users: people.map((person) => {
+      const owned = songs.filter((song) => song.owner_id === person.id)
+      const brief = (song: (typeof songs)[number]) => ({
+        id: song.id,
+        title: song.title,
+        shared: Number(song.shared) === 1 || Number(song.listed) === 1,
+      })
+      return {
+        ...publicUser(person),
+        copies: owned.filter((song) => song.origin === 'copy').map(brief),
+        created: owned.filter((song) => song.origin === 'local').map(brief),
+        catalogCount: owned.filter((song) => song.origin === 'catalog').length,
+      }
+    }),
+    inventory: { users, catalogSongs, personalCopies, sharedCopies, createdSongs, setlists, serviceDays },
+  })
+}
+
+async function adminCreateUser(sql: Sql, actor: User, request: Request): Promise<Response> {
+  const denied = staffOnly(actor)
+  if (denied) return denied
+  const body = await readJson<{ name?: string; role?: unknown; password?: string }>(request)
+  const name = body.name?.trim() ?? ''
+  if (!name || name.length > 80) return json({ error: 'Escribe un nombre.' }, 400)
+  const role = parseRole(body.role)
+  if (!role) return json({ error: 'Ese rol no existe.' }, 400)
+  if (actor.role !== 'owner' && role === 'owner') return json({ error: 'Un admin no puede nombrar a un dueño.' }, 403)
+  const existing = await sql.get(`SELECT id FROM users WHERE name = ? COLLATE NOCASE`, [name])
+  if (existing) return json({ error: 'Ya hay alguien con ese nombre.' }, 409)
+  let passwordHash: string | null = null
+  if (typeof body.password === 'string' && body.password.trim()) {
+    const stored = await storedPassword(body.password)
+    if (stored instanceof Response) return stored
+    passwordHash = stored
+  }
+  const id = await freshUserId(sql, name)
+  await sql.run(`INSERT INTO users (id, name, role, password_hash) VALUES (?, ?, ?, ?)`, [id, name, role, passwordHash])
+  return adminOverview(sql, actor)
+}
+
+async function adminUpdateUser(sql: Sql, actor: User, id: string, request: Request): Promise<Response> {
+  const denied = staffOnly(actor)
+  if (denied) return denied
+  const target = await sql.get<{ id: string; role: Role }>(`SELECT id, role FROM users WHERE id = ?`, [id])
+  if (!target) return json({ error: 'No está esa persona.' }, 404)
+  const body = await readJson<{ role?: unknown; password?: string | null }>(request)
+  const touchesRole = Object.prototype.hasOwnProperty.call(body, 'role')
+  const touchesPassword = Object.prototype.hasOwnProperty.call(body, 'password')
+  if (!touchesRole && !touchesPassword) return json({ error: 'Nada que cambiar.' }, 400)
+
+  let role = target.role
+  if (touchesRole) {
+    const next = parseRole(body.role)
+    if (!next) return json({ error: 'Ese rol no existe.' }, 400)
+    if (actor.role !== 'owner' && target.role === 'owner' && next !== target.role) {
+      return json({ error: 'Un admin no puede cambiar el rol del dueño.' }, 403)
+    }
+    if (actor.role !== 'owner' && next === 'owner' && target.role !== 'owner') {
+      return json({ error: 'Un admin no puede nombrar a un dueño.' }, 403)
+    }
+    if (target.role === 'owner' && next !== 'owner') {
+      const owners = await count(sql, `SELECT COUNT(*) AS n FROM users WHERE role = 'owner'`)
+      if (owners <= 1) return json({ error: 'Tiene que quedar al menos un dueño.' }, 400)
+    }
+    role = next
+  }
+
+  let passwordHash: string | null | undefined
+  if (touchesPassword) {
+    if (actor.role !== 'owner' && target.role === 'owner') {
+      return json({ error: 'Un admin no puede cambiar la contraseña del dueño.' }, 403)
+    }
+    const stored = await storedPassword(body.password ?? null)
+    if (stored instanceof Response) return stored
+    passwordHash = stored
+  }
+
+  if (role !== target.role) await sql.run(`UPDATE users SET role = ? WHERE id = ?`, [role, id])
+  if (passwordHash !== undefined) await sql.run(`UPDATE users SET password_hash = ? WHERE id = ?`, [passwordHash, id])
+  return adminOverview(sql, actor)
+}
+
+async function adminRemoveUser(sql: Sql, actor: User, id: string): Promise<Response> {
+  const denied = staffOnly(actor)
+  if (denied) return denied
+  const target = await sql.get<{ id: string; role: Role }>(`SELECT id, role FROM users WHERE id = ?`, [id])
+  if (!target) return json({ error: 'No está esa persona.' }, 404)
+  if (target.role === 'owner') return json({ error: 'No se puede quitar a un dueño.' }, 403)
+  const keeper = await sql.get<{ id: string }>(
+    `SELECT id FROM users WHERE role = 'owner' ORDER BY CASE WHEN id = 'jorge' THEN 0 ELSE 1 END, name COLLATE NOCASE LIMIT 1`,
+  )
+  if (!keeper || keeper.id === id) return json({ error: 'No hay un dueño para conservar el catálogo.' }, 409)
+  const now = new Date().toISOString()
+  await sql.transaction(async (tx) => {
+    await tx.run(
+      `DELETE FROM setlist_items WHERE song_id IN (
+        SELECT id FROM songs
+        WHERE owner_id = ?
+          AND origin != 'catalog'
+          AND shared = 0
+          AND NOT EXISTS (SELECT 1 FROM song_shares sh WHERE sh.song_id = songs.id)
+      )`,
+      [id],
+    )
+    await tx.run(
+      `DELETE FROM songs
+       WHERE owner_id = ?
+         AND origin != 'catalog'
+         AND shared = 0
+         AND NOT EXISTS (SELECT 1 FROM song_shares sh WHERE sh.song_id = songs.id)`,
+      [id],
+    )
+    await tx.run(`UPDATE songs SET owner_id = ?, updated_at = ? WHERE owner_id = ?`, [keeper.id, now, id])
+    await tx.run(`DELETE FROM users WHERE id = ?`, [id])
+  })
+  return adminOverview(sql, actor)
 }
 
 async function freshUserId(sql: Sql, name: string): Promise<string> {
@@ -748,6 +969,19 @@ async function readJson<T>(request: Request): Promise<T> {
     return JSON.parse(text) as T
   } catch {
     throw json({ error: 'No pude leer el JSON.' }, 400)
+  }
+}
+
+async function searchCharts(url: URL): Promise<Response> {
+  const query = url.searchParams.get('q')?.trim() ?? ''
+  if (!query || query.length > 180) return json({ error: 'Escribe el nombre de la canción.' }, 400)
+  try {
+    const hit = await findPublicChart(query)
+    if (!hit) return json({ found: false })
+    return json({ found: true, title: hit.title, url: hit.url })
+  } catch (error) {
+    const message = error instanceof Error && error.message ? error.message : 'No pude buscar en la web. Pega un enlace.'
+    return json({ error: message }, 502)
   }
 }
 

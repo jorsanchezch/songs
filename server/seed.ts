@@ -10,13 +10,71 @@ const SERVICE_LISTS = [
   { id: 'servicio-0', weekday: 0, name: 'Servicio del próximo domingo' },
 ]
 
+const PARTS_TABLE = `CREATE TABLE instrument_parts_next (
+  song_id TEXT NOT NULL REFERENCES songs(id) ON DELETE CASCADE,
+  instrument TEXT NOT NULL CHECK (instrument IN ('electric_guitar', 'guitar', 'bass', 'drums', 'piano')),
+  source_text TEXT NOT NULL,
+  revision INTEGER NOT NULL DEFAULT 1,
+  PRIMARY KEY (song_id, instrument)
+)`
+
 export async function ensureSchema(sql: Sql): Promise<void> {
   await sql.exec(SCHEMA)
   await addColumn(sql, `ALTER TABLE songs ADD COLUMN revision INTEGER NOT NULL DEFAULT 1`)
   await addColumn(sql, `ALTER TABLE instrument_parts ADD COLUMN revision INTEGER NOT NULL DEFAULT 1`)
+  await addColumn(sql, `ALTER TABLE users ADD COLUMN password_hash TEXT`)
+  await allowElectricGuitar(sql)
+  await backfillElectricGuitar(sql)
   await sql.run(
     `INSERT OR IGNORE INTO users (id, name, role) VALUES (?, ?, 'owner')`,
     [OWNER_ID, OWNER_NAME],
+  )
+}
+
+async function allowElectricGuitar(sql: Sql): Promise<void> {
+  const pending = await sql.get<{ name: string }>(
+    `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'instrument_parts_next'`,
+  )
+  if (pending) {
+    const currentRows = await sql.get<{ n: number }>(`SELECT COUNT(*) AS n FROM instrument_parts`)
+    const savedRows = await sql.get<{ n: number }>(`SELECT COUNT(*) AS n FROM instrument_parts_next`)
+    if (Number(savedRows?.n ?? 0) > 0 && Number(currentRows?.n ?? 0) === 0) {
+      await sql.exec(`DROP TABLE instrument_parts`)
+      await sql.exec(`ALTER TABLE instrument_parts_next RENAME TO instrument_parts`)
+    } else {
+      await sql.exec(`DROP TABLE instrument_parts_next`)
+    }
+  }
+  const row = await sql.get<{ definition: string }>(
+    `SELECT sql AS definition FROM sqlite_master WHERE type = 'table' AND name = 'instrument_parts'`,
+  )
+  if (row?.definition?.includes('electric_guitar')) return
+  await sql.transaction(async (tx) => {
+    await tx.exec(PARTS_TABLE)
+    await tx.exec(
+      `INSERT INTO instrument_parts_next (song_id, instrument, source_text, revision)
+       SELECT song_id, instrument, source_text, revision FROM instrument_parts`,
+    )
+    await tx.exec(`DROP TABLE instrument_parts`)
+    await tx.exec(`ALTER TABLE instrument_parts_next RENAME TO instrument_parts`)
+  })
+}
+
+async function backfillElectricGuitar(sql: Sql): Promise<void> {
+  await sql.run(
+    `INSERT INTO instrument_parts (song_id, instrument, source_text, revision)
+     SELECT s.id, 'electric_guitar',
+       COALESCE(
+         (SELECT g.source_text FROM instrument_parts g WHERE g.song_id = s.id AND g.instrument = 'guitar'),
+         s.catalog_source,
+         ''
+       ),
+       1
+     FROM songs s
+     WHERE NOT EXISTS (
+       SELECT 1 FROM instrument_parts e
+       WHERE e.song_id = s.id AND e.instrument = 'electric_guitar'
+     )`,
   )
 }
 

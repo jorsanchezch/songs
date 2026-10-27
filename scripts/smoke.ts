@@ -203,7 +203,7 @@ assert(planned.items.length === 1 && planned.items[0]?.songId === 'd', 'adding a
 assert(planned.evergreen.serviceDate === '2026-10-24', 'the new service is the following Saturday')
 planned = planEvergreenAdd({ weekday: 6, serviceDate: '2026-10-17' }, [{ songId: 'a', semitones: 0 }], 'e', laterSaturday)
 assert(planned.items.length === 1 && planned.evergreen.serviceDate === '2026-10-24', 'a later Saturday starts that Saturday')
-assert(currentUser.role === 'owner' && roleLabel('owner') === 'Dueño', 'the seeded owner stays the owner')
+assert(currentUser.role === 'owner' && roleLabel('owner') === 'Admin' && roleLabel('admin') === 'Ayudante', 'the seeded owner stays the owner')
 assert(can(currentUser, 'create') && can(currentUser, 'update') && can(currentUser, 'delete'), 'the owner can change songs and lists')
 assert(!can({ ...currentUser, role: 'viewer' }, 'create'), 'a reader cannot create')
 assert(!can({ ...currentUser, role: 'viewer' }, 'update'), 'a reader cannot edit')

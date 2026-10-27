@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import { ChartPreview } from '@/components/ChartPreview'
 import { InstrumentSwitch } from '@/components/InstrumentSwitch'
+import { Kbd, ShortcutLegend } from '@/components/KeyHint'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { UserBadge } from '@/components/UserBadge'
@@ -156,7 +157,7 @@ export function SongEditor() {
       <div className="mx-auto max-w-md px-4 py-16 text-center">
         <p className="mb-4">
           {song.origin === 'catalog'
-            ? 'El catálogo solo lo cambia el dueño o un admin.'
+            ? 'El catálogo solo lo cambia un Admin o un Ayudante.'
             : 'Esta copia no es tuya.'}
         </p>
         <div className="flex justify-center gap-2">
@@ -184,6 +185,7 @@ export function SongEditor() {
               <ArrowLeft />
             </Link>
           </Button>
+          <ShortcutLegend items={[{ id: 'back', keys: <Kbd>Esc</Kbd>, label: 'Atrás' }]} />
           <h1 className="min-w-0 flex-1 truncate text-lg font-semibold">
             {draft.title.trim() || (song ? 'Editar canción' : 'Nueva canción')}
           </h1>
@@ -206,7 +208,7 @@ export function SongEditor() {
         <p className="text-sm text-muted-foreground">
           {songId
             ? 'La letra se copia a los otros instrumentos. Los acordes y las notas de ejecución se quedan en este.'
-            : 'Al guardar, los cuatro instrumentos empiezan con esta cifra.'}
+            : 'Al guardar, los cinco instrumentos empiezan con esta cifra.'}
         </p>
         {status && <p className="text-sm text-primary">{status}</p>}
         {error && <p className="text-sm text-destructive">{error}</p>}

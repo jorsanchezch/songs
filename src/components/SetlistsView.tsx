@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { ArrowLeft, ListMusic, Plus, Settings, Trash2 } from 'lucide-react'
+import { Kbd } from '@/components/KeyHint'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { UserBadge } from '@/components/UserBadge'
@@ -40,11 +41,14 @@ export function SetlistsView() {
     <div className="min-h-svh pb-12">
       <header className="border-b bg-card/80">
         <div className={`${page} flex items-center gap-3 py-4`}>
-          <Button variant="ghost" size="icon" asChild aria-label="Volver">
-            <Link to="/">
-              <ArrowLeft />
-            </Link>
-          </Button>
+          <span className="inline-flex items-center gap-1">
+            <Button variant="ghost" size="icon" asChild aria-label="Volver" aria-keyshortcuts="Escape">
+              <Link to="/">
+                <ArrowLeft />
+              </Link>
+            </Button>
+            <Kbd>Esc</Kbd>
+          </span>
           <ListMusic className="size-5 text-primary" />
           <h1 className="text-lg font-semibold">Listas</h1>
           <div className="ml-auto flex items-center gap-2">

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, Check, ChevronDown, ChevronUp, GripVertical, Plus, Trash2 } from 'lucide-react'
+import { Kbd, ShortcutLegend } from '@/components/KeyHint'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { UserBadge } from '@/components/UserBadge'
@@ -120,6 +121,17 @@ export function SetlistView() {
         </div>
       </header>
       <main className={`${page} flex flex-col gap-4 py-4`}>
+        <ShortcutLegend
+          items={[
+            ...(list.items.some((item) => songs.some((song) => song.id === item.songId))
+              ? [
+                  { id: 'last', keys: <Kbd>⌘←</Kbd>, label: 'Última canción' },
+                  { id: 'first', keys: <Kbd>⌘→</Kbd>, label: 'Primera canción' },
+                ]
+              : []),
+            { id: 'esc', keys: <Kbd>Esc</Kbd>, label: 'Ir a las canciones' },
+          ]}
+        />
         {list.evergreen && <p className="text-sm text-muted-foreground">{evergreenStatus(list)}</p>}
         {can(user, 'create') && (
         <div className="relative">
