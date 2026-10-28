@@ -652,10 +652,10 @@ export function SongView() {
             <Eye className="size-4 shrink-0 text-muted-foreground" aria-hidden />
             <SpellingToggle value={spelling} onChange={(next) => update({ spelling: next })} />
             {isGuitar(instrument) && (
-              <WithHint text="En la guitarra, un acorde con barra (como C/E) muestra solo su grado, no la nota del bajo. Apagado, vuelve la cifra original.">
+              <WithHint text="En la guitarra, un acorde con barra (como C/E) oculta la barra y el bajo, y deja la letra del acorde. Apagado, vuelve la barra.">
                 <Button
                   variant={settings.slashAsDegree ? 'default' : 'outline'}
-                  title="En la guitarra, un acorde con barra (como C/E) muestra solo su grado, no la nota del bajo. Apagado, vuelve la cifra original."
+                  title="En la guitarra, un acorde con barra (como C/E) oculta la barra y el bajo, y deja la letra del acorde. Apagado, vuelve la barra."
                   aria-pressed={settings.slashAsDegree}
                   onClick={() => update({ slashAsDegree: !settings.slashAsDegree })}
                 >
