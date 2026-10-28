@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   ArrowLeft,
@@ -7,6 +7,7 @@ import {
   Eye,
   EyeOff,
   Loader2,
+  Minus,
   Plus,
   Trash2,
 } from 'lucide-react'
@@ -31,12 +32,11 @@ import {
   blankSong,
   blankVersion,
   freshId,
-  normalizeKeyText,
   slugify,
   uniqueId,
   usedSectionIds,
 } from '@/lib/draftSong'
-import { keyChoices } from '@/lib/theory'
+import { parseKey, transposeKeyName } from '@/lib/chords'
 import { NOTE_LABEL, NOTE_TYPES, type NoteType, type Song, type SongNote, type SongSection } from '@/lib/types'
 
 export function SongEditor() {
@@ -240,18 +240,22 @@ export function SongEditor() {
               <Field label="Compositor" hint="Quién la escribió.">
                 <Input aria-label="Compositor" value={draft.composer} onChange={(event) => setDraft({ ...draft, composer: event.target.value })} />
               </Field>
-              <KeyCombobox
-                label="Tono de edición"
-                hint="Tono en el que editas. Al cambiarlo, transporta los acordes y deja quieto el tono original."
-                value={draft.key}
-                onCommit={(next) => setDraft((current) => applyEditingKey(current, next))}
-              />
-              <KeyCombobox
-                label="Tono original"
-                hint="Tono de la cifra de origen. Cambiarlo no mueve los acordes."
-                value={draft.originalKey || draft.key}
-                onCommit={(next) => setDraft((current) => applyOriginalKey(current, next))}
-              />
+              <div className="flex flex-nowrap items-end gap-3 sm:col-span-2">
+                <KeyStepper
+                  label="Tono de edición"
+                  hint="Tono en el que editas. Al cambiarlo, transporta los acordes y deja quieto el tono original."
+                  value={draft.key}
+                  onStep={(delta) => setDraft((current) => applyEditingKey(current, neighborKey(current.key, delta)))}
+                />
+                <KeyStepper
+                  label="Tono original"
+                  hint="Tono de la cifra de origen. Cambiarlo no mueve los acordes."
+                  value={draft.originalKey || draft.key}
+                  onStep={(delta) =>
+                    setDraft((current) => applyOriginalKey(current, neighborKey(current.originalKey || current.key, delta)))
+                  }
+                />
+              </div>
               <div className="sm:col-span-2 flex flex-col gap-2">
                 <div className="flex items-center justify-between gap-2">
                   <p className="inline-flex items-center gap-1 text-sm font-medium">
@@ -998,50 +1002,56 @@ function Field({
   )
 }
 
-function KeyCombobox({
+function neighborKey(key: string, delta: -1 | 1): string {
+  const base = key.trim()
+  if (!base || !parseKey(base).valid) return delta > 0 ? 'C' : 'B'
+  return transposeKeyName(base, delta)
+}
+
+/** Same − / tono / + group as the song page. */
+function KeyStepper({
   label,
   hint,
   value,
-  onCommit,
+  onStep,
 }: {
   label: string
   hint: string
   value: string
-  onCommit: (next: string) => void
+  onStep: (delta: -1 | 1) => void
 }) {
-  const listId = useId()
-  const [text, setText] = useState(value)
-  useEffect(() => {
-    setText(value)
-  }, [value])
   return (
-    <Field label={label} hint={hint}>
-      <Input
-        list={listId}
-        value={text}
-        aria-label={label}
-        autoCapitalize="off"
-        autoCorrect="off"
-        spellCheck={false}
-        onChange={(event) => {
-          const next = event.target.value
-          setText(next)
-          const native = event.nativeEvent
-          if (native instanceof InputEvent && native.inputType === 'insertReplacementText') {
-            onCommit(normalizeKeyText(next))
-          }
-        }}
-        onBlur={(event) => onCommit(normalizeKeyText(event.target.value))}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter') event.currentTarget.blur()
-        }}
-      />
-      <datalist id={listId}>
-        {keyChoices().map((choice) => (
-          <option key={choice} value={choice} />
-        ))}
-      </datalist>
-    </Field>
+    <div className="flex flex-col gap-1 text-sm font-medium">
+      <span className="inline-flex items-center gap-1">
+        {label}
+        <ControlHint text={hint} />
+      </span>
+      <div role="group" aria-label={label} className="flex items-center gap-1 rounded-md border bg-card px-1 py-1">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label={`Bajar ${label}`}
+          title="Baja un semitono."
+          onClick={() => onStep(-1)}
+        >
+          <Minus />
+        </Button>
+        <span className="min-w-16 text-center text-sm font-semibold" aria-live="polite">
+          {value.trim() || '—'}
+        </span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label={`Subir ${label}`}
+          title="Sube un semitono."
+          onClick={() => onStep(1)}
+        >
+          <Plus />
+        </Button>
+      </div>
+    </div>
   )
 }
 
