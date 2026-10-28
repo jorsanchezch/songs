@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowLeft, Loader2, Shield } from 'lucide-react'
+import { ArrowLeft, ExternalLink, Loader2, Shield } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { UserBadge } from '@/components/UserBadge'
@@ -58,6 +58,34 @@ const INVENTORY: { key: keyof AdminOverview['inventory']; label: string }[] = [
   { key: 'createdSongs', label: 'Canciones propias' },
   { key: 'setlists', label: 'Listas' },
   { key: 'serviceDays', label: 'Días de servicio' },
+]
+
+const INFRA: { href: string; label: string; detail: string }[] = [
+  {
+    href: 'https://songbook.jorsanchezch.workers.dev',
+    label: 'API del Worker',
+    detail: 'Cloudflare Worker que atiende la API.',
+  },
+  {
+    href: 'https://dash.cloudflare.com/?to=/:account/workers/d1/databases/a3f3f9f3-33d7-4f07-a94f-cd44a64f483b',
+    label: 'Base D1 songbook',
+    detail: 'Base de datos D1 songbook en el panel de Cloudflare.',
+  },
+  {
+    href: 'https://github.com/jorsanchezch/songs',
+    label: 'Repositorio',
+    detail: 'Código en GitHub.',
+  },
+  {
+    href: 'https://jorsanchezch.github.io/songs/',
+    label: 'Sitio publicado',
+    detail: 'GitHub Pages.',
+  },
+  {
+    href: 'https://github.com/jorsanchezch/songs/actions/workflows/deploy-pages.yml',
+    label: 'Despliegue de Pages',
+    detail: 'Workflow de GitHub Actions que publica el sitio.',
+  },
 ]
 
 export function AdminView() {
@@ -248,8 +276,36 @@ function AdminPanel() {
             </section>
           </>
         )}
+        {!loading && <InfraLinks />}
       </main>
     </div>
+  )
+}
+
+function InfraLinks() {
+  return (
+    <section className="flex flex-col gap-3">
+      <h2 className="font-semibold">Infraestructura</h2>
+      <p className="text-sm text-muted-foreground">
+        Enlaces a lo que usa esta aplicación. Cada uno se abre en otra pestaña.
+      </p>
+      <ul className="flex flex-col gap-2">
+        {INFRA.map((item) => (
+          <li key={item.label} className="rounded-lg border bg-card px-3 py-2">
+            <a
+              href={item.href}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 font-medium text-primary underline-offset-2 hover:underline"
+            >
+              {item.label}
+              <ExternalLink className="size-3.5" aria-hidden="true" />
+            </a>
+            <p className="text-sm text-muted-foreground">{item.detail}</p>
+          </li>
+        ))}
+      </ul>
+    </section>
   )
 }
 
