@@ -39,7 +39,7 @@ Me has lavado oh Señor
    [E]     [D]      [Bm7]     [C#m7]    [E]
 Conozco hoy Tu abrazo y tu perdón
 
-## Estribillo {#estribillo}
+## Coro {#coro}
 
  [A]            [E/G#]  [Bm7]      [A/C#]     [D]
 Digno es el Señor, en Su trono está
@@ -61,7 +61,7 @@ Digno es el Señor
 
 ## Estrofa {#estrofa-2 same=estrofa}
 
-## Estribillo {#estribillo-2 same=estribillo}
+## Coro {#coro-2 same=coro}
 
 ## Tag {#tag}
 

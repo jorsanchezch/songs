@@ -27,7 +27,7 @@ I raise a hallelujah, my weapon is a melody
 [A]                      [D/F#]
 I raise a hallelujah, Heaven comes to fight for me
 
-## Estribillo {#estribillo}
+## Coro {#coro}
 
 [D]                     [A]
 I'm gonna sing in the middle of the storm
@@ -58,7 +58,7 @@ I raise a hallelujah, in the middle of the mystery
 [A]                      [D/F#]
 I raise a hallelujah, fear you lost your hold on me
 
-## Estribillo {#estribillo-2 same=estribillo}
+## Coro {#coro-2 same=coro}
 
 ## Canal {#canal}
 
@@ -95,7 +95,7 @@ Sing a little louder (Heaven comes to fight for me)
 [E]
 Sing a little louder
 
-## Estribillo {#estribillo-3 same=estribillo repeat=2}
+## Coro {#coro-3 same=coro repeat=2}
 
 ## Tag {#tag}
 

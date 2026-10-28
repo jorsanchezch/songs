@@ -30,7 +30,7 @@ Más tu perdón, me liberó
               [G]                  [D2]
 Tu voz me habló y a la muerte venció
 
-## Estribillo {#estribillo}
+## Coro {#coro}
           [G]                    [D2]
 Glorioso día, tu sangre me rescató
 
@@ -59,7 +59,7 @@ Tu voz me habló
                    [D2]
 Y a la muerte venció
 
-## Estribillo {#estribillo-2}
+## Coro {#coro-2}
           [G]                    [D2]
 Glorioso día, tu sangre me rescató
 
@@ -93,7 +93,7 @@ Porque tú voz me habló
                    [D2]
 Y a la muerte venció
 
-## Estribillo {#estribillo-3}
+## Coro {#coro-3}
           [G]                    [D2]
 Glorioso día, tu sangre me rescató
 

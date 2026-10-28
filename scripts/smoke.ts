@@ -100,10 +100,10 @@ for (const name of ['raise-a-hallelujah', 'living-hope', 'digno-es-el-senor']) {
 }
 const blocks = blocksFor(markdown, markdown.versions[0]?.flow ?? null)
 assert(blocks.some((block) => block.repeat >= 2) || markdown.sections.some((section) => section.sameAs), 'same section')
-const only = blocksFor(markdown, ['estribillo-2'])
+const only = blocksFor(markdown, ['coro-2'])
 assert(only[0] && only[0].section.lines.length > 0, 'same= copies the chorus')
 assert(only[0].repeat === 2, 'repeat badge')
-const collapsed = blocksFor(markdown, ['estribillo', 'estribillo-2'])
+const collapsed = blocksFor(markdown, ['coro', 'coro-2'])
 assert(collapsed.length === 1, 'adjacent chorus collapses')
 assert(collapsed[0]?.repeat === 3, 'repeat counts add')
 
@@ -129,7 +129,7 @@ const cifra = `<!doctype html><title>Bienvenido Espíritu Santo - Miel San Marco
 <b>C</b>    <b>F</b>
 <b>G</b>
 
-[Estribillo]
+[Coro]
 <b>C</b>Bienvenido <b>G</b>espíritu
 E|---0---|
 </pre>
@@ -144,7 +144,7 @@ const intro = imported.sections.find((section) => section.label === 'Intro')
 assert(intro?.lines[0]?.chords[0]?.raw === 'C', 'intro chord C')
 assert(intro?.lines[0]?.chords[1]?.column === 5, `F column ${intro?.lines[0]?.chords[1]?.column}`)
 assert(intro?.lines[0]?.lyric == null, 'intro chord line stays instrumental')
-const chorus = imported.sections.find((section) => section.label === 'Estribillo')
+const chorus = imported.sections.find((section) => section.label === 'Coro')
 assert(chorus?.lines[0]?.lyric?.includes('Bienvenido'), 'inline chords leave the lyric')
 assert(chorus?.lines[0]?.chords[1]?.raw === 'G', 'inline G')
 assert(
@@ -217,7 +217,7 @@ assert(fromMd.title === imported.title, 'markdown keeps the title')
 assert(fromMd.artist === imported.artist, 'markdown keeps the artist')
 assert(fromMd.key === 'C', 'markdown keeps the key')
 assert(fromMd.sections.find((section) => section.label === 'Intro')?.lines[0]?.chords[1]?.column === 5, 'markdown keeps chord columns')
-assert(fromMd.sections.find((section) => section.label === 'Estribillo')?.lines[0]?.lyric?.includes('Bienvenido'), 'markdown keeps the lyric')
+assert(fromMd.sections.find((section) => section.label === 'Coro')?.lines[0]?.lyric?.includes('Bienvenido'), 'markdown keeps the lyric')
 
 const names = await readdir(charts)
 const files = names.filter((name) => /\.(cho|chopro)$/i.test(name))

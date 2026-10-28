@@ -65,7 +65,7 @@ Beautiful Savior, I'm Yours forever
           [G]          [A]       [D]
 Jesus Christ, my living hope
 
-## Estribillo {#estribillo}
+## Coro {#coro}
 
                     [G]   [D]               [A]              [Bm]
 Hallelujah, praise the One who set me free
@@ -79,7 +79,7 @@ You have broken every chain, there's salvation in Your name
          [A]      [G]          [D]   [A]   [D]
 Jesus Christ, my living hope
 
-## Estribillo {#estribillo-2 same=estribillo}
+## Coro {#coro-2 same=coro}
 
 ## Estrofa {#estrofa-3}
 
@@ -110,7 +110,7 @@ Declared the grave has no claim on me
            [G]           [A]      [D]
 Jesus, Yours is the victory
 
-## Estribillo {#estribillo-3 same=estribillo repeat=2}
+## Coro {#coro-3 same=coro repeat=2}
 
 ## Tag {#tag}
 

@@ -24,7 +24,7 @@ En Nosotros
 {comment: Repeat primera parte 2x}
 {end_of_verse}
 
-{start_of_chorus: Estribillo}
+{start_of_chorus: Coro}
 [C]
 Vienes y haces que mi
 [C/E]  [F]
@@ -35,7 +35,7 @@ Cuando llenas el lugar
 Tú estás y te estás moviendo
 [F]
 Yo estoy y me estoy llenando
-{comment: Repeat estribillo 2x}
+{comment: Repeat coro 2x}
 {end_of_chorus}
 
 {start_of_verse: Segunda Parte}
@@ -63,7 +63,7 @@ Cuando llenas el lugar
 Tú estás y te estás moviendo
 [F]
 Yo estoy y me estoy llenando
-{comment: Repeat estribillo 2x}
+{comment: Repeat coro 2x}
 {end_of_chorus}
 
 {start_of_bridge: Puente}
@@ -87,7 +87,7 @@ Cuando llenas el lugar
 Tú estás y te estás moviendo
 [F]
 Yo estoy y me estoy llenando
-{comment: Repeat estribillo 2x}
+{comment: Repeat coro 2x}
 {end_of_chorus}
 
 {start_of_bridge}

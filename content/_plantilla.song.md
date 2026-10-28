@@ -21,19 +21,19 @@ Primera línea
 [D]          [Em]
 Segunda línea aquí
 
-## Estribillo {#estribillo}
+## Coro {#coro}
 
 [C]{how: arpegio}
-Texto del estribillo
+Texto del coro
 
-## Estribillo {#estribillo-2 same=estribillo repeat=2}
+## Coro {#coro-2 same=coro repeat=2}
 
 ## Versions
 
 ### servicio
-- flow: intro, estrofa, estribillo
+- flow: intro, estrofa, coro
 - notes: cue
 
 ### ensayo
-- flow: intro, estrofa, estribillo, estribillo-2
+- flow: intro, estrofa, coro, coro-2
 - notes: cue, how, arrange
