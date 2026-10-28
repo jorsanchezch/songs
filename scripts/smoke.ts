@@ -2,7 +2,7 @@ import { readFile, readdir } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { formatChord, transposeChordSymbol, transposeKeyName } from '../src/lib/chords.ts'
-import { applyEditingKey, applyOriginalKey, normalizeKeyText } from '../src/lib/draftSong.ts'
+import { applyEditingKey, applyOriginalKey, foldComposerIntoArtist, normalizeKeyText } from '../src/lib/draftSong.ts'
 import { keyChoices } from '../src/lib/theory.ts'
 import { blocksFor, headerChips, headerChipText, partKind } from '../src/lib/display.ts'
 import { diagramFor, shapesFor } from '../src/lib/guitar.ts'
@@ -91,6 +91,13 @@ assert(songToMarkdown(markedKey).includes('original_key: G'), 'writes original_k
 const roundKey = parseChart(songToMarkdown(markedKey), 'prueba.song.md')
 assert(roundKey.key === 'C' && roundKey.originalKey === 'G', 'reads original_key')
 assert(!songToMarkdown(applyOriginalKey(markedKey, 'C')).includes('original_key'), 'drops original_key when it matches')
+const prefixCredit = foldComposerIntoArtist({ ...keySample, artist: 'Marcela Gándara', composer: 'Marcela Gándara / Vino Nuevo' })
+assert(prefixCredit.artist === 'Marcela Gándara / Vino Nuevo' && prefixCredit.composer === '', 'composer that extends the artist replaces it')
+const joinedCredit = foldComposerIntoArtist({ ...keySample, artist: 'Marcos Brunet', composer: 'Abbie Gamboa' })
+assert(joinedCredit.artist === 'Marcos Brunet · Abbie Gamboa' && joinedCredit.composer === '', 'distinct composer joins the artist')
+const sameCredit = foldComposerIntoArtist({ ...keySample, artist: 'Passion', composer: 'Passion' })
+assert(sameCredit.artist === 'Passion' && sameCredit.composer === '', 'same composer does not repeat')
+assert(!songToMarkdown(joinedCredit).includes('composer:'), 'folded credit writes only artist')
 
 const santo = parseChart(
   await readFile(path.join(charts, 'Santo Por Siempre.chopro'), 'utf8'),

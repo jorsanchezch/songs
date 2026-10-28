@@ -18,7 +18,7 @@ export function OptionDots({ count, index }: { count: number; index: number }) {
 }
 
 /** Small “i”. Hover uses the native title; a tap opens the same text. */
-export function ControlHint({ text }: { text: string }) {
+export function ControlHint({ text, wide = false }: { text: string; wide?: boolean }) {
   const buttonRef = useRef<HTMLButtonElement>(null)
   const [open, setOpen] = useState(false)
   const [place, setPlace] = useState<{ top: number; left: number } | null>(null)
@@ -65,7 +65,10 @@ export function ControlHint({ text }: { text: string }) {
         <span
           role="tooltip"
           style={{ top: place.top, left: place.left }}
-          className="fixed z-50 w-56 rounded-md border bg-popover px-2 py-1.5 text-left font-sans text-xs font-normal tracking-normal text-popover-foreground normal-case shadow-md"
+          className={cn(
+            'fixed z-50 rounded-md border bg-popover px-2 py-1.5 text-left font-sans text-xs font-normal tracking-normal text-popover-foreground normal-case shadow-md',
+            wide ? 'w-80 max-w-[calc(100vw-1rem)]' : 'w-56',
+          )}
         >
           {text}
         </span>

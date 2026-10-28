@@ -61,6 +61,33 @@ export function usedSectionIds(song: Song): Set<string> {
   return new Set(song.sections.map((section) => section.id))
 }
 
+/** One credit line. A separate composer is folded into the artist, then dropped. */
+export function foldComposerIntoArtist(song: Song): Song {
+  const artist = song.artist.trim()
+  const composer = song.composer.trim()
+  if (!composer) return song.composer === '' ? song : { ...song, composer: '' }
+  const merged = mergeCredit(artist, composer)
+  if (merged === song.artist && song.composer === '') return song
+  return { ...song, artist: merged, composer: '' }
+}
+
+function mergeCredit(artist: string, composer: string): string {
+  if (!artist) return composer
+  if (artist.localeCompare(composer, 'es', { sensitivity: 'accent' }) === 0) return artist
+  if (extendsCredit(artist, composer)) return composer
+  if (extendsCredit(composer, artist)) return artist
+  return `${artist} · ${composer}`
+}
+
+/** True when `longer` repeats `shorter` and then adds more names. */
+function extendsCredit(shorter: string, longer: string): boolean {
+  const rest = longer.slice(shorter.length)
+  if (rest === longer || longer.slice(0, shorter.length).localeCompare(shorter, 'es', { sensitivity: 'accent' }) !== 0) {
+    return false
+  }
+  return /^[\s·/,]/.test(rest) || /^\s+y\s/i.test(rest)
+}
+
 /** Keep `C#` and `Cm` as written. `parseKey` needs the lowercase `m`. */
 export function normalizeKeyText(raw: string): string {
   const trimmed = raw.trim()
