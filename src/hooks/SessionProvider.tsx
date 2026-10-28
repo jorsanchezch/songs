@@ -52,6 +52,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       try {
         const next = await bootSession()
         if (cancel) return
+        if (!next) {
+          setSignedOut(true)
+          return
+        }
         await apply(next)
       } catch (reason) {
         if (cancel) return

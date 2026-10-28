@@ -46,16 +46,15 @@ export type SongList = {
 
 type ShareBody = { shared?: boolean; userId?: string; include?: boolean }
 
-export async function bootSession(): Promise<Account> {
+export async function bootSession(): Promise<Account | null> {
   const token = localStorage.getItem(SESSION_KEY)
-  if (token) {
-    try {
-      return await me()
-    } catch {
-      localStorage.removeItem(SESSION_KEY)
-    }
+  if (!token) return null
+  try {
+    return await me()
+  } catch {
+    localStorage.removeItem(SESSION_KEY)
+    return null
   }
-  return signIn('Jorge Sanchez')
 }
 
 export async function me(): Promise<Account> {
