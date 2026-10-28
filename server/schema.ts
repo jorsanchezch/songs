@@ -76,6 +76,11 @@ CREATE TABLE IF NOT EXISTS user_prefs (
   chord_shapes TEXT NOT NULL DEFAULT '{}'
 );
 
+CREATE TABLE IF NOT EXISTS deleted_songs (
+  id TEXT PRIMARY KEY,
+  deleted_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_songs_owner ON songs(owner_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 `

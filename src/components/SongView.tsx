@@ -622,16 +622,12 @@ export function SongView() {
               <Button
                 variant="outline"
                 onClick={() => {
-                  const label =
-                    song.origin === 'catalog'
-                      ? '¿Ocultar esta canción del catálogo?'
-                      : '¿Eliminar esta canción?'
-                  if (!window.confirm(label)) return
+                  if (!window.confirm('¿Eliminar esta canción? No vuelve al recargar.')) return
                   void removeSong(song).then(() => navigate(listaId ? `/listas/${encodeURIComponent(listaId)}` : '/'))
                 }}
               >
                 <Trash2 />
-                {song.origin === 'catalog' ? 'Ocultar canción' : 'Eliminar'}
+                Eliminar
               </Button>
             )}
             <Button

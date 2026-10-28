@@ -9,6 +9,7 @@ import { shareLyrics } from '../server/lyrics.ts'
 import { nextServiceDate, planEvergreenAdd, serviceListName } from '../src/lib/setlists.ts'
 import { can, currentUser, roleLabel } from '../src/lib/access.ts'
 import { parseChart } from '../src/lib/parseChart.ts'
+import { sectionDegrees, sectionProgressions } from '../src/lib/sectionProgression.ts'
 import { diatonicChords, keyName, parseStudyKey, pianoVoicings, signature } from '../src/lib/theory.ts'
 import { distinctMarks, songIconIndex, songMarkTone, SONG_ICON_SHAPES, SONG_MARK_HUES } from '../src/lib/songMark.ts'
 
@@ -325,5 +326,45 @@ assert(signature({ pc: 5, minor: false }) === '1♭' && signature({ pc: 4, minor
 assert(keyName(parseStudyKey('Bbm')!) === 'Bbm', 'study key round trip')
 assert(pianoVoicings(11, [0, 4, 7, 11]).every((notes) => notes[0]! < 12 && notes.at(-1)! < 24), 'piano voicings fit two octaves')
 assert(shapesFor('Bm7b5')[0]?.frets.join(',') === '-1,2,3,2,3,-1', 'half-diminished shape')
+
+const dame = parseChart(
+  await readFile(path.join(root, 'public/songs/authored/dame-a-cristo.song.md'), 'utf8'),
+  'authored/dame-a-cristo.song.md',
+)
+const dameVerse = dame.sections.find((section) => section.label === 'Verso')
+assert(dameVerse, 'dame verse')
+const dameDegrees = sectionDegrees(
+  dame.key,
+  dameVerse!.lines.flatMap((line) => line.chords.map((chord) => chord.raw)),
+)
+assert(dameDegrees.join('-') === '1-4-2m-1-4', `dame verse degrees ${dameDegrees.join('-')}`)
+const mixed = sectionProgressions([
+  {
+    id: 'uno',
+    title: 'Uno',
+    key: 'C',
+    origin: 'catalog',
+    sections: [{ label: 'Verso', lines: [{ chords: [{ raw: 'C' }, { raw: 'G' }, { raw: 'Am' }, { raw: 'Dm' }] }] }],
+  },
+  {
+    id: 'dos',
+    title: 'Dos',
+    key: 'C',
+    origin: 'catalog',
+    sections: [{ label: 'Coro', lines: [{ chords: [{ raw: 'C' }, { raw: 'G' }, { raw: 'Am' }, { raw: 'Dm' }] }] }],
+  },
+  {
+    id: 'tres',
+    title: 'Tres',
+    key: 'G',
+    origin: 'catalog',
+    sections: [{ label: 'Verso', lines: [{ chords: [{ raw: 'G' }, { raw: 'D' }, { raw: 'Em' }, { raw: 'Am' }] }] }],
+  },
+])
+const pattern = mixed.find((item) => item.degrees === '1-5-6m-2m')
+assert(pattern, '1-5-6m-2m comes from the stored sections')
+assert(pattern.reference.key === 'C' && (pattern.reference.section === 'Verso' || pattern.reference.section === 'Coro'), 'the example is one section in that key')
+assert(pattern.alternatives.length === 1 && pattern.alternatives[0]?.key === 'G' && pattern.alternatives[0]?.title === 'Tres', 'another key is another way to play it')
+assert(pattern.alternatives.every((item) => item.key !== 'C'), 'another song in the same key is not an example')
 
 console.log(`Parsed ${files.length} charts`)

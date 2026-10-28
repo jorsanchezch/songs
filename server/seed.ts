@@ -93,6 +93,8 @@ export async function seedCatalog(sql: Sql, files: CatalogFile[]): Promise<numbe
   const now = new Date().toISOString()
   let added = 0
   for (const file of files) {
+    const removed = await sql.get(`SELECT id FROM deleted_songs WHERE id = ?`, [file.id])
+    if (removed) continue
     const meta = chartMeta(file.sourceText, file.id)
     const inserted = await insertIgnore(sql, `INSERT OR IGNORE INTO songs (
       id, title, artist, composer, key_name, source, lyrics_text, origin, catalog_id,
@@ -157,14 +159,14 @@ export function renderSeedSql(files: CatalogFile[]): string {
     lines.push(`INSERT OR IGNORE INTO songs (
       id, title, artist, composer, key_name, source, lyrics_text, origin, catalog_id,
       owner_id, shared, hidden, catalog_source, created_at, updated_at
-    ) VALUES (
+    ) SELECT
       ${quote(file.id)}, ${quote(meta.title)}, ${quote(meta.artist)}, ${quote(meta.composer)},
       ${quote(meta.key)}, ${quote(meta.source)}, ${quote(meta.lyrics)}, 'catalog', NULL,
       ${quote(OWNER_ID)}, 0, 0, ${quote(file.sourceText)}, ${quote(now)}, ${quote(now)}
-    );`)
+    WHERE NOT EXISTS (SELECT 1 FROM deleted_songs WHERE id = ${quote(file.id)});`)
     for (const instrument of INSTRUMENTS) {
       lines.push(
-        `INSERT OR IGNORE INTO instrument_parts (song_id, instrument, source_text) VALUES (${quote(file.id)}, ${quote(instrument)}, ${quote(file.sourceText)});`,
+        `INSERT OR IGNORE INTO instrument_parts (song_id, instrument, source_text) SELECT ${quote(file.id)}, ${quote(instrument)}, ${quote(file.sourceText)} WHERE NOT EXISTS (SELECT 1 FROM deleted_songs WHERE id = ${quote(file.id)});`,
       )
     }
   }

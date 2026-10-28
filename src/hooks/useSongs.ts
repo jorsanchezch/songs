@@ -283,7 +283,6 @@ export function useSongs() {
       const catalog = entries.find((item) => item.id === song.catalogId)
       if (catalog) catalog.hasCopy = false
     }
-    if (song.origin === 'catalog') hiddenCount += 1
     emit()
   }
 

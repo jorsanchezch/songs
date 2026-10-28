@@ -283,11 +283,16 @@ async function removeSong(sql: Sql, user: User, id: string): Promise<Response> {
   const row = await oneSong(sql, id, 'guitar')
   if (!row || !canSee(user, row)) return json({ error: 'No está esta canción.' }, 404)
   if (!canRemove(user, row)) return json({ error: 'No puedes borrar esta canción.' }, 403)
-  if (row.origin === 'catalog') {
-    await sql.run(`UPDATE songs SET hidden = 1, updated_at = ? WHERE id = ?`, [new Date().toISOString(), id])
-    return json({ ok: true, hidden: true })
-  }
-  await sql.run(`DELETE FROM songs WHERE id = ?`, [id])
+  const now = new Date().toISOString()
+  await sql.transaction(async (tx) => {
+    await tx.run(
+      `INSERT INTO deleted_songs (id, deleted_at) VALUES (?, ?)
+       ON CONFLICT(id) DO UPDATE SET deleted_at = excluded.deleted_at`,
+      [id, now],
+    )
+    await tx.run(`DELETE FROM setlist_items WHERE song_id = ?`, [id])
+    await tx.run(`DELETE FROM songs WHERE id = ?`, [id])
+  })
   return json({ ok: true, hidden: false })
 }
 
@@ -518,6 +523,8 @@ async function importLocal(sql: Sql, user: User, request: Request): Promise<Resp
 }
 
 async function writeCatalogChart(sql: Sql, ownerId: string, id: string, sourceText: string, now: string): Promise<void> {
+  const removed = await sql.get(`SELECT id FROM deleted_songs WHERE id = ?`, [id])
+  if (removed) return
   const meta = chartMeta(sourceText, id)
   const existing = await sql.get<{ origin: Origin }>(`SELECT origin FROM songs WHERE id = ?`, [id])
   if (!existing) {

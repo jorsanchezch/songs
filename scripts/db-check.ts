@@ -200,8 +200,43 @@ assert(keptText.includes('[Xy9]') && !keptText.includes('viejo'), 'the stale sav
 await checkImport(files)
 await checkSeedLists(files)
 await checkPasswords(files)
+await checkDeleteSurvivesSeed(files)
 
 console.log(`SQL ok: ${songs.length} catalog songs, copies and instruments checked`)
+
+async function checkDeleteSurvivesSeed(files: { id: string; sourceText: string }[]) {
+  const db = openSqlite(':memory:')
+  await seedCatalog(db, files)
+  const boss = await signIn(db, 'Jorge Sanchez')
+  const reader = await signIn(db, 'Lector Borrar')
+  const sample = files[0]
+  assert(sample, 'a catalog file to delete')
+  const denied = await call(db, reader.token, 'DELETE', `/api/songs/${encodeURIComponent(sample.id)}`)
+  assert(denied.status === 403, 'a reader cannot delete a catalog song')
+  assert(await db.get(`SELECT id FROM songs WHERE id = ?`, [sample.id]), 'the song stays after a refused delete')
+  const listed = await call(db, boss.token, 'PUT', '/api/setlists', {
+    days: [0],
+    setlists: [{ id: 'lista-borrar', name: 'Borrar', items: [{ songId: sample.id, semitones: 0 }] }],
+  })
+  assert(listed.status === 200, 'the song can sit on a list')
+  const removed = await call(db, boss.token, 'DELETE', `/api/songs/${encodeURIComponent(sample.id)}`)
+  assert(removed.status === 200 && removed.data.hidden === false, `delete removes the row ${JSON.stringify(removed.data)}`)
+  assert(!(await db.get(`SELECT id FROM songs WHERE id = ?`, [sample.id])), 'the catalog row is gone')
+  assert(await db.get(`SELECT id FROM deleted_songs WHERE id = ?`, [sample.id]), 'the id is remembered')
+  const item = await db.get<{ n: number }>(`SELECT COUNT(*) AS n FROM setlist_items WHERE song_id = ?`, [sample.id])
+  assert(Number(item?.n) === 0, 'a deleted song leaves the lists')
+  const parts = await db.get<{ n: number }>(`SELECT COUNT(*) AS n FROM instrument_parts WHERE song_id = ?`, [sample.id])
+  assert(Number(parts?.n) === 0, 'parts go with the song')
+  await seedCatalog(db, files)
+  assert(!(await db.get(`SELECT id FROM songs WHERE id = ?`, [sample.id])), 'a reseed does not restore the song')
+  const posted = await call(db, boss.token, 'POST', '/api/catalog', {
+    songs: [{ id: sample.id, sourceText: sample.sourceText }],
+  })
+  assert(posted.status === 200, 'catalog post still answers')
+  assert(!(await db.get(`SELECT id FROM songs WHERE id = ?`, [sample.id])), 'a catalog file does not restore the song')
+  const missing = await call(db, boss.token, 'GET', `/api/songs/${encodeURIComponent(sample.id)}?instrument=guitar`)
+  assert(missing.status === 404, 'the deleted song stays missing')
+}
 
 async function checkImport(files: { id: string; sourceText: string }[]) {
   const db = openSqlite(':memory:')

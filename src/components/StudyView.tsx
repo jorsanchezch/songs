@@ -25,7 +25,6 @@ import {
   noteLabel,
   parseStudyKey,
   pianoVoicings,
-  progressionsFor,
   QUALITIES,
   qualityById,
   scaleById,
@@ -34,6 +33,7 @@ import {
   type StudyChord,
   type StudyKey,
 } from '@/lib/theory'
+import { sectionProgressions, spellProgression } from '@/lib/sectionProgression'
 import { cn } from '@/lib/utils'
 
 type StudyInstrument = 'guitarra' | 'piano'
@@ -179,13 +179,7 @@ export function StudyView() {
           />
         )}
         {tab === 'progresiones' && (
-          <ProgressionsTab
-            instrument={instrument}
-            studyKey={studyKey}
-            sevenths={sevenths}
-            onSevenths={(on) => setParam('siete', on ? '1' : null)}
-            labels={labels}
-          />
+          <ProgressionsTab instrument={instrument} studyKey={studyKey} labels={labels} />
         )}
         {tab === 'escalas' && (
           <ScalesTab
@@ -580,39 +574,56 @@ function KeyTab({
 function ProgressionsTab({
   instrument,
   studyKey,
-  sevenths,
-  onSevenths,
   labels,
 }: {
   instrument: StudyInstrument
   studyKey: StudyKey
-  sevenths: boolean
-  onSevenths: (on: boolean) => void
   labels: Labels
 }) {
-  const chords = diatonicChords(studyKey, sevenths)
+  const { state } = useSongs()
+  const songs = state.status === 'ready' ? state.songs : []
+  const progressions = useMemo(() => sectionProgressions(songs), [songs])
   const flats = keyFlats(studyKey)
   const [selected, setSelected] = useState<{ row: number; index: number } | null>(null)
-  const progressions = progressionsFor(studyKey)
-  const active = selected ? chords[progressions[selected.row]?.steps[selected.index] ?? -1] : undefined
+  const activeRow = selected ? progressions[selected.row] : undefined
+  const active = activeRow ? chordsFor(activeRow.steps, studyKey)[selected?.index ?? -1] : undefined
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <h2 className="font-semibold">Progresiones en {keyName(studyKey)}</h2>
-        <SeventhsToggle value={sevenths} onChange={onSevenths} />
+      <div>
+        <h2 className="font-semibold">Progresiones de cada parte</h2>
+        <p className="text-sm text-muted-foreground">
+          Los grados salen de una parte de una canción guardada. Abajo, la misma progresión en otras tonalidades.
+        </p>
       </div>
+      {state.status === 'loading' && <p className="text-sm text-muted-foreground">Cargando canciones…</p>}
+      {state.status === 'ready' && progressions.length === 0 && (
+        <p className="text-sm text-muted-foreground">Ninguna parte tiene una progresión todavía.</p>
+      )}
       {progressions.map((progression, row) => {
-        const steps = progression.steps.flatMap((step) => {
-          const chord = chords[step]
-          return chord ? [chord] : []
-        })
+        const steps = chordsFor(progression.steps, studyKey)
+        const played =
+          progression.alternatives.length > 0
+            ? progression.alternatives
+            : otherKeys(progression.reference.key).map((key) => ({
+                key: keyName(key),
+                chords: spellProgression(progression.steps, key),
+                songId: '',
+                title: '',
+                section: '',
+              }))
         return (
-          <section key={progression.label} className="rounded-xl border bg-card/70 p-3">
+          <section key={progression.degrees} className="rounded-xl border bg-card/70 p-3">
             <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1">
-              <h3 className="font-semibold">{progression.label}</h3>
-              <span className="text-sm text-muted-foreground">{steps.map((chord) => chord.degree).join(' – ')}</span>
-              <span className="text-sm text-chart-chord">{steps.map((chord) => chord.name).join(' – ')}</span>
+              <h3 className="font-semibold tracking-wide">{progression.degrees}</h3>
+              <span className="text-sm text-muted-foreground">
+                Ejemplo:{' '}
+                <Link to={`/c/${encodeURIComponent(progression.reference.songId)}`} className="font-medium text-primary hover:underline">
+                  {progression.reference.title}
+                </Link>
+                {' · '}
+                {progression.reference.section}
+              </span>
               <Button
                 size="sm"
                 variant="outline"
@@ -628,12 +639,13 @@ function ProgressionsTab({
                 Escuchar
               </Button>
             </div>
+            <p className="mb-2 text-sm text-chart-chord">En {keyName(studyKey)}: {spellProgression(progression.steps, studyKey)}</p>
             <div className="flex gap-2 overflow-x-auto pb-1">
               {steps.map((chord, index) => (
                 <ChordCard
                   key={index}
                   instrument={instrument}
-                  chord={{ ...chord, role: undefined }}
+                  chord={chord}
                   selected={selected?.row === row && selected.index === index}
                   onSelect={() =>
                     setSelected(selected?.row === row && selected.index === index ? null : { row, index })
@@ -641,12 +653,61 @@ function ProgressionsTab({
                 />
               ))}
             </div>
+            {played.length > 0 && (
+              <div className="mt-3 flex flex-col gap-1 text-sm">
+                <p className="text-muted-foreground">También se toca</p>
+                {played.map((item) => (
+                  <p key={`${item.key}-${item.songId}`}>
+                    <span className="font-medium">En {item.key}:</span>{' '}
+                    <span className="text-chart-chord">{item.chords}</span>
+                    {item.songId && (
+                      <>
+                        {' · '}
+                        <Link to={`/c/${encodeURIComponent(item.songId)}`} className="text-primary hover:underline">
+                          {item.title}
+                        </Link>
+                        {' · '}
+                        {item.section}
+                      </>
+                    )}
+                  </p>
+                ))}
+              </div>
+            )}
           </section>
         )
       })}
       {active && <ChordDetail instrument={instrument} chord={active} labels={labels} flats={flats} />}
     </div>
   )
+}
+
+function chordsFor(steps: string[], key: StudyKey): StudyChord[] {
+  return steps.map((step) => {
+    const match = step.match(/^(1|b2|2|b3|3|4|b5|5|b6|6|b7|7)(m|dim|aug)?$/)
+    const offset = { '1': 0, b2: 1, '2': 2, b3: 3, '3': 4, '4': 5, b5: 6, '5': 7, b6: 8, '6': 9, b7: 10, '7': 11 }[match?.[1] ?? '1'] ?? 0
+    const quality = match?.[2] ?? ''
+    return {
+      root: mod12(key.pc + offset),
+      quality,
+      name: spellStepName(step, key),
+      degree: step,
+    }
+  })
+}
+
+function spellStepName(step: string, key: StudyKey): string {
+  return spellProgression([step], key)
+}
+
+function otherKeys(referenceKey: string): StudyKey[] {
+  const parsed = parseKey(referenceKey)
+  const base = parsed.valid ? parsed.pc : 0
+  const minor = parsed.valid ? parsed.minor : false
+  return [
+    { pc: mod12(base + 7), minor },
+    { pc: mod12(base + 5), minor },
+  ]
 }
 
 function ScalesTab({
