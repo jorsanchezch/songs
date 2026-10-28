@@ -1,21 +1,24 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   ArrowLeft,
+  BookOpen,
   ChevronLeft,
   ChevronRight,
   ExternalLink,
   Eye,
+  Guitar,
   Info,
   Loader2,
   Minus,
   Moon,
   Pencil,
   Plus,
+  SlidersHorizontal,
   Sun,
   Trash2,
 } from 'lucide-react'
-import { ChartRow, NoteRow } from '@/components/ChartLines'
+import { ChartRow, NoteRow, placeChords } from '@/components/ChartLines'
 import { markLetters, SongMark, useSongMarks } from '@/components/SongMark'
 import { InstrumentCharts } from '@/components/InstrumentCharts'
 import { InstrumentSwitch } from '@/components/InstrumentSwitch'
@@ -24,7 +27,7 @@ import { SpellingToggle } from '@/components/SpellingToggle'
 import { Button } from '@/components/ui/button'
 import { UserBadge } from '@/components/UserBadge'
 import { formatChord, transposeKeyName } from '@/lib/chords'
-import { blocksFor, chordSequence, partKind, type PartKind } from '@/lib/display'
+import { blocksFor, chordSequence, displayLyric, partKind, type DisplayBlock, type PartKind } from '@/lib/display'
 import { instrumentLabel, type InstrumentId } from '@/lib/instruments'
 import { putPrefs } from '@/lib/api'
 import { loadSettings, saveSettings, type ViewSettings } from '@/lib/settings'
@@ -51,9 +54,21 @@ export function SongView() {
   const [versionId, setVersionId] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<string[]>([])
   const [headerOpen, setHeaderOpen] = useState(false)
-  const pendingScroll = useRef<string | null>(null)
+  const [announce, setAnnounce] = useState('')
+  const [headerHeight, setHeaderHeight] = useState(0)
+  const [chartWidth, setChartWidth] = useState(0)
+  const [chPerPx, setChPerPx] = useState(0.6)
+  const headerRef = useRef<HTMLElement>(null)
+  const chartRef = useRef<HTMLDivElement>(null)
+  const probeRef = useRef<HTMLSpanElement>(null)
+  const chipsRef = useRef<HTMLDivElement>(null)
+  const footerRef = useRef<HTMLElement>(null)
+  const [nearEnd, setNearEnd] = useState(false)
+  // Smooth scrolling passes through other parts. The scroll spy waits until it lands.
+  const spyPausedUntil = useRef(0)
 
   const instrument = settings.instrument
+  const live = settings.mode === 'live'
   const marks = useSongMarks(state.status === 'ready' ? state.songs : [])
 
   useEffect(() => {
@@ -134,16 +149,130 @@ export function SongView() {
   }
 
   const go = (id: string) => {
-    pendingScroll.current = id
+    const index = blocks.findIndex((block) => block.id === id)
+    const block = blocks[index]
+    if (!block) return
     setCurrent(id)
+    setAnnounce(`${block.label}${block.repeat > 1 ? ` por ${block.repeat}` : ''}, parte ${index + 1} de ${blocks.length}`)
+    const smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    spyPausedUntil.current = Date.now() + (smooth ? 900 : 100)
+    document.getElementById(`sec-${id}`)?.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', block: 'start' })
   }
 
+  // The sticky header changes height with the controls. Parts land just under it.
+  useLayoutEffect(() => {
+    const header = headerRef.current
+    if (!header) return
+    const observer = new ResizeObserver(() => setHeaderHeight(header.offsetHeight))
+    observer.observe(header)
+    return () => observer.disconnect()
+  })
+
+  // Scrolling by hand moves the current part too, so the footer never lies.
   useEffect(() => {
-    const id = pendingScroll.current
-    if (!id) return
-    pendingScroll.current = null
-    document.getElementById(`sec-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    let frame = 0
+    const onScroll = () => {
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => {
+        if (Date.now() < spyPausedUntil.current || !blocks.length) return
+        const line = headerHeight + 48
+        let index = 0
+        blocks.forEach((block, position) => {
+          const top = document.getElementById(`sec-${block.id}`)?.getBoundingClientRect().top
+          if (top != null && top <= line) index = position
+        })
+        const atBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4
+        if (atBottom) {
+          // The last parts cannot reach the top. Keep a part chosen down there.
+          const chosen = blocks.findIndex((block) => block.id === current)
+          index = Math.max(index, chosen)
+        }
+        const id = blocks[index]?.id
+        if (id) setCurrent((prev) => (prev === id ? prev : id))
+      })
+    }
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => {
+      cancelAnimationFrame(frame)
+      window.removeEventListener('scroll', onScroll)
+    }
+  }, [blocks, current, headerHeight])
+
+  // When the end of the current part is on screen, the change is coming: the footer says so.
+  useEffect(() => {
+    if (!live) {
+      setNearEnd(false)
+      return
+    }
+    let frame = 0
+    const check = () => {
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => {
+        const section = activeId ? document.getElementById(`sec-${activeId}`) : null
+        const footerTop = footerRef.current?.getBoundingClientRect().top ?? window.innerHeight
+        const last = activeId !== blocks[blocks.length - 1]?.id
+        setNearEnd(Boolean(section && last && section.getBoundingClientRect().bottom <= footerTop))
+      })
+    }
+    check()
+    window.addEventListener('scroll', check, { passive: true })
+    window.addEventListener('resize', check)
+    return () => {
+      cancelAnimationFrame(frame)
+      window.removeEventListener('scroll', check)
+      window.removeEventListener('resize', check)
+    }
+  }, [activeId, blocks, live])
+
+  // Keep the current part chip in view in the scrolling row.
+  useEffect(() => {
+    const row = chipsRef.current
+    const chip = row?.querySelector<HTMLElement>('[aria-current="step"]')
+    if (!row || !chip) return
+    const left = chip.offsetLeft - row.offsetLeft
+    if (left < row.scrollLeft || left + chip.offsetWidth > row.scrollLeft + row.clientWidth) {
+      row.scrollTo({ left: Math.max(0, left - 16), behavior: 'auto' })
+    }
   }, [activeId])
+
+  // In live mode the chart fits the width, so nothing scrolls sideways mid-song.
+  useLayoutEffect(() => {
+    const chartEl = chartRef.current
+    if (!chartEl) return
+    const measure = () => {
+      setChartWidth(chartEl.clientWidth)
+      const probe = probeRef.current
+      if (probe && settings.fontSize) setChPerPx(probe.offsetWidth / 10 / settings.fontSize)
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(chartEl)
+    return () => observer.disconnect()
+  }, [settings.fontSize, chart])
+
+  // The screen stays on while a song is being played.
+  useEffect(() => {
+    if (!live || !('wakeLock' in navigator)) return
+    let lock: WakeLockSentinel | null = null
+    let gone = false
+    const request = () => {
+      if (document.visibilityState !== 'visible') return
+      void navigator.wakeLock
+        .request('screen')
+        .then((sentinel) => {
+          if (gone) void sentinel.release()
+          else lock = sentinel
+        })
+        .catch(() => undefined)
+    }
+    request()
+    document.addEventListener('visibilitychange', request)
+    return () => {
+      gone = true
+      document.removeEventListener('visibilitychange', request)
+      void lock?.release()
+    }
+  }, [live])
 
   const stepSection = (direction: -1 | 1) => {
     const index = blocks.findIndex((block) => block.id === activeId)
@@ -174,13 +303,21 @@ export function SongView() {
         go(block.id)
         return
       }
-      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+      if (event.key === 'm' || event.key === 'M') {
+        event.preventDefault()
+        update({ mode: settings.mode === 'live' ? 'learn' : 'live' })
+        return
+      }
+      // Bluetooth page turner pedals send PageUp and PageDown.
+      const back = event.key === 'ArrowLeft' || event.key === 'PageUp'
+      const forward = event.key === 'ArrowRight' || event.key === 'PageDown'
+      if (!back && !forward) return
       event.preventDefault()
-      stepSection(event.key === 'ArrowLeft' ? -1 : 1)
+      stepSection(back ? -1 : 1)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [blocks, activeId])
+  }, [blocks, activeId, settings.mode])
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -248,9 +385,25 @@ export function SongView() {
   const partTotal = blocks.length
   const partCountLabel =
     partLabel && partTotal > 0 ? `${partLabel} ${partIndex + 1}/${partTotal}` : partLabel
+  const songKey = (chart ?? song).key
+  const spelling = live ? settings.liveSpelling : settings.spelling
+  const nextBlock = blocks[partIndex + 1]
+  const nextChords = nextBlock
+    ? chordSequence(nextBlock.section.lines)
+        .slice(0, 4)
+        .map((raw) => formatChord(raw, songKey, semitones, spelling))
+    : []
+  const widestLine = widestLineCh(blocks, songKey, semitones, spelling)
+  // Section border and padding take about 16px of the width.
+  const fitted = chartWidth && widestLine ? Math.floor((chartWidth - 16) / (widestLine * chPerPx)) : settings.fontSize
+  // Live mode shrinks a little to keep lines whole, then wraps what is still too long.
+  const chartFontSize = live
+    ? Math.max(Math.round(settings.fontSize * 0.85), Math.min(settings.fontSize, fitted))
+    : settings.fontSize
+  const wrapAt = live && chartWidth ? Math.floor((chartWidth - 16) / (chPerPx * chartFontSize)) : undefined
   const author = song.artist.trim() || song.composer.trim()
   const names = chordSequence(blocks.flatMap((block) => block.section.lines)).map((raw) =>
-    formatChord(raw, (chart ?? song).key, semitones, settings.spelling),
+    formatChord(raw, songKey, semitones, spelling),
   )
   const uniqueNames = [...new Set(names)]
   const diagramNames = [
@@ -293,11 +446,81 @@ export function SongView() {
     </>
   )
 
+  const modeButton = (
+    <Button
+      size="sm"
+      variant="outline"
+      aria-keyshortcuts="M"
+      title={live ? 'Modo aprender: diagramas, notas y referencias.' : 'Modo tocar: solo la cifra, grande y sin distracciones.'}
+      onClick={() => update({ mode: live ? 'learn' : 'live' })}
+    >
+      {live ? <BookOpen /> : <Guitar />}
+      <span className={cn(live && !headerOpen && 'sr-only sm:not-sr-only')}>{live ? 'Aprender' : 'Tocar'}</span>
+      {headerOpen && <Kbd>M</Kbd>}
+    </Button>
+  )
+
+  const transposer = (compact: boolean) => (
+    <div
+      role="group"
+      aria-label="Tono"
+      className={cn('flex shrink-0 items-center rounded-md border bg-card', compact ? 'gap-0' : 'gap-1 self-start px-1 py-1')}
+    >
+      <Button variant="ghost" size="icon" aria-label="Bajar un semitono" title="Baja un semitono." onClick={() => setSemitones(semitones - 1)}>
+        <Minus />
+      </Button>
+      <span className={cn('text-center font-semibold', compact ? 'min-w-10 text-base' : 'min-w-16 text-sm')} aria-live="polite">
+        <span className="sr-only">Tono </span>
+        {soundingKey || '—'}
+        {semitones !== 0 && songKey ? (
+          <span className={cn('block text-xs font-normal text-muted-foreground', compact && 'sr-only')}>orig. {songKey}</span>
+        ) : null}
+      </span>
+      <Button variant="ghost" size="icon" aria-label="Subir un semitono" title="Sube un semitono." onClick={() => setSemitones(semitones + 1)}>
+        <Plus />
+      </Button>
+    </div>
+  )
+
   return (
-    <div className="min-h-svh pb-32">
-      <header className="sticky top-0 z-20 border-b bg-background/95 backdrop-blur">
-        <div className="mx-auto flex max-w-[70.4rem] flex-col gap-3 px-4 py-2">
-          {headerOpen ? (
+    <div className="min-h-svh pb-40">
+      <p className="sr-only" aria-live="polite" aria-atomic="true">
+        {announce}
+      </p>
+      <header ref={headerRef} className="sticky top-0 z-20 border-b bg-background/95 backdrop-blur">
+        <div className={cn('mx-auto flex max-w-[70.4rem] flex-col px-4 py-2', live && !headerOpen ? 'gap-2' : 'gap-3')}>
+          {live && !headerOpen ? (
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="hidden sm:contents">
+                <SongMark songId={song.id} letters={markLetters(marks, song)} />
+              </span>
+              <div className="min-w-0 flex-1">
+                <h1 className="truncate text-lg leading-tight font-semibold">{song.title}</h1>
+                {activeList && (
+                  <Link
+                    to={`/listas/${encodeURIComponent(activeList.id)}`}
+                    className="block truncate text-xs text-muted-foreground hover:underline"
+                  >
+                    {setlistItemIndex + 1}/{activeList.items.length} {activeList.name}
+                  </Link>
+                )}
+              </div>
+              {transposer(true)}
+              {modeButton}
+              <Button
+                size="sm"
+                variant="ghost"
+                aria-expanded={headerOpen}
+                aria-keyshortcuts="Space"
+                aria-label="Controles"
+                title="Controles (Espacio)"
+                onClick={() => setHeaderOpen(true)}
+              >
+                <SlidersHorizontal />
+                <span className="sr-only sm:not-sr-only">Controles</span>
+              </Button>
+            </div>
+          ) : headerOpen ? (
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
               <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:min-w-[12rem] sm:flex-1">
                 <SongMark songId={song.id} letters={markLetters(marks, song)} />
@@ -307,7 +530,10 @@ export function SongView() {
             </div>
           ) : (
             <div className="flex flex-col gap-2">
-              <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-2">{toolbarFloat}</div>
+              <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-2">
+                {modeButton}
+                {toolbarFloat}
+              </div>
               <div className="flex min-w-0 items-center gap-2">
                 <SongMark songId={song.id} letters={markLetters(marks, song)} />
                 <h1 className="min-w-0 flex-1 truncate text-lg font-semibold">{song.title}</h1>
@@ -315,23 +541,11 @@ export function SongView() {
               </div>
             </div>
           )}
-          <div className="flex items-center gap-1 self-start rounded-md border bg-card px-1 py-1">
-            <Button variant="ghost" size="icon" aria-label="Bajar un semitono" title="Baja un semitono." onClick={() => setSemitones(semitones - 1)}>
-              <Minus />
-            </Button>
-            <span className="min-w-16 text-center text-sm font-semibold">
-              {soundingKey || '—'}
-              {semitones !== 0 && (chart ?? song).key ? (
-                <span className="block text-xs font-normal text-muted-foreground">orig. {(chart ?? song).key}</span>
-              ) : null}
-            </span>
-            <Button variant="ghost" size="icon" aria-label="Subir un semitono" title="Sube un semitono." onClick={() => setSemitones(semitones + 1)}>
-              <Plus />
-            </Button>
-          </div>
+          {!(live && !headerOpen) && transposer(false)}
           {headerOpen && (
           <>
           <div className="flex flex-wrap items-center gap-2">
+            {modeButton}
             <InstrumentSwitch value={instrument} onChange={(next: InstrumentId) => update({ instrument: next })} />
             {!song.editable && (
               <Button
@@ -465,7 +679,10 @@ export function SongView() {
           )}
 
           <div className="flex flex-wrap items-center gap-2">
-            <SpellingToggle value={settings.spelling} onChange={(spelling) => update({ spelling })} />
+            <SpellingToggle
+              value={spelling}
+              onChange={(next) => update(live ? { liveSpelling: next } : { spelling: next })}
+            />
             <Button variant="outline" title="Achica la letra de la cifra." onClick={() => update({ fontSize: Math.max(16, settings.fontSize - 2) })}>
               A−
             </Button>
@@ -550,7 +767,7 @@ export function SongView() {
           </>
           )}
 
-          <div className="flex gap-1.5 overflow-x-auto pb-1">
+          <nav ref={chipsRef} aria-label="Partes de la canción" className="flex gap-1.5 overflow-x-auto pb-1">
             {blocks.map((block, index) => {
               const kind = partKind(block.label)
               const active = block.id === activeId
@@ -558,10 +775,12 @@ export function SongView() {
                 <button
                   key={block.id}
                   type="button"
+                  aria-current={active ? 'step' : undefined}
                   aria-keyshortcuts={index < 9 ? String(index + 1) : undefined}
                   onClick={() => go(block.id)}
                   className={cn(
-                    'inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-sm',
+                    'inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 text-sm focus-visible:ring-[3px] focus-visible:ring-ring/60 focus-visible:outline-none',
+                    live ? 'min-h-11 text-base' : 'py-1',
                     active ? 'border-primary bg-primary text-primary-foreground' : 'bg-card',
                   )}
                 >
@@ -574,11 +793,23 @@ export function SongView() {
                 </button>
               )
             })}
-          </div>
+          </nav>
+          {(!live || headerOpen) && (
           <ShortcutLegend
             className="border-t pt-2"
             items={[
               { id: 'space', keys: <Kbd>Espacio</Kbd>, label: 'Controles' },
+              { id: 'mode', keys: <Kbd>M</Kbd>, label: live ? 'Modo aprender' : 'Modo tocar' },
+              {
+                id: 'pedal',
+                keys: (
+                  <>
+                    <Kbd>RePág</Kbd>
+                    <Kbd>AvPág</Kbd>
+                  </>
+                ),
+                label: 'Pedal de páginas',
+              },
               {
                 id: 'part',
                 keys: (
@@ -607,12 +838,13 @@ export function SongView() {
               },
             ]}
           />
+          )}
         </div>
       </header>
 
       <main className="mx-auto max-w-[70.4rem] px-4 py-4">
         {!chart && <p className="mb-4 text-sm text-muted-foreground">Cargando {instrumentLabel(instrument)}…</p>}
-        {chart && settings.showDiagrams && (instrument === 'drums' || diagramNames.length > 0) && (
+        {chart && !live && settings.showDiagrams && (instrument === 'drums' || diagramNames.length > 0) && (
           <InstrumentCharts
             instrument={instrument}
             names={diagramNames}
@@ -634,28 +866,49 @@ export function SongView() {
           </p>
         )}
 
-        <div className="space-y-8 font-mono" style={{ fontSize: `${settings.fontSize}px` }}>
-          {blocks.map((block) => {
+        <div
+          ref={chartRef}
+          className={cn('relative font-mono', live ? 'space-y-5' : 'space-y-8')}
+          style={{ fontSize: `${chartFontSize}px` }}
+        >
+          <span ref={probeRef} aria-hidden className="invisible absolute whitespace-pre" style={{ fontSize: `${settings.fontSize}px` }}>
+            0000000000
+          </span>
+          {blocks.map((block, index) => {
             const active = block.id === activeId
             const kind = partKind(block.label)
             const folded = settings.concise && Boolean(block.duplicateOf) && !expanded.includes(block.id)
+            const following = blocks[index + 1]
+            const followingChord = following ? chordSequence(following.section.lines)[0] : undefined
             return (
               <section
                 key={block.id}
                 id={`sec-${block.id}`}
+                aria-labelledby={`h-${block.id}`}
+                aria-current={active ? 'step' : undefined}
+                style={{ scrollMarginTop: `${headerHeight + 8}px` }}
                 className={cn(
-                  headerOpen ? 'scroll-mt-64' : 'scroll-mt-56',
-                  'border-l-2 pl-3',
-                  active ? 'border-primary' : kindEdge(kind),
+                  'rounded-r-md pl-3 transition-colors',
+                  active ? 'border-l-4 border-primary bg-primary/[0.06] py-2' : cn('border-l-2', kindEdge(kind)),
                 )}
               >
                 <div className="mb-2 flex flex-wrap items-baseline gap-2">
-                  <h2 className={cn('font-sans text-[0.7em] font-semibold tracking-wide uppercase', kindHeading(kind))}>
+                  <h2
+                    id={`h-${block.id}`}
+                    className={cn('font-sans text-[0.7em] font-semibold tracking-wide uppercase', kindHeading(kind))}
+                  >
+                    <span className="sr-only">Parte {index + 1}: </span>
                     {block.label}
                   </h2>
                   {block.repeat > 1 && (
-                    <span className="rounded-md bg-primary/15 px-1.5 py-0.5 font-sans text-[0.55em] font-semibold">
-                      ×{block.repeat}
+                    <span
+                      className={cn(
+                        'rounded-md px-1.5 py-0.5 font-sans font-bold',
+                        live ? 'bg-primary text-[0.7em] text-primary-foreground' : 'bg-primary/15 text-[0.55em]',
+                      )}
+                    >
+                      <span aria-hidden>×{block.repeat}</span>
+                      <span className="sr-only">se repite {block.repeat} veces</span>
                     </span>
                   )}
                 </div>
@@ -682,12 +935,13 @@ export function SongView() {
                         block={block}
                         lineIndex={index}
                         showChords={settings.showChords || line.lyric == null}
-                        spelling={settings.spelling}
+                        spelling={spelling}
                         semitones={semitones}
                         songKey={(chart ?? song).key}
                         visible={settings.visibleNotes}
                         openNote={openNote}
                         onToggle={setOpenNote}
+                        wrapAt={wrapAt}
                       />
                     ))}
                     {block.section.sameAs && block.section.lines.length === 0 && (
@@ -697,12 +951,33 @@ export function SongView() {
                     )}
                   </div>
                 )}
+                {live && following && (
+                  <button
+                    type="button"
+                    data-cue
+                    aria-label={`Ir a la parte siguiente: ${following.label}`}
+                    onClick={() => go(following.id)}
+                    className={cn(
+                      'mt-1 inline-flex items-center gap-1.5 rounded-md border border-dashed px-2 py-1 font-sans text-[0.6em] focus-visible:ring-[3px] focus-visible:ring-ring/60 focus-visible:outline-none',
+                      active ? 'border-primary/60 text-foreground' : 'border-border text-muted-foreground',
+                    )}
+                  >
+                    <ChevronRight className="size-[1.1em]" aria-hidden />
+                    <span className="font-semibold">{following.label}</span>
+                    {following.repeat > 1 && <span>×{following.repeat}</span>}
+                    {followingChord && (
+                      <span className="font-mono font-semibold text-chart-chord">
+                        {formatChord(followingChord, songKey, semitones, spelling)}
+                      </span>
+                    )}
+                  </button>
+                )}
               </section>
             )
           })}
         </div>
 
-        {(song.sources.length > 0 || song.source) && (
+        {!live && (song.sources.length > 0 || song.source) && (
           <section className="mt-8 font-sans text-sm">
             <h2 className="mb-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
               Referencias y tutoriales
@@ -729,7 +1004,7 @@ export function SongView() {
         )}
       </main>
 
-      <footer className="fixed inset-x-0 bottom-8 z-20 border-t bg-background/95 px-4 py-3 backdrop-blur">
+      <footer ref={footerRef} className="fixed inset-x-0 bottom-8 z-20 border-t bg-background/95 px-4 py-3 backdrop-blur">
         <div className="mx-auto flex max-w-[70.4rem] flex-col gap-2">
           <div
             className="h-1 overflow-hidden rounded-full bg-muted"
@@ -744,32 +1019,54 @@ export function SongView() {
               style={{ width: partTotal ? `${((Math.max(partIndex, 0) + 1) / partTotal) * 100}%` : '0%' }}
             />
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-stretch gap-2">
           <Button
             size="lg"
             variant="secondary"
             aria-label="Parte anterior"
-            aria-keyshortcuts="ArrowLeft"
+            aria-keyshortcuts="ArrowLeft PageUp"
             disabled={partIndex <= 0}
+            className={cn(live && 'h-14 px-4')}
             onClick={() => stepSection(-1)}
           >
             <ChevronLeft />
-            Anterior
+            <span className={cn(live && 'sr-only sm:not-sr-only')}>Anterior</span>
             {headerOpen && <Kbd>←</Kbd>}
           </Button>
-          <p className="min-w-0 flex-1 text-center">
-            <span className="block truncate text-sm font-semibold">{partLabel || 'Canción'}</span>
-            {partTotal > 0 && (
-              <span className="text-xs font-medium text-muted-foreground tabular-nums">
-                {Math.max(partIndex + 1, 1)} de {partTotal}
-              </span>
-            )}
+          <p className="flex min-w-0 flex-1 flex-col items-center justify-center text-center">
+            <span className="block max-w-full truncate text-sm font-semibold">
+              {partLabel || 'Canción'}
+              {partTotal > 0 && (
+                <span className="ml-1.5 text-xs font-medium text-muted-foreground tabular-nums">
+                  {Math.max(partIndex + 1, 1)}/{partTotal}
+                </span>
+              )}
+            </span>
+            <span
+              className={cn(
+                'block max-w-full truncate rounded-md px-2 text-xs transition-colors motion-reduce:transition-none',
+                nearEnd ? 'bg-primary/20 py-0.5 text-sm text-foreground ring-1 ring-primary' : 'text-muted-foreground',
+              )}
+            >
+              {nextBlock ? (
+                <>
+                  Sigue <span className="font-semibold text-foreground">{nextBlock.label}</span>
+                  {nextBlock.repeat > 1 ? ` ×${nextBlock.repeat}` : ''}
+                  {nextChords.length > 0 && (
+                    <span className="ml-1.5 font-mono text-chart-chord">{nextChords.join(' ')}</span>
+                  )}
+                </>
+              ) : (
+                'Última parte'
+              )}
+            </span>
           </p>
           <Button
             size="lg"
-            aria-label="Parte siguiente"
-            aria-keyshortcuts="ArrowRight"
+            aria-label={nextBlock ? `Parte siguiente: ${nextBlock.label}` : 'Parte siguiente'}
+            aria-keyshortcuts="ArrowRight PageDown"
             disabled={partIndex >= blocks.length - 1}
+            className={cn(live && 'h-14 min-w-28 px-5')}
             onClick={() => stepSection(1)}
           >
             {headerOpen && <Kbd>→</Kbd>}
@@ -835,6 +1132,21 @@ function kindEdge(kind: PartKind): string {
   if (kind === 'chorus') return 'border-primary/40'
   if (kind === 'bridge') return 'border-accent-foreground/40'
   return 'border-transparent'
+}
+
+/** Widest chart line in ch, chords included, as ChartRow lays it out. */
+function widestLineCh(blocks: DisplayBlock[], songKey: string, semitones: number, spelling: ViewSettings['spelling']): number {
+  let widest = 0
+  for (const block of blocks) {
+    for (const line of block.section.lines) {
+      const placed = placeChords(
+        line.chords.map((chord) => ({ ...chord, name: formatChord(chord.raw, songKey, semitones, spelling) })),
+      )
+      const lyric = line.lyric == null ? 0 : displayLyric(line.lyric).trimEnd().length
+      widest = Math.max(widest, lyric, placed.cursor)
+    }
+  }
+  return widest
 }
 
 function typing(target: EventTarget | null): boolean {
