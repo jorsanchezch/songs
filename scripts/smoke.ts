@@ -6,10 +6,10 @@ import { blocksFor, partKind } from '../src/lib/display.ts'
 import { diagramFor, shapesFor } from '../src/lib/guitar.ts'
 import { chartToCho, chartToSongMd, isBlockedPage, isPlainChordLine, songToMarkdown, wrapPlainChordLine } from '../src/lib/importChart.ts'
 import { shareLyrics } from '../server/lyrics.ts'
-import { nextServiceDate, planEvergreenAdd, serviceListName, weekdayMark } from '../src/lib/setlists.ts'
+import { nextServiceDate, planEvergreenAdd, serviceListName } from '../src/lib/setlists.ts'
 import { can, currentUser, roleLabel } from '../src/lib/access.ts'
 import { parseChart } from '../src/lib/parseChart.ts'
-import { songIconIndex, songMarkTone, SONG_ICON_SHAPES, SONG_MARK_HUES } from '../src/lib/songMark.ts'
+import { distinctMarks, songIconIndex, songMarkTone, SONG_ICON_SHAPES, SONG_MARK_HUES } from '../src/lib/songMark.ts'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const parentCharts = path.resolve(root, '..')
@@ -203,8 +203,6 @@ assert(nextServiceDate(friday, 6) === '2026-10-17', 'next Saturday from Friday i
 assert(nextServiceDate(saturday, 6) === '2026-10-17', 'Saturday service is that same Saturday')
 assert(serviceListName(3) === 'Servicio del próximo miércoles', 'wednesday service name')
 assert(serviceListName(0) === 'Servicio del próximo domingo', 'sunday service name')
-assert(weekdayMark(3) === 'M' && weekdayMark(6) === 'S' && weekdayMark(0) === 'D', 'service day initials')
-assert(weekdayMark(1) === 'L' && weekdayMark(undefined) === null && weekdayMark(9) === null, 'no initial without a known day')
 let planned = planEvergreenAdd({ weekday: 6, serviceDate: null }, [], 'a', friday)
 assert(planned.evergreen.serviceDate === '2026-10-17' && planned.items.length === 1, 'first add targets Saturday')
 planned = planEvergreenAdd(planned.evergreen, planned.items, 'b', friday)
@@ -244,6 +242,11 @@ assert([...toneSamples].some((tone) => tone.includes('0.42 ')), 'palette include
 assert(SONG_ICON_SHAPES.length >= 8, 'fixed icon set')
 const iconShapes = new Set(SONG_ICON_SHAPES.map((shape) => JSON.stringify(shape)))
 assert(iconShapes.size === SONG_ICON_SHAPES.length, 'icons are distinct')
+const listIds = Array.from({ length: 60 }, (_, n) => `lista-${n}`)
+const listLooks = distinctMarks(listIds)
+const shuffledLooks = distinctMarks([...listIds].reverse())
+assert(new Set([...listLooks.values()].map((look) => `${look.shape}:${look.tone}`)).size === listIds.length, 'list marks are all distinct')
+assert(listIds.every((id) => JSON.stringify(listLooks.get(id)) === JSON.stringify(shuffledLooks.get(id))), 'list marks ignore list order')
 
 const names = await readdir(charts)
 const files = names.filter((name) => /\.(cho|chopro)$/i.test(name))

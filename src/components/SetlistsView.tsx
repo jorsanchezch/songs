@@ -8,7 +8,8 @@ import { UserBadge } from '@/components/UserBadge'
 import { useSetlists } from '@/hooks/useSetlists'
 import { useUser } from '@/hooks/useUser'
 import { can } from '@/lib/access'
-import { createSetlist, evergreenStatus, removeSetlist, WEEKDAYS, weekdayMark } from '@/lib/setlists'
+import { ListMark, useListMarks, WeekdayMark } from '@/components/ListMark'
+import { createSetlist, evergreenStatus, removeSetlist } from '@/lib/setlists'
 
 const page = 'mx-auto w-full max-w-[52.8rem] px-4'
 
@@ -17,6 +18,7 @@ export function SetlistsView() {
   const user = useUser()
   const setlists = useSetlists()
   const [name, setName] = useState('')
+  const marks = useListMarks(setlists.filter((list) => !list.evergreen).map((list) => list.id))
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -85,9 +87,10 @@ export function SetlistsView() {
           </form>
         )}
         <p className="text-sm text-muted-foreground">⌘← y ⌘→ cambian de canción dentro de una lista.</p>
-        <SetlistGroup lists={setlists.filter((list) => list.evergreen)} />
+        <SetlistGroup lists={setlists.filter((list) => list.evergreen)} marks={marks} />
         <SetlistGroup
           lists={setlists.filter((list) => !list.evergreen)}
+          marks={marks}
           empty="Todavía no hay otras listas."
           allowDelete={can(user, 'delete')}
         />
@@ -98,10 +101,12 @@ export function SetlistsView() {
 
 function SetlistGroup({
   lists,
+  marks,
   empty,
   allowDelete = false,
 }: {
   lists: ReturnType<typeof useSetlists>
+  marks: ReturnType<typeof useListMarks>
   empty?: string
   allowDelete?: boolean
 }) {
@@ -116,7 +121,7 @@ function SetlistGroup({
             to={`/listas/${encodeURIComponent(list.id)}`}
             className="flex min-w-0 flex-1 items-center gap-3 px-4 py-3 hover:bg-accent/60"
           >
-            <DayMark weekday={list.evergreen?.weekday} />
+            {list.evergreen ? <WeekdayMark weekday={list.evergreen.weekday} /> : <ListMark look={marks.get(list.id)} />}
             <span className="min-w-0">
               <span className="block font-medium">{list.name}</span>
               <span className="block text-sm text-muted-foreground">
@@ -141,21 +146,6 @@ function SetlistGroup({
         </li>
       ))}
     </ul>
-  )
-}
-
-function DayMark({ weekday }: { weekday?: number }) {
-  const letter = weekdayMark(weekday)
-  if (!letter) return null
-  const name = WEEKDAYS.find((day) => day.id === weekday)?.name
-  return (
-    <span
-      className="flex size-7 shrink-0 items-center justify-center rounded-md bg-primary/10 text-sm font-semibold text-primary"
-      title={name}
-      aria-hidden="true"
-    >
-      {letter}
-    </span>
   )
 }
 

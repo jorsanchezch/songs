@@ -56,15 +56,47 @@ function mixHash(hash: number): number {
   return value >>> 0
 }
 
-export function songMarkTone(id: string): SongMarkTone {
-  const mixed = mixHash(hashSongId(id))
-  const slot = mixed % (SONG_MARK_HUES.length * 2)
-  const hue = SONG_MARK_HUES[slot % SONG_MARK_HUES.length] ?? SONG_MARK_HUES[0]
-  const deep = slot >= SONG_MARK_HUES.length
+export const SONG_MARK_TONES = SONG_MARK_HUES.length * 2
+
+/** One of the light or deep tones around the wheel. */
+export function markTone(slot: number): SongMarkTone {
+  const wrapped = ((slot % SONG_MARK_TONES) + SONG_MARK_TONES) % SONG_MARK_TONES
+  const hue = SONG_MARK_HUES[wrapped % SONG_MARK_HUES.length] ?? SONG_MARK_HUES[0]
+  const deep = wrapped >= SONG_MARK_HUES.length
   const lightness = deep ? 0.42 : 0.7
   const chroma = deep ? 0.15 : 0.14
   return {
     background: `oklch(${lightness} ${chroma} ${hue})`,
     foreground: deep ? `oklch(0.985 0.012 ${hue})` : `oklch(0.27 0.05 ${hue})`,
   }
+}
+
+function toneSlot(id: string): number {
+  return mixHash(hashSongId(id)) % SONG_MARK_TONES
+}
+
+export function songMarkTone(id: string): SongMarkTone {
+  return markTone(toneSlot(id))
+}
+
+export type MarkLook = { shape: number; tone: number }
+
+// Each id starts from its own shape and tone. A clash keeps the earlier id
+// and moves the later one to the next free tone, so the result ignores list order.
+export function distinctMarks(ids: string[]): Map<string, MarkLook> {
+  const used = new Set<string>()
+  const looks = new Map<string, MarkLook>()
+  const total = SONG_ICON_SHAPES.length * SONG_MARK_TONES
+  for (const id of [...new Set(ids)].sort((a, b) => a.localeCompare(b, 'en'))) {
+    const start = songIconIndex(id) * SONG_MARK_TONES + toneSlot(id)
+    for (let step = 0; step < total; step += 1) {
+      const combo = (start + step) % total
+      const look = { shape: Math.floor(combo / SONG_MARK_TONES), tone: combo % SONG_MARK_TONES }
+      if (used.has(`${look.shape}:${look.tone}`)) continue
+      used.add(`${look.shape}:${look.tone}`)
+      looks.set(id, look)
+      break
+    }
+  }
+  return looks
 }
