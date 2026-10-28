@@ -59,6 +59,38 @@ export function songIconIndex(id: string): number {
   return hashSongId(id) % SONG_ICON_SHAPES.length
 }
 
+// Even steps around the wheel. A mixed hash, not the icon index, picks the slot,
+// so two songs can share a shape and still wear different colors.
+export const SONG_MARK_HUES = [12, 42, 72, 102, 132, 162, 192, 222, 252, 282, 312, 342] as const
+
+export type SongMarkTone = {
+  background: string
+  foreground: string
+}
+
+function mixHash(hash: number): number {
+  let value = hash >>> 0
+  value ^= value >>> 16
+  value = Math.imul(value, 0x7feb352d)
+  value ^= value >>> 15
+  value = Math.imul(value, 0x846ca68b)
+  value ^= value >>> 16
+  return value >>> 0
+}
+
+export function songMarkTone(id: string): SongMarkTone {
+  const mixed = mixHash(hashSongId(id))
+  const slot = mixed % (SONG_MARK_HUES.length * 2)
+  const hue = SONG_MARK_HUES[slot % SONG_MARK_HUES.length] ?? SONG_MARK_HUES[0]
+  const deep = slot >= SONG_MARK_HUES.length
+  const lightness = deep ? 0.42 : 0.7
+  const chroma = deep ? 0.15 : 0.14
+  return {
+    background: `oklch(${lightness} ${chroma} ${hue})`,
+    foreground: deep ? `oklch(0.985 0.012 ${hue})` : `oklch(0.27 0.05 ${hue})`,
+  }
+}
+
 function letterWords(title: string): string[] {
   return title
     .normalize('NFD')

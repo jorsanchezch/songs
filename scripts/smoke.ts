@@ -9,7 +9,7 @@ import { shareLyrics } from '../server/lyrics.ts'
 import { nextServiceDate, planEvergreenAdd, serviceListName, weekdayMark } from '../src/lib/setlists.ts'
 import { can, currentUser, roleLabel } from '../src/lib/access.ts'
 import { parseChart } from '../src/lib/parseChart.ts'
-import { songIconIndex, songMarkLetters, SONG_ICON_SHAPES, titleLetters } from '../src/lib/songMark.ts'
+import { songIconIndex, songMarkLetters, songMarkTone, SONG_ICON_SHAPES, SONG_MARK_HUES, titleLetters } from '../src/lib/songMark.ts'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const parentCharts = path.resolve(root, '..')
@@ -243,6 +243,14 @@ assert(titleLetters('¡Santo!') === 'SA', 'punctuation')
 assert(titleLetters('') === 'XX', 'empty title')
 assert(titleLetters('El') === 'EL', 'article-only title')
 assert(songIconIndex('hosanna') === songIconIndex('hosanna'), 'icon is a pure function of the id')
+assert(songMarkTone('hosanna').background === songMarkTone('hosanna').background, 'color is a pure function of the id')
+assert(songMarkTone('hosanna').background.startsWith('oklch('), 'color is a fixed oklch tone')
+assert(SONG_MARK_HUES.length >= 12, 'hue palette is wide')
+const toneSamples = new Set<string>()
+for (let n = 0; n < 500; n += 1) toneSamples.add(songMarkTone(`tone-${n}`).background)
+assert(toneSamples.size >= 16, `song marks use many colors, got ${toneSamples.size}`)
+assert([...toneSamples].some((tone) => tone.includes('0.7 ')), 'palette includes a light band')
+assert([...toneSamples].some((tone) => tone.includes('0.42 ')), 'palette includes a deep band')
 assert(SONG_ICON_SHAPES.length >= 8, 'fixed icon set')
 const iconShapes = new Set(SONG_ICON_SHAPES.map((shape) => JSON.stringify(shape)))
 assert(iconShapes.size === SONG_ICON_SHAPES.length, 'icons are distinct')
@@ -294,6 +302,8 @@ for (const song of catalogMarks) {
   assert(!pairs.has(pair), `duplicate mark ${pair} on ${song.title}`)
   pairs.add(pair)
 }
+const catalogTones = new Set(catalogMarks.map((song) => songMarkTone(song.id).background))
+assert(catalogTones.size >= 8, `catalog mark colors, got ${catalogTones.size}`)
 
 const hosannaText = await readFile(path.join(charts, 'Hosanna - Hillsong en Español.cho'), 'utf8')
 const hosannaSong = parseChart(hosannaText, 'Hosanna.cho')
