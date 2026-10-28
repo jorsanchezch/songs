@@ -11,6 +11,7 @@ import { SetlistView } from '@/components/SetlistView'
 import { SetlistsView } from '@/components/SetlistsView'
 import { SongEditor } from '@/components/SongEditor'
 import { SongView } from '@/components/SongView'
+import { StudyIndex, StudyView } from '@/components/StudyView'
 
 export default function App() {
   const basename = import.meta.env.BASE_URL.replace(/\/$/, '')
@@ -29,6 +30,8 @@ export default function App() {
         <Route path="/nueva" element={<SongEditor />} />
         <Route path="/agregar/enlaces" element={<BulkLinksView />} />
         <Route path="/agregar/sugerencias" element={<SuggestChartsView />} />
+        <Route path="/estudio" element={<StudyIndex />} />
+        <Route path="/estudio/:instrumento" element={<StudyView />} />
         <Route path="/c/:songId" element={<SongView />} />
         <Route path="/editar/:songId" element={<SongEditor />} />
       </Routes>

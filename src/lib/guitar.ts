@@ -96,6 +96,10 @@ const MOVABLE: Record<string, { openPc: number; frets: number[] }[]> = {
   dim: [
     { openPc: 9, frets: [-1, 0, 1, 2, 1, -1] },
   ],
+  m7b5: [
+    { openPc: 5, frets: [1, -1, 1, 1, 0, -1] },
+    { openPc: 9, frets: [-1, 0, 1, 0, 1, -1] },
+  ],
   aug: [
     { openPc: 4, frets: [0, 3, 2, 1, 1, 0] },
   ],
@@ -176,6 +180,7 @@ function normalizeQuality(quality: string): string {
   ) {
     return 'maj7'
   }
+  if (quality === 'm7b5' || quality === 'ø' || quality === 'm7(b5)') return 'm7b5'
   if (quality === 'm7' || quality === 'm7(11)' || quality === 'm11' || quality === 'm9') return 'm7'
   if (quality === '9' || quality === '7(9)') return '9'
   if (quality === 'm' || quality === 'min') return 'm'

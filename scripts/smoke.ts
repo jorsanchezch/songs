@@ -9,6 +9,7 @@ import { shareLyrics } from '../server/lyrics.ts'
 import { nextServiceDate, planEvergreenAdd, serviceListName } from '../src/lib/setlists.ts'
 import { can, currentUser, roleLabel } from '../src/lib/access.ts'
 import { parseChart } from '../src/lib/parseChart.ts'
+import { diatonicChords, keyName, parseStudyKey, pianoVoicings, signature } from '../src/lib/theory.ts'
 import { distinctMarks, songIconIndex, songMarkTone, SONG_ICON_SHAPES, SONG_MARK_HUES } from '../src/lib/songMark.ts'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -315,5 +316,14 @@ assert(!merged.includes('[Xy9]'), 'the other chart does not take the chord edit'
 assert(merged.includes(`[${keptChord}]`), 'the other chart keeps its chord')
 assert(/\{key:\s*C\}/.test(merged), 'key stays the song key')
 assert(shareLyrics(hosannaText, hosannaText) === hosannaText, 'identical lyrics do not rewrite the chart')
+
+const gMajor = diatonicChords({ pc: 7, minor: false }, false)
+assert(gMajor.map((chord) => chord.name).join(' ') === 'G Am Bm C D Em F#dim', 'diatonic G')
+assert(gMajor.map((chord) => chord.degree).join(' ') === '1 2m 3m 4 5 6m 7dim', 'diatonic degrees')
+assert(diatonicChords({ pc: 2, minor: true }, true).map((chord) => chord.name).join(' ') === 'Dm7 Em7b5 Fmaj7 Gm7 Am7 Bbmaj7 C7', 'diatonic Dm sevenths')
+assert(signature({ pc: 5, minor: false }) === '1♭' && signature({ pc: 4, minor: true }) === '1♯', 'key signature')
+assert(keyName(parseStudyKey('Bbm')!) === 'Bbm', 'study key round trip')
+assert(pianoVoicings(11, [0, 4, 7, 11]).every((notes) => notes[0]! < 12 && notes.at(-1)! < 24), 'piano voicings fit two octaves')
+assert(shapesFor('Bm7b5')[0]?.frets.join(',') === '-1,2,3,2,3,-1', 'half-diminished shape')
 
 console.log(`Parsed ${files.length} charts`)

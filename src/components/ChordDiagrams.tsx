@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { diagramFor, shapesFor, type Diagram } from '@/lib/guitar'
 import { cn } from '@/lib/utils'
 
-export function ChordDiagram({ diagram }: { diagram: Diagram }) {
+export function ChordDiagram({ diagram, size = 'sm' }: { diagram: Diagram; size?: 'sm' | 'lg' }) {
   const left = 18
   const top = 28
   const gapX = 10
@@ -11,9 +11,16 @@ export function ChordDiagram({ diagram }: { diagram: Diagram }) {
   const barre = barreSpan(diagram.frets)
 
   return (
-    <figure className="w-[4.6rem] shrink-0 text-center">
-      <figcaption className="truncate text-xs font-semibold text-chart-chord">{diagram.name}</figcaption>
-      <svg viewBox="0 0 78 96" className="mt-1 h-[5.4rem] w-full" role="img" aria-label={diagram.name}>
+    <figure className={cn('shrink-0 text-center', size === 'lg' ? 'w-[5.6rem]' : 'w-[4.6rem]')}>
+      <figcaption className={cn('truncate font-semibold text-chart-chord', size === 'lg' ? 'text-sm' : 'text-xs')}>
+        {diagram.name}
+      </figcaption>
+      <svg
+        viewBox="0 0 78 96"
+        className={cn('mt-1 w-full', size === 'lg' ? 'h-[6.6rem]' : 'h-[5.4rem]')}
+        role="img"
+        aria-label={diagram.name}
+      >
         {diagram.frets.map((fret, index) => {
           const x = left + index * gapX
           if (fret === -1) {
@@ -152,7 +159,7 @@ export function ChordStrip({
   )
 }
 
-function shapeLabel(diagram: Diagram): string {
+export function shapeLabel(diagram: Diagram): string {
   const pressed = diagram.frets.filter((fret) => fret > 0)
   if (!pressed.length || diagram.frets.some((fret) => fret === 0)) return 'Al aire'
   return `Traste ${Math.min(...pressed)}`
@@ -160,7 +167,7 @@ function shapeLabel(diagram: Diagram): string {
 
 function barreSpan(frets: number[]): { fret: number; from: number; to: number } | null {
   const pressed = frets.filter((fret) => fret > 0)
-  if (!pressed.length) return null
+  if (!pressed.length || frets.includes(0)) return null
   const fret = Math.min(...pressed)
   const indexes = frets.flatMap((value, index) => (value === fret ? [index] : []))
   const from = indexes[0]

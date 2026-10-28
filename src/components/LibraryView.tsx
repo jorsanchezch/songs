@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { ListMusic, Loader2, Music, Plus, RefreshCw, Search, Shield } from 'lucide-react'
+import { GraduationCap, ListMusic, Loader2, Music, Plus, RefreshCw, Search, Shield } from 'lucide-react'
 import { Kbd, ShortcutLegend } from '@/components/KeyHint'
 import { SongMark } from '@/components/SongMark'
 import { Button } from '@/components/ui/button'
@@ -76,6 +76,12 @@ export function LibraryView() {
                 </Link>
               </Button>
             )}
+            <Button asChild variant="outline">
+              <Link to="/estudio">
+                <GraduationCap className="size-4" />
+                Estudio
+              </Link>
+            </Button>
             <Button asChild variant="outline">
               <Link to="/listas">
                 <ListMusic className="size-4" />

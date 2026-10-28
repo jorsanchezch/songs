@@ -36,6 +36,7 @@ function intervalsFor(quality: string): number[] {
   if (quality === 'sus4') return [0, 5, 7]
   if (quality === 'sus2') return [0, 2, 7]
   if (quality === 'dim') return [0, 3, 6]
+  if (quality === 'm7b5') return [0, 3, 6, 10]
   if (quality === 'aug') return [0, 4, 8]
   if (quality === '5') return [0, 7]
   if (quality === '9') return [0, 2, 4, 7, 10]
@@ -48,6 +49,7 @@ function normalize(quality: string): string {
   if (quality === '7M' || quality === 'maj7' || quality === 'M7' || quality === '7M(9)' || quality === 'maj9') {
     return 'maj7'
   }
+  if (quality === 'm7b5' || quality === 'ø' || quality === 'm7(b5)') return 'm7b5'
   if (quality === 'm7' || quality === 'm9' || quality === 'm11' || quality === 'm7(11)') return 'm7'
   if (quality === '9' || quality === '7(9)') return '9'
   if (quality === 'm' || quality === 'min') return 'm'
