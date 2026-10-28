@@ -1,4 +1,4 @@
-import { getSetlists, putSetlists } from '@/lib/api'
+import { getSetlists, putSetlists, type DayListHistoryPayload } from '@/lib/api'
 
 export type SetlistItem = {
   songId: string
@@ -15,6 +15,13 @@ export type Setlist = {
   name: string
   items: SetlistItem[]
   evergreen?: Evergreen
+}
+
+export type DayListHistory = {
+  id: string
+  weekday: number
+  serviceDate: string
+  items: SetlistItem[]
 }
 
 export const WEEKDAYS = [
@@ -63,15 +70,40 @@ export function evergreenStatus(list: Setlist, today = new Date()): string {
   return `Para el ${formatServiceDay(serviceDate)}.`
 }
 
+/** The day after the stored service date, the next added song replaces the list. */
+export function dayListIsDue(evergreen: Evergreen, today: Date): boolean {
+  return evergreen.serviceDate != null && isoDate(today) > evergreen.serviceDate
+}
+
+export function closeRotatedDayList(
+  evergreen: Evergreen,
+  items: SetlistItem[],
+  today: Date,
+): DayListHistory | null {
+  if (!dayListIsDue(evergreen, today) || !evergreen.serviceDate || items.length === 0) return null
+  return {
+    id: `historial-${evergreen.weekday}-${evergreen.serviceDate}`,
+    weekday: evergreen.weekday,
+    serviceDate: evergreen.serviceDate,
+    items: items.map((item) => ({ songId: item.songId, semitones: item.semitones })),
+  }
+}
+
+export function rememberClosedDayList(history: DayListHistory[], closed: DayListHistory | null): DayListHistory[] {
+  if (!closed || history.some((entry) => entry.id === closed.id)) return history
+  return [...history, closed]
+}
+
 export function planEvergreenAdd(
   evergreen: Evergreen,
   items: SetlistItem[],
   songId: string,
   today: Date,
-): { evergreen: Evergreen; items: SetlistItem[] } {
-  const stale = evergreen.serviceDate != null && isoDate(today) > evergreen.serviceDate
+): { evergreen: Evergreen; items: SetlistItem[]; closed: DayListHistory | null } {
+  const stale = dayListIsDue(evergreen, today)
+  const closed = closeRotatedDayList(evergreen, items, today)
   const base = stale ? [] : items
-  if (!stale && base.some((item) => item.songId === songId)) return { evergreen, items }
+  if (!stale && base.some((item) => item.songId === songId)) return { evergreen, items, closed: null }
   return {
     items: [...base, { songId, semitones: 0 }],
     evergreen: {
@@ -79,11 +111,16 @@ export function planEvergreenAdd(
       serviceDate:
         stale || !evergreen.serviceDate ? nextServiceDate(today, evergreen.weekday) : evergreen.serviceDate,
     },
+    closed,
   }
 }
 
 const listeners = new Set<() => void>()
-let snapshot: { lists: Setlist[]; days: number[] } = { lists: [], days: [...DEFAULT_SERVICE_DAYS] }
+let snapshot: { lists: Setlist[]; days: number[]; history: DayListHistory[] } = {
+  lists: [],
+  days: [...DEFAULT_SERVICE_DAYS],
+  history: [],
+}
 let ready = false
 let hydrating: Promise<void> | null = null
 let persistChain: Promise<void> = Promise.resolve()
@@ -98,6 +135,31 @@ function read(): Setlist[] {
 
 function emitLists() {
   listeners.forEach((listener) => listener())
+}
+
+function normalizeHistory(entries: DayListHistoryPayload[] | undefined): DayListHistory[] {
+  if (!Array.isArray(entries)) return []
+  const seen = new Set<string>()
+  const history: DayListHistory[] = []
+  for (const entry of entries) {
+    const weekday = entry?.weekday
+    const serviceDate = entry?.serviceDate
+    if (typeof weekday !== 'number' || weekday < 0 || weekday > 6) continue
+    if (typeof serviceDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(serviceDate)) continue
+    const items = Array.isArray(entry.items)
+      ? entry.items.flatMap((item) =>
+          item && typeof item.songId === 'string'
+            ? [{ songId: item.songId, semitones: typeof item.semitones === 'number' ? item.semitones : 0 }]
+            : [],
+        )
+      : []
+    if (!items.length) continue
+    const id = `historial-${weekday}-${serviceDate}`
+    if (seen.has(id)) continue
+    seen.add(id)
+    history.push({ id, weekday, serviceDate, items })
+  }
+  return history
 }
 
 function normalizeSetlist(list: Setlist): Setlist | null {
@@ -115,8 +177,8 @@ function normalizeSetlist(list: Setlist): Setlist | null {
   return { id: list.id, name: list.name, items, evergreen: { weekday, serviceDate } }
 }
 
-function write(lists: Setlist[]) {
-  snapshot = { ...snapshot, lists }
+function write(lists: Setlist[], history: DayListHistory[] = snapshot.history) {
+  snapshot = { ...snapshot, lists, history }
   emitLists()
   if (ready) void persist()
 }
@@ -126,7 +188,7 @@ function persist() {
     if (!ready) return
     const current = snapshot
     try {
-      await putSetlists(current.days, current.lists)
+      await putSetlists(current.days, current.lists, current.history)
     } catch (error) {
       console.error(error)
     }
@@ -174,6 +236,10 @@ export function loadSetlists(): Setlist[] {
   return read()
 }
 
+export function loadDayListHistory(): DayListHistory[] {
+  return snapshot.history
+}
+
 export async function hydrateSetlists(): Promise<void> {
   if (ready) return
   if (hydrating) return hydrating
@@ -184,7 +250,7 @@ export async function hydrateSetlists(): Promise<void> {
       return normalized ? [normalized] : []
     })
     const days = remote.days.length ? remote.days : [...DEFAULT_SERVICE_DAYS]
-    snapshot = { lists, days }
+    snapshot = { lists, days, history: normalizeHistory(remote.history) }
     ready = true
     emitLists()
   })()
@@ -215,17 +281,18 @@ export function removeSetlist(id: string) {
 }
 
 export function addSetlistSong(id: string, songId: string, today = new Date()) {
-  write(
-    read().map((list) => {
-      if (list.id !== id) return list
-      if (list.evergreen) {
-        const next = planEvergreenAdd(list.evergreen, list.items, songId, today)
-        return { ...list, ...next }
-      }
-      if (list.items.some((item) => item.songId === songId)) return list
-      return { ...list, items: [...list.items, { songId, semitones: 0 }] }
-    }),
-  )
+  let history = snapshot.history
+  const lists = read().map((list) => {
+    if (list.id !== id) return list
+    if (list.evergreen) {
+      const next = planEvergreenAdd(list.evergreen, list.items, songId, today)
+      history = rememberClosedDayList(history, next.closed)
+      return { ...list, evergreen: next.evergreen, items: next.items }
+    }
+    if (list.items.some((item) => item.songId === songId)) return list
+    return { ...list, items: [...list.items, { songId, semitones: 0 }] }
+  })
+  write(lists, history)
 }
 
 export function removeSetlistSong(id: string, index: number) {

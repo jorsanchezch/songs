@@ -1,5 +1,13 @@
 import { useEffect, useState } from 'react'
-import { hydrateSetlists, loadServiceDays, loadSetlists, subscribeSetlists, type Setlist } from '@/lib/setlists'
+import {
+  hydrateSetlists,
+  loadDayListHistory,
+  loadServiceDays,
+  loadSetlists,
+  subscribeSetlists,
+  type DayListHistory,
+  type Setlist,
+} from '@/lib/setlists'
 
 export function useSetlists(): Setlist[] {
   const [setlists, setSetlists] = useState<Setlist[]>(() => loadSetlists())
@@ -9,6 +17,12 @@ export function useSetlists(): Setlist[] {
     return unsubscribe
   }, [])
   return setlists
+}
+
+export function useDayListHistory(): DayListHistory[] {
+  const [history, setHistory] = useState<DayListHistory[]>(() => loadDayListHistory())
+  useEffect(() => subscribeSetlists(() => setHistory(loadDayListHistory())), [])
+  return history
 }
 
 export function useServiceDays(): number[] {

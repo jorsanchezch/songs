@@ -37,6 +37,8 @@ if (process.env.SONGBOOK_DB === 'd1') {
     'service_days',
     'setlists',
     'setlist_items',
+    'day_list_history',
+    'day_list_history_items',
     'app_meta',
     'user_prefs',
   ]

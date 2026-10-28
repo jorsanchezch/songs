@@ -65,6 +65,21 @@ CREATE TABLE IF NOT EXISTS setlist_items (
   PRIMARY KEY (setlist_id, position)
 );
 
+CREATE TABLE IF NOT EXISTS day_list_history (
+  id TEXT PRIMARY KEY,
+  weekday INTEGER NOT NULL,
+  service_date TEXT NOT NULL,
+  position INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS day_list_history_items (
+  history_id TEXT NOT NULL REFERENCES day_list_history(id) ON DELETE CASCADE,
+  position INTEGER NOT NULL,
+  song_id TEXT NOT NULL,
+  semitones INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (history_id, position)
+);
+
 CREATE TABLE IF NOT EXISTS app_meta (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL

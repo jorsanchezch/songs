@@ -199,6 +199,7 @@ assert(keptText.includes('[Xy9]') && !keptText.includes('viejo'), 'the stale sav
 
 await checkImport(files)
 await checkSeedLists(files)
+await checkDayListHistory(files)
 await checkPasswords(files)
 await checkDeleteSurvivesSeed(files)
 
@@ -311,6 +312,64 @@ async function checkSeedLists(files: { id: string; sourceText: string }[]) {
   const lists = await call(db, boss.token, 'GET', '/api/setlists')
   const days = lists.data.days as number[]
   assert(days.includes(1) && days.includes(5) && !days.includes(3), `seed lists replaced ${days.join()}`)
+}
+
+async function checkDayListHistory(files: { id: string; sourceText: string }[]) {
+  const db = openSqlite(':memory:')
+  await seedCatalog(db, files)
+  const boss = await signIn(db, 'Jorge Sanchez')
+  const before = await call(db, boss.token, 'GET', '/api/setlists')
+  assert(Array.isArray(before.data.history) && (before.data.history as unknown[]).length === 0, 'history starts empty')
+  const saved = await call(db, boss.token, 'PUT', '/api/setlists', {
+    days: [6, 0],
+    setlists: [
+      {
+        id: 'servicio-6',
+        name: 'Servicio del próximo sábado',
+        items: [{ songId: 'nueva', semitones: 0 }],
+        evergreen: { weekday: 6, serviceDate: '2026-10-24' },
+      },
+    ],
+    history: [
+      {
+        weekday: 6,
+        serviceDate: '2026-10-17',
+        items: [
+          { songId: 'a', semitones: 0 },
+          { songId: 'b', semitones: 2 },
+        ],
+      },
+      { weekday: 9, serviceDate: '2026-10-18', items: [{ songId: 'no', semitones: 0 }] },
+      { weekday: 0, serviceDate: '2026-10-18', items: [] },
+      {
+        weekday: 0,
+        serviceDate: '2026-10-18',
+        items: [{ songId: 'c', semitones: -1 }],
+      },
+    ],
+  })
+  assert(saved.status === 200, `history save ${saved.status} ${JSON.stringify(saved.data)}`)
+  const history = saved.data.history as { id: string; serviceDate: string; items: { songId: string; semitones: number }[] }[]
+  assert(history.length === 2, `two closed lists, got ${history.length}`)
+  assert(history[0]?.id === 'historial-6-2026-10-17' && history[0].serviceDate === '2026-10-17', 'history keeps that Saturday')
+  assert(history[0].items.map((item) => `${item.songId}:${item.semitones}`).join() === 'a:0,b:2', 'history keeps song order')
+  assert(history[1]?.serviceDate === '2026-10-18' && history[1].items[0]?.songId === 'c', 'sunday history stays second')
+  const loaded = await call(db, boss.token, 'GET', '/api/setlists')
+  const again = loaded.data.history as typeof history
+  assert(again[0]?.items.map((item) => item.songId).join() === 'a,b', 'history reloads in order')
+  const kept = await call(db, boss.token, 'PUT', '/api/setlists', {
+    days: [6],
+    setlists: [
+      {
+        id: 'servicio-6',
+        name: 'Servicio del próximo sábado',
+        items: [],
+        evergreen: { weekday: 6, serviceDate: '2026-10-24' },
+      },
+    ],
+  })
+  const still = kept.data.history as typeof history
+  assert(still.length === 2 && still[0]?.serviceDate === '2026-10-17', 'a save without history leaves the closed lists')
 }
 
 async function checkPasswords(files: { id: string; sourceText: string }[]) {

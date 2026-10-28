@@ -397,6 +397,11 @@ type SetlistBody = {
   items?: SetlistItem[]
   evergreen?: { weekday?: number; serviceDate?: string | null }
 }
+type HistoryBody = {
+  weekday?: number
+  serviceDate?: string | null
+  items?: SetlistItem[]
+}
 
 async function listSetlists(sql: Sql): Promise<Response> {
   const days = await sql.all<{ weekday: number }>(`SELECT weekday FROM service_days ORDER BY weekday`)
@@ -421,18 +426,72 @@ async function listSetlists(sql: Sql): Promise<Response> {
         ? {}
         : { evergreen: { weekday: list.evergreen_weekday, serviceDate: list.service_date } }),
     })),
+    history: await readDayListHistory(sql),
   })
+}
+
+async function readDayListHistory(sql: Sql) {
+  const rows = await sql.all<{ id: string; weekday: number; service_date: string }>(
+    `SELECT id, weekday, service_date FROM day_list_history ORDER BY position`,
+  )
+  const items = await sql.all<{ history_id: string; song_id: string; semitones: number }>(
+    `SELECT history_id, song_id, semitones FROM day_list_history_items ORDER BY position`,
+  )
+  return rows.map((row) => ({
+    id: row.id,
+    weekday: Number(row.weekday),
+    serviceDate: row.service_date,
+    items: items
+      .filter((item) => item.history_id === row.id)
+      .map((item) => ({ songId: item.song_id, semitones: item.semitones })),
+  }))
 }
 
 async function saveSetlists(sql: Sql, user: User, request: Request): Promise<Response> {
   if (!isStaff(user)) return json({ error: 'Solo el dueño o un admin cambia las listas.' }, 403)
-  const body = await readJson<{ days?: number[]; setlists?: SetlistBody[] }>(request)
+  const body = await readJson<{ days?: number[]; setlists?: SetlistBody[]; history?: HistoryBody[] }>(request)
   const days = normalizeDays(body.days)
   const lists = Array.isArray(body.setlists) ? body.setlists : []
   await sql.transaction(async (tx) => {
     await replaceSetlists(tx, days, lists)
+    if (Array.isArray(body.history)) await replaceDayListHistory(tx, body.history)
   })
   return listSetlists(sql)
+}
+
+async function replaceDayListHistory(sql: Sql, history: HistoryBody[]): Promise<void> {
+  await sql.run(`DELETE FROM day_list_history_items`)
+  await sql.run(`DELETE FROM day_list_history`)
+  const seen = new Set<string>()
+  let position = 0
+  for (const entry of history) {
+    const weekday = entry?.weekday
+    const serviceDate = entry?.serviceDate
+    if (typeof weekday !== 'number' || !Number.isInteger(weekday) || weekday < 0 || weekday > 6) continue
+    if (typeof serviceDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(serviceDate)) continue
+    const id = `historial-${weekday}-${serviceDate}`
+    if (seen.has(id)) continue
+    const stored = (Array.isArray(entry.items) ? entry.items : []).flatMap((item) =>
+      item && typeof item.songId === 'string' && item.songId
+        ? [{ songId: item.songId, semitones: typeof item.semitones === 'number' ? item.semitones : 0 }]
+        : [],
+    )
+    if (!stored.length) continue
+    seen.add(id)
+    await sql.run(
+      `INSERT INTO day_list_history (id, weekday, service_date, position) VALUES (?, ?, ?, ?)`,
+      [id, weekday, serviceDate, position],
+    )
+    position += 1
+    for (let index = 0; index < stored.length; index += 1) {
+      const item = stored[index]
+      if (!item) continue
+      await sql.run(
+        `INSERT INTO day_list_history_items (history_id, position, song_id, semitones) VALUES (?, ?, ?, ?)`,
+        [id, index, item.songId, item.semitones],
+      )
+    }
+  }
 }
 
 async function replaceSetlists(sql: Sql, days: number[], lists: SetlistBody[]): Promise<void> {

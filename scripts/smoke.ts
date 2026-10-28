@@ -8,7 +8,14 @@ import { blocksFor, headerChips, headerChipText, partKind } from '../src/lib/dis
 import { diagramFor, shapesFor } from '../src/lib/guitar.ts'
 import { chartToCho, chartToSongMd, isBlockedPage, isPlainChordLine, songToMarkdown, wrapPlainChordLine } from '../src/lib/importChart.ts'
 import { shareLyrics } from '../server/lyrics.ts'
-import { nextServiceDate, planEvergreenAdd, serviceListName } from '../src/lib/setlists.ts'
+import {
+  closeRotatedDayList,
+  dayListIsDue,
+  nextServiceDate,
+  planEvergreenAdd,
+  rememberClosedDayList,
+  serviceListName,
+} from '../src/lib/setlists.ts'
 import { can, currentUser, roleLabel } from '../src/lib/access.ts'
 import { parseChart } from '../src/lib/parseChart.ts'
 import { sectionDegrees, sectionProgressions } from '../src/lib/sectionProgression.ts'
@@ -307,15 +314,51 @@ assert(serviceListName(3) === 'Servicio del próximo miércoles', 'wednesday ser
 assert(serviceListName(0) === 'Servicio del próximo domingo', 'sunday service name')
 let planned = planEvergreenAdd({ weekday: 6, serviceDate: null }, [], 'a', friday)
 assert(planned.evergreen.serviceDate === '2026-10-17' && planned.items.length === 1, 'first add targets Saturday')
+assert(planned.closed == null, 'the first song does not close a list')
 planned = planEvergreenAdd(planned.evergreen, planned.items, 'b', friday)
 assert(planned.items.map((item) => item.songId).join() === 'a,b', 'adds keep accumulating before the service')
+assert(planned.closed == null, 'adding before the service does not close the list')
 planned = planEvergreenAdd(planned.evergreen, planned.items, 'c', saturday)
 assert(planned.items.length === 3 && planned.evergreen.serviceDate === '2026-10-17', 'adding on the service day keeps the list')
+assert(planned.closed == null, 'adding on the service day does not close the list')
+assert(!dayListIsDue({ weekday: 6, serviceDate: '2026-10-17' }, saturday), 'the service day itself is not due')
+assert(dayListIsDue({ weekday: 6, serviceDate: '2026-10-17' }, sunday), 'the day after the service is due')
 planned = planEvergreenAdd(planned.evergreen, planned.items, 'd', sunday)
 assert(planned.items.length === 1 && planned.items[0]?.songId === 'd', 'adding after the service clears the list')
 assert(planned.evergreen.serviceDate === '2026-10-24', 'the new service is the following Saturday')
+assert(planned.closed?.serviceDate === '2026-10-17', 'closing keeps that Saturday')
+assert(planned.closed?.items.map((item) => item.songId).join() === 'a,b,c', 'closing keeps the song order')
+const repeated = planEvergreenAdd(
+  { weekday: 6, serviceDate: '2026-10-17' },
+  [
+    { songId: 'a', semitones: 3 },
+    { songId: 'b', semitones: 0 },
+  ],
+  'a',
+  sunday,
+)
+assert(repeated.closed?.items.map((item) => `${item.songId}:${item.semitones}`).join() === 'a:3,b:0', 'closing keeps semitones')
+assert(repeated.items.map((item) => item.songId).join() === 'a', 'the new rotation starts with the added song')
+assert(closeRotatedDayList({ weekday: 6, serviceDate: '2026-10-17' }, [], sunday) == null, 'an empty list has nothing to close')
+assert(
+  closeRotatedDayList({ weekday: 6, serviceDate: '2026-10-17' }, [{ songId: 'a', semitones: 1 }], saturday) == null,
+  'close uses the same day-after rule',
+)
+const closed = closeRotatedDayList(
+  { weekday: 6, serviceDate: '2026-10-17' },
+  [
+    { songId: 'a', semitones: 1 },
+    { songId: 'b', semitones: -2 },
+  ],
+  sunday,
+)
+assert(closed?.id === 'historial-6-2026-10-17' && closed.serviceDate === '2026-10-17', 'closed list keeps the day key')
+assert(closed?.items.map((item) => `${item.songId}:${item.semitones}`).join() === 'a:1,b:-2', 'closed list keeps song order')
+const remembered = rememberClosedDayList([], closed)
+assert(rememberClosedDayList(remembered, closed).length === 1, 'the same day is closed once')
 planned = planEvergreenAdd({ weekday: 6, serviceDate: '2026-10-17' }, [{ songId: 'a', semitones: 0 }], 'e', laterSaturday)
 assert(planned.items.length === 1 && planned.evergreen.serviceDate === '2026-10-24', 'a later Saturday starts that Saturday')
+assert(planned.closed?.serviceDate === '2026-10-17' && planned.closed.items[0]?.songId === 'a', 'a later Saturday closes the previous one')
 assert(currentUser.role === 'owner' && roleLabel('owner') === 'Admin' && roleLabel('admin') === 'Ayudante', 'the seeded owner stays the owner')
 assert(can(currentUser, 'create') && can(currentUser, 'update') && can(currentUser, 'delete'), 'the owner can change songs and lists')
 assert(!can({ ...currentUser, role: 'viewer' }, 'create'), 'a reader cannot create')

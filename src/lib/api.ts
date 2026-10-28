@@ -9,6 +9,13 @@ type SetlistPayload = {
   evergreen?: { weekday: number; serviceDate: string | null }
 }
 
+export type DayListHistoryPayload = {
+  id: string
+  weekday: number
+  serviceDate: string
+  items: { songId: string; semitones: number }[]
+}
+
 export type ApiSong = {
   id: string
   title: string
@@ -223,15 +230,20 @@ export function revealSongs(): Promise<{ ok: boolean }> {
   return request('/api/songs/reveal', { method: 'POST', body: {} })
 }
 
-export function getSetlists(): Promise<{ days: number[]; setlists: SetlistPayload[] }> {
+export function getSetlists(): Promise<{
+  days: number[]
+  setlists: SetlistPayload[]
+  history?: DayListHistoryPayload[]
+}> {
   return request('/api/setlists')
 }
 
 export function putSetlists(
   days: number[],
   setlists: SetlistPayload[],
-): Promise<{ days: number[]; setlists: SetlistPayload[] }> {
-  return request('/api/setlists', { method: 'PUT', body: { days, setlists } })
+  history: DayListHistoryPayload[],
+): Promise<{ days: number[]; setlists: SetlistPayload[]; history?: DayListHistoryPayload[] }> {
+  return request('/api/setlists', { method: 'PUT', body: { days, setlists, history } })
 }
 
 function apiRoot(): string {
