@@ -21,7 +21,7 @@ Gracias por la cruz oh Dios
                  [D]  [E]      [A]
 El precio que pagaste por mí
 
-              [F#m]
+         [E]       [F#m]
 Llevando mi pecado allí
 
     [E]     [D]       [Bm7]    [C#m7]    [E]
@@ -33,7 +33,7 @@ Gracias por Tu amor oh Dios
               [D]  [E]      [A]
 Tus manos clavadas por mí
 
-              [F#m]
+         [E]       [F#m]
 Me has lavado oh Señor
 
    [E]     [D]      [Bm7]     [C#m7]    [E]
