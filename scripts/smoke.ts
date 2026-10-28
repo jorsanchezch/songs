@@ -1,7 +1,9 @@
 import { readFile, readdir } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { formatChord, transposeKeyName } from '../src/lib/chords.ts'
+import { formatChord, transposeChordSymbol, transposeKeyName } from '../src/lib/chords.ts'
+import { applyEditingKey, applyOriginalKey, normalizeKeyText } from '../src/lib/draftSong.ts'
+import { keyChoices } from '../src/lib/theory.ts'
 import { blocksFor, headerChips, headerChipText, partKind } from '../src/lib/display.ts'
 import { diagramFor, shapesFor } from '../src/lib/guitar.ts'
 import { chartToCho, chartToSongMd, isBlockedPage, isPlainChordLine, songToMarkdown, wrapPlainChordLine } from '../src/lib/importChart.ts'
@@ -61,6 +63,34 @@ assert(formatChord('C#m7/B', 'A', 0, 'degrees', true) === '3m7', 'slash keeps th
 assert(formatChord('D/F#', 'A', 0, 'letters', true) === '4', 'D/F# in A is 4')
 assert(formatChord('G', 'C', 0, 'letters', true) === 'G', 'plain chords ignore the slash switch')
 assert(formatChord('E/G#', 'E', 2, 'letters') === 'F#/A#', 'slash spelling returns when the switch is off')
+assert(transposeChordSymbol('E/G#', 2, false) === 'F#/A#', 'transpose slash')
+assert(transposeChordSymbol('C#m7', 2, false) === 'D#m7', 'transpose keeps quality')
+assert(transposeChordSymbol('Bb', 0) === 'Bb', 'zero transpose keeps the spelling')
+assert(normalizeKeyText('c#') === 'C#' && normalizeKeyText('am') === 'Am', 'key text keeps minor m')
+const choices = keyChoices()
+assert(choices.includes('A') && choices.includes('F#m') && choices.indexOf('C') < choices.indexOf('Am'), 'key list is majors then minors')
+const keySample = parseChart(
+  ['---', 'title: Prueba', 'key: C', '---', '', '## Verso {#verso}', '', '[C] [E/G#]', 'Hola', ''].join('\n'),
+  'prueba.song.md',
+)
+assert(applyEditingKey(keySample, 'c') === keySample, 'same editing key does not transpose')
+const movedKey = applyEditingKey(keySample, 'D')
+assert(movedKey.key === 'D' && movedKey.originalKey === 'C', 'editing key freezes the original')
+assert(movedKey.sections[0]?.lines[0]?.chords[0]?.raw === 'D', 'root moves with the editing key')
+assert(movedKey.sections[0]?.lines[0]?.chords[1]?.raw === 'F#/A#', 'slash moves with the editing key')
+const sharpKey = applyEditingKey(keySample, 'C#')
+assert(sharpKey.key === 'C#' && sharpKey.sections[0]?.lines[0]?.chords[0]?.raw === 'C#', 'written sharps stay sharp')
+const flatKey = applyEditingKey(keySample, 'Db')
+assert(flatKey.key === 'Db' && flatKey.sections[0]?.lines[0]?.chords[0]?.raw === 'Db', 'written flats stay flat')
+const restoredKey = applyEditingKey(movedKey, 'C')
+assert(restoredKey.key === 'C' && !restoredKey.originalKey, 'returning to the original clears it')
+assert(restoredKey.sections[0]?.lines[0]?.chords[0]?.raw === 'C', 'chord returns with the original key')
+const markedKey = applyOriginalKey(keySample, 'G')
+assert(markedKey.originalKey === 'G' && markedKey.sections[0]?.lines[0]?.chords[0]?.raw === 'C', 'original key does not transpose')
+assert(songToMarkdown(markedKey).includes('original_key: G'), 'writes original_key')
+const roundKey = parseChart(songToMarkdown(markedKey), 'prueba.song.md')
+assert(roundKey.key === 'C' && roundKey.originalKey === 'G', 'reads original_key')
+assert(!songToMarkdown(applyOriginalKey(markedKey, 'C')).includes('original_key'), 'drops original_key when it matches')
 
 const santo = parseChart(
   await readFile(path.join(charts, 'Santo Por Siempre.chopro'), 'utf8'),
@@ -107,6 +137,21 @@ for (const name of ['raise-a-hallelujah', 'living-hope', 'digno-es-el-senor']) {
   assert(song.sources.every((item) => item.url.startsWith('http')), `${name} source urls`)
   assert(song.sections.length >= 2, `${name} sections`)
 }
+const digno = parseChart(
+  await readFile(path.join(root, 'content/digno-es-el-senor.song.md'), 'utf8'),
+  'content/digno-es-el-senor.song.md',
+)
+const vino = parseChart(
+  await readFile(path.join(root, 'content/digno-es-el-senor-vino-nuevo.song.md'), 'utf8'),
+  'content/digno-es-el-senor-vino-nuevo.song.md',
+)
+const chordSet = (song: { sections: { lines: { chords: { raw: string }[] }[] }[] }) =>
+  song.sections.flatMap((section) => section.lines.flatMap((line) => line.chords.map((chord) => chord.raw))).join(' ')
+assert(vino.title === 'Digno es el Señor', 'vino nuevo title')
+assert(vino.key === 'A', 'vino nuevo key')
+assert(vino.source.includes('lacuerda.net'), 'vino nuevo source')
+assert(chordSet(vino).includes('D/E') && !chordSet(vino).includes('C#m7'), 'vino nuevo keeps the La Cuerda chords')
+assert(chordSet(digno).includes('C#m7') && digno.source.includes('youtube.com'), 'existing digno chart stays')
 const blocks = blocksFor(markdown, markdown.versions[0]?.flow ?? null)
 assert(blocks.some((block) => block.repeat >= 2) || markdown.sections.some((section) => section.sameAs), 'same section')
 const only = blocksFor(markdown, ['coro-2'])

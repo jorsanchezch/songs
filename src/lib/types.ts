@@ -49,6 +49,8 @@ export type Song = {
   artist: string
   composer: string
   key: string
+  /** Frozen when the editing key changes. Omitted when it matches `key`. */
+  originalKey?: string
   source: string
   sources: SongSource[]
   sections: SongSection[]

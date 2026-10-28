@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   ArrowLeft,
@@ -11,6 +11,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import { ChartPreview } from '@/components/ChartPreview'
+import { ControlHint, WithHint } from '@/components/ControlHint'
 import { InstrumentSwitch } from '@/components/InstrumentSwitch'
 import { Kbd, ShortcutLegend } from '@/components/KeyHint'
 import { Button } from '@/components/ui/button'
@@ -22,16 +23,20 @@ import { loadSettings, saveSettings } from '@/lib/settings'
 import { chartToSongMd, fetchChartPage, isBlockedPage, songToMarkdown } from '@/lib/importChart'
 import { parseChart } from '@/lib/parseChart'
 import {
+  applyEditingKey,
+  applyOriginalKey,
   blankLine,
   blankNote,
   blankSection,
   blankSong,
   blankVersion,
   freshId,
+  normalizeKeyText,
   slugify,
   uniqueId,
   usedSectionIds,
 } from '@/lib/draftSong'
+import { keyChoices } from '@/lib/theory'
 import { NOTE_LABEL, NOTE_TYPES, type NoteType, type Song, type SongNote, type SongSection } from '@/lib/types'
 
 export function SongEditor() {
@@ -180,26 +185,34 @@ export function SongEditor() {
     <div className="min-h-svh pb-32">
       <header className="sticky top-0 z-20 border-b bg-background/95 backdrop-blur">
         <div className="mx-auto flex max-w-[70.4rem] items-center gap-3 px-4 py-3">
-          <Button variant="ghost" size="icon" asChild aria-label="Volver">
-            <Link to={song ? `/c/${encodeURIComponent(song.id)}` : '/'}>
-              <ArrowLeft />
-            </Link>
-          </Button>
+          <WithHint text="Sale del editor.">
+            <Button variant="ghost" size="icon" asChild aria-label="Volver" title="Sale del editor.">
+              <Link to={song ? `/c/${encodeURIComponent(song.id)}` : '/'}>
+                <ArrowLeft />
+              </Link>
+            </Button>
+          </WithHint>
           <ShortcutLegend items={[{ id: 'back', keys: <Kbd>Esc</Kbd>, label: 'Atrás' }]} />
           <h1 className="min-w-0 flex-1 truncate text-lg font-semibold">
             {draft.title.trim() || (song ? 'Editar canción' : 'Nueva canción')}
           </h1>
           <UserBadge />
           {songId ? (
-            <InstrumentSwitch value={instrument} onChange={chooseInstrument} />
+            <WithHint text="Cambia el instrumento. La letra se comparte; los acordes se quedan en este.">
+              <InstrumentSwitch value={instrument} onChange={chooseInstrument} />
+            </WithHint>
           ) : null}
           <div className="flex rounded-lg border p-0.5">
-            <Button size="sm" variant={mode === 'edit' ? 'default' : 'ghost'} onClick={() => setMode('edit')}>
-              Editar
-            </Button>
-            <Button size="sm" variant={mode === 'preview' ? 'default' : 'ghost'} onClick={() => setMode('preview')}>
-              Vista previa
-            </Button>
+            <WithHint text="Vuelve a los campos de la cifra.">
+              <Button size="sm" variant={mode === 'edit' ? 'default' : 'ghost'} title="Vuelve a los campos de la cifra." onClick={() => setMode('edit')}>
+                Editar
+              </Button>
+            </WithHint>
+            <WithHint text="Muestra la cifra como se ve en la canción.">
+              <Button size="sm" variant={mode === 'preview' ? 'default' : 'ghost'} title="Muestra la cifra como se ve en la canción." onClick={() => setMode('preview')}>
+                Vista previa
+              </Button>
+            </WithHint>
           </div>
         </div>
       </header>
@@ -218,25 +231,39 @@ export function SongEditor() {
         ) : (
           <>
             <section className="grid gap-3 sm:grid-cols-2">
-              <Field label="Título">
-                <Input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} />
+              <Field label="Título" hint="Nombre de la canción.">
+                <Input aria-label="Título" value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} />
               </Field>
-              <Field label="Artista">
-                <Input value={draft.artist} onChange={(event) => setDraft({ ...draft, artist: event.target.value })} />
+              <Field label="Artista" hint="Quién la canta.">
+                <Input aria-label="Artista" value={draft.artist} onChange={(event) => setDraft({ ...draft, artist: event.target.value })} />
               </Field>
-              <Field label="Compositor">
-                <Input value={draft.composer} onChange={(event) => setDraft({ ...draft, composer: event.target.value })} />
+              <Field label="Compositor" hint="Quién la escribió.">
+                <Input aria-label="Compositor" value={draft.composer} onChange={(event) => setDraft({ ...draft, composer: event.target.value })} />
               </Field>
-              <Field label="Tonalidad">
-                <Input value={draft.key} onChange={(event) => setDraft({ ...draft, key: event.target.value })} className="uppercase" />
-              </Field>
+              <KeyCombobox
+                label="Tono de edición"
+                hint="Tono en el que editas. Al cambiarlo, transporta los acordes y deja quieto el tono original."
+                value={draft.key}
+                onCommit={(next) => setDraft((current) => applyEditingKey(current, next))}
+              />
+              <KeyCombobox
+                label="Tono original"
+                hint="Tono de la cifra de origen. Cambiarlo no mueve los acordes."
+                value={draft.originalKey || draft.key}
+                onCommit={(next) => setDraft((current) => applyOriginalKey(current, next))}
+              />
               <div className="sm:col-span-2 flex flex-col gap-2">
                 <div className="flex items-center justify-between gap-2">
-                  <p className="text-sm font-medium">Referencias y tutoriales</p>
-                  <Button
+                  <p className="inline-flex items-center gap-1 text-sm font-medium">
+                    Referencias y tutoriales
+                    <ControlHint text="Enlaces de tutoriales o cifras." />
+                  </p>
+                  <WithHint text="Agrega otro enlace.">
+                    <Button
                     type="button"
                     size="sm"
                     variant="outline"
+                    title="Agrega otro enlace."
                     onClick={() =>
                       setDraft((current) => ({
                         ...current,
@@ -246,6 +273,7 @@ export function SongEditor() {
                   >
                     <Plus /> Enlace
                   </Button>
+                  </WithHint>
                 </div>
                 {(draft.sources.length ? draft.sources : [{ url: draft.source, label: '' }]).map(
                   (item, index) => (
@@ -270,6 +298,7 @@ export function SongEditor() {
                         }}
                         placeholder="https://youtube.com/... o cifra"
                         inputMode="url"
+                        title="Dirección del tutorial o de la cifra."
                         aria-label={`URL de referencia ${index + 1}`}
                       />
                       <Input
@@ -287,12 +316,15 @@ export function SongEditor() {
                           })
                         }}
                         placeholder="Tutorial, cifra…"
+                        title="Nombre corto del enlace, como Tutorial o Cifra."
                         aria-label={`Etiqueta de referencia ${index + 1}`}
                       />
+                      <WithHint text="Quita este enlace.">
                       <Button
                         type="button"
                         size="icon"
                         variant="ghost"
+                        title="Quita este enlace."
                         aria-label={`Quitar referencia ${index + 1}`}
                         onClick={() =>
                           setDraft((current) => {
@@ -310,6 +342,7 @@ export function SongEditor() {
                       >
                         <Trash2 />
                       </Button>
+                      </WithHint>
                     </div>
                   ),
                 )}
@@ -317,26 +350,38 @@ export function SongEditor() {
             </section>
 
             <details className="rounded-xl border bg-card px-3 py-2">
-              <summary className="cursor-pointer text-sm font-medium">Traer de un enlace</summary>
+              <summary className="cursor-pointer text-sm font-medium">
+                <span className="inline-flex items-center gap-1">
+                  Traer de un enlace
+                  <span onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
+                    <ControlHint text="Pega un enlace y convierte esa cifra en este borrador." />
+                  </span>
+                </span>
+              </summary>
               <div className="mt-3 flex flex-col gap-2 sm:flex-row">
                 <Input
                   value={url}
                   onChange={(event) => setUrl(event.target.value)}
                   placeholder="https://www.cifraclub.com/..."
                   inputMode="url"
+                  title="Enlace de Cifra Club, La Cuerda u otra cifra."
                   aria-label="Enlace de la cifra"
                 />
-                <Button onClick={() => void convert()} disabled={busy || !url.trim()}>
-                  {busy ? 'Convirtiendo…' : 'Convertir'}
-                </Button>
+                <WithHint text="Lee el enlace y reemplaza el borrador.">
+                  <Button title="Lee el enlace y reemplaza el borrador." onClick={() => void convert()} disabled={busy || !url.trim()}>
+                    {busy ? 'Convirtiendo…' : 'Convertir'}
+                  </Button>
+                </WithHint>
               </div>
             </details>
 
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h2 className="text-sm font-semibold tracking-wide text-muted-foreground uppercase">Partes</h2>
+              <WithHint text="Agrega una parte vacía al final.">
               <Button
                 size="sm"
                 variant="outline"
+                title="Agrega una parte vacía al final."
                 onClick={() =>
                   setDraft((current) => {
                     const ids = usedSectionIds(current)
@@ -352,6 +397,7 @@ export function SongEditor() {
               >
                 <Plus /> Parte
               </Button>
+              </WithHint>
             </div>
 
             {draft.sections.map((section, index) => (
@@ -384,15 +430,18 @@ export function SongEditor() {
             <VersionsEditor song={draft} onChange={setDraft} />
 
             {song?.overridden && song.origin === 'catalog' && song.editable && (
-              <Button
-                variant="outline"
-                onClick={() => {
-                  void restoreSong(song.id)
-                  navigate(`/c/${encodeURIComponent(song.id)}`)
-                }}
-              >
-                Restaurar original
-              </Button>
+              <WithHint text="Vuelve a la cifra del archivo y descarta el cambio de la base.">
+                <Button
+                  variant="outline"
+                  title="Vuelve a la cifra del archivo y descarta el cambio de la base."
+                  onClick={() => {
+                    void restoreSong(song.id)
+                    navigate(`/c/${encodeURIComponent(song.id)}`)
+                  }}
+                >
+                  Restaurar original
+                </Button>
+              </WithHint>
             )}
           </>
         )}
@@ -400,10 +449,16 @@ export function SongEditor() {
 
       <footer className="fixed inset-x-0 bottom-8 z-20 border-t bg-background/95 px-4 py-3 backdrop-blur">
         <div className="mx-auto flex max-w-[70.4rem] flex-wrap gap-2">
-          {(!songId || song?.editable) && <Button onClick={save}>Guardar</Button>}
-          <Button variant="outline" onClick={download}>
-            Descargar .song.md
-          </Button>
+          {(!songId || song?.editable) && (
+            <WithHint text="Guarda la cifra en el cancionero.">
+              <Button title="Guarda la cifra en el cancionero." onClick={save}>Guardar</Button>
+            </WithHint>
+          )}
+          <WithHint text="Baja un archivo .song.md de este borrador.">
+            <Button variant="outline" title="Baja un archivo .song.md de este borrador." onClick={download}>
+              Descargar .song.md
+            </Button>
+          </WithHint>
         </div>
       </footer>
     </div>
@@ -444,6 +499,7 @@ function SectionCard({
         <Input
           value={section.label}
           aria-label="Nombre de la parte"
+          title="Verso, coro, puente u otro nombre."
           onChange={(event) => onChange({ ...section, label: event.target.value })}
           className="max-w-xs font-semibold"
         />
@@ -454,42 +510,57 @@ function SectionCard({
             min={1}
             value={section.repeat}
             aria-label="Repeticiones"
+            title="Cuántas veces se toca esta parte."
             onChange={(event) => onChange({ ...section, repeat: Math.max(1, Number(event.target.value) || 1) })}
             className="w-16"
           />
+          <ControlHint text="Cuántas veces se toca esta parte." />
         </label>
-        <Button size="icon" variant="ghost" aria-label="Subir parte" onClick={() => onMove(-1)}>
-          <ChevronUp />
-        </Button>
-        <Button size="icon" variant="ghost" aria-label="Bajar parte" onClick={() => onMove(1)}>
-          <ChevronDown />
-        </Button>
-        <Button size="sm" variant="ghost" onClick={onToggleFold} aria-pressed={folded}>
-          {folded ? <Eye /> : <EyeOff />}
-          {folded ? 'Mostrar' : 'Plegar'}
-        </Button>
-        <Button size="sm" variant={included ? 'outline' : 'default'} onClick={onToggleIncluded}>
-          {included ? `En ${versionLabel ?? 'la versión'}` : 'Oculta'}
-        </Button>
-        <Button size="sm" variant="ghost" onClick={onDuplicate}>
-          Duplicar
-        </Button>
-        <Button size="icon" variant="ghost" aria-label="Quitar parte" onClick={onRemove}>
-          <Trash2 />
-        </Button>
+        <WithHint text="Mueve la parte hacia arriba.">
+          <Button size="icon" variant="ghost" aria-label="Subir parte" title="Mueve la parte hacia arriba." onClick={() => onMove(-1)}>
+            <ChevronUp />
+          </Button>
+        </WithHint>
+        <WithHint text="Mueve la parte hacia abajo.">
+          <Button size="icon" variant="ghost" aria-label="Bajar parte" title="Mueve la parte hacia abajo." onClick={() => onMove(1)}>
+            <ChevronDown />
+          </Button>
+        </WithHint>
+        <WithHint text="Esconde o muestra el contenido de la parte.">
+          <Button size="sm" variant="ghost" onClick={onToggleFold} aria-pressed={folded} title="Esconde o muestra el contenido de la parte.">
+            {folded ? <Eye /> : <EyeOff />}
+            {folded ? 'Mostrar' : 'Plegar'}
+          </Button>
+        </WithHint>
+        <WithHint text="Incluye o quita esta parte de la versión.">
+          <Button size="sm" variant={included ? 'outline' : 'default'} title="Incluye o quita esta parte de la versión." onClick={onToggleIncluded}>
+            {included ? `En ${versionLabel ?? 'la versión'}` : 'Oculta'}
+          </Button>
+        </WithHint>
+        <WithHint text="Copia esta parte al final.">
+          <Button size="sm" variant="ghost" title="Copia esta parte al final." onClick={onDuplicate}>
+            Duplicar
+          </Button>
+        </WithHint>
+        <WithHint text="Elimina esta parte.">
+          <Button size="icon" variant="ghost" aria-label="Quitar parte" title="Elimina esta parte." onClick={onRemove}>
+            <Trash2 />
+          </Button>
+        </WithHint>
       </div>
 
       {!folded && (
         <div className="mt-3 flex flex-col gap-3">
           <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Id">
+            <Field label="Id" hint="Identificador interno. Sirve para repetir la parte.">
               <Input
                 value={section.id}
+                aria-label="Id de la parte"
                 onChange={(event) => onRenameId(slugify(event.target.value))}
                 className="font-mono"
               />
             </Field>
-            <Field label="Igual que">
+            <Field label="Igual que" hint="Muestra la letra de otra parte, sin copiarla.">
               <select
                 value={section.sameAs ?? ''}
                 aria-label="Parte duplicada"
@@ -513,6 +584,7 @@ function SectionCard({
 
           <NoteList
             label="Notas de la parte"
+            hint="Marcas de esta parte: entrada, cómo, repite, arreglo o nota."
             notes={section.notes}
             onChange={(notes) => onChange({ ...section, notes })}
           />
@@ -542,9 +614,11 @@ function SectionCard({
                   }
                 />
               ))}
-              <Button size="sm" variant="outline" onClick={() => onChange({ ...section, lines: [...section.lines, blankLine()] })}>
-                <Plus /> Línea
-              </Button>
+              <WithHint text="Agrega una línea a esta parte.">
+                <Button size="sm" variant="outline" title="Agrega una línea a esta parte." onClick={() => onChange({ ...section, lines: [...section.lines, blankLine()] })}>
+                  <Plus /> Línea
+                </Button>
+              </WithHint>
             </div>
           )}
         </div>
@@ -574,6 +648,7 @@ function LineCard({
             <input
               value={chord.raw}
               aria-label="Acorde"
+              title="Símbolo del acorde, como G o D/F#."
               onChange={(event) =>
                 onChange({
                   ...line,
@@ -589,6 +664,7 @@ function LineCard({
               min={0}
               value={chord.column}
               aria-label="Columna del acorde"
+              title="En qué letra de la línea cae el acorde."
               onChange={(event) =>
                 onChange({
                   ...line,
@@ -602,6 +678,7 @@ function LineCard({
             <button
               type="button"
               aria-label="Quitar acorde"
+              title="Quita este acorde."
               className="px-1 text-muted-foreground"
               onClick={() => onChange({ ...line, chords: line.chords.filter((_, itemIndex) => itemIndex !== index) })}
             >
@@ -609,6 +686,7 @@ function LineCard({
             </button>
             <NoteList
               label=""
+              hint="Marca sobre este acorde."
               notes={chord.notes}
               compact
               onChange={(notes) =>
@@ -620,9 +698,11 @@ function LineCard({
             />
           </span>
         ))}
+        <WithHint text="Agrega un acorde donde está el cursor de la letra.">
         <Button
           size="sm"
           variant="ghost"
+          title="Agrega un acorde donde está el cursor de la letra."
           onClick={() => {
             const column = lyricRef.current?.selectionStart ?? (line.lyric?.length ?? 0)
             onChange({
@@ -633,6 +713,7 @@ function LineCard({
         >
           <Plus /> Acorde
         </Button>
+        </WithHint>
       </div>
       {instrumental ? (
         <p className="font-mono text-sm text-muted-foreground">Instrumental</p>
@@ -641,41 +722,53 @@ function LineCard({
           ref={lyricRef}
           value={line.lyric ?? ''}
           aria-label="Letra"
+          title="Texto que se canta en esta línea."
           onChange={(event) => onChange({ ...line, lyric: event.target.value })}
           className="w-full bg-transparent font-mono text-base outline-none"
           placeholder="Letra"
         />
       )}
       <div className="mt-2 flex flex-wrap gap-1">
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={() => onChange({ ...line, lyric: instrumental ? '' : null })}
-        >
-          {instrumental ? 'Con letra' : 'Sin letra'}
-        </Button>
-        <Button size="icon" variant="ghost" aria-label="Subir línea" onClick={() => onMove(-1)}>
-          <ChevronUp />
-        </Button>
-        <Button size="icon" variant="ghost" aria-label="Bajar línea" onClick={() => onMove(1)}>
-          <ChevronDown />
-        </Button>
-        <Button size="icon" variant="ghost" aria-label="Quitar línea" onClick={onRemove}>
-          <Trash2 />
-        </Button>
+        <WithHint text={instrumental ? 'Vuelve a poner letra en esta línea.' : 'Deja la línea solo con acordes.'}>
+          <Button
+            size="sm"
+            variant="ghost"
+            title={instrumental ? 'Vuelve a poner letra en esta línea.' : 'Deja la línea solo con acordes.'}
+            onClick={() => onChange({ ...line, lyric: instrumental ? '' : null })}
+          >
+            {instrumental ? 'Con letra' : 'Sin letra'}
+          </Button>
+        </WithHint>
+        <WithHint text="Mueve la línea hacia arriba.">
+          <Button size="icon" variant="ghost" aria-label="Subir línea" title="Mueve la línea hacia arriba." onClick={() => onMove(-1)}>
+            <ChevronUp />
+          </Button>
+        </WithHint>
+        <WithHint text="Mueve la línea hacia abajo.">
+          <Button size="icon" variant="ghost" aria-label="Bajar línea" title="Mueve la línea hacia abajo." onClick={() => onMove(1)}>
+            <ChevronDown />
+          </Button>
+        </WithHint>
+        <WithHint text="Elimina esta línea.">
+          <Button size="icon" variant="ghost" aria-label="Quitar línea" title="Elimina esta línea." onClick={onRemove}>
+            <Trash2 />
+          </Button>
+        </WithHint>
       </div>
-      <NoteList label="Notas de la línea" notes={line.notes} onChange={(notes) => onChange({ ...line, notes })} />
+      <NoteList label="Notas de la línea" hint="Marcas de esta línea." notes={line.notes} onChange={(notes) => onChange({ ...line, notes })} />
     </div>
   )
 }
 
 function NoteList({
   label,
+  hint,
   notes,
   onChange,
   compact = false,
 }: {
   label: string
+  hint?: string
   notes: SongNote[]
   onChange: (notes: SongNote[]) => void
   compact?: boolean
@@ -687,6 +780,7 @@ function NoteList({
           <select
             value={note.type}
             aria-label="Tipo de nota"
+            title="Entrada, cómo tocarlo, repetición, arreglo o nota libre."
             onChange={(event) =>
               onChange(notes.map((item) => (item.id === note.id ? { ...item, type: event.target.value as NoteType } : item)))
             }
@@ -701,6 +795,7 @@ function NoteList({
           <Input
             value={note.text}
             aria-label="Texto de la nota"
+            title="Lo que dice la marca."
             onChange={(event) =>
               onChange(notes.map((item) => (item.id === note.id ? { ...item, text: event.target.value } : item)))
             }
@@ -709,6 +804,7 @@ function NoteList({
           <button
             type="button"
             aria-label="Quitar nota"
+            title="Elimina esta marca."
             className="px-1 text-muted-foreground"
             onClick={() => onChange(notes.filter((item) => item.id !== note.id))}
           >
@@ -716,13 +812,17 @@ function NoteList({
           </button>
         </div>
       ))}
-      <button
-        type="button"
-        className="self-start text-xs font-medium text-primary"
-        onClick={() => onChange([...notes, blankNote()])}
-      >
-        {label ? `+ ${label}` : '+ Nota'}
-      </button>
+      <span className="inline-flex items-center gap-1 self-start">
+        <button
+          type="button"
+          className="text-xs font-medium text-primary"
+          title={hint || (label ? `Agrega ${label.toLowerCase()}.` : 'Agrega una marca.')}
+          onClick={() => onChange([...notes, blankNote()])}
+        >
+          {label ? `+ ${label}` : '+ Nota'}
+        </button>
+        <ControlHint text={hint || (label ? `Agrega ${label.toLowerCase()}.` : 'Agrega una marca sobre el acorde.')} />
+      </span>
     </div>
   )
 }
@@ -732,9 +832,11 @@ function VersionsEditor({ song, onChange }: { song: Song; onChange: (song: Song)
     <section className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-sm font-semibold tracking-wide text-muted-foreground uppercase">Versiones</h2>
+        <WithHint text="Agrega una versión con el orden de las partes.">
         <Button
           size="sm"
           variant="outline"
+          title="Agrega una versión con el orden de las partes."
           onClick={() =>
             onChange({
               ...song,
@@ -751,6 +853,7 @@ function VersionsEditor({ song, onChange }: { song: Song; onChange: (song: Song)
         >
           <Plus /> Versión
         </Button>
+        </WithHint>
       </div>
       {song.versions.length === 0 && (
         <p className="text-sm text-muted-foreground">
@@ -763,6 +866,7 @@ function VersionsEditor({ song, onChange }: { song: Song; onChange: (song: Song)
             <Input
               value={version.label}
               aria-label="Nombre de la versión"
+              title="Nombre de esta presentación."
               onChange={(event) =>
                 onChange({
                   ...song,
@@ -773,16 +877,22 @@ function VersionsEditor({ song, onChange }: { song: Song; onChange: (song: Song)
               }
               className="max-w-xs"
             />
-            <Button
-              size="icon"
-              variant="ghost"
-              aria-label="Quitar versión"
-              onClick={() => onChange({ ...song, versions: song.versions.filter((item) => item.id !== version.id) })}
-            >
-              <Trash2 />
-            </Button>
+            <WithHint text="Elimina esta versión.">
+              <Button
+                size="icon"
+                variant="ghost"
+                aria-label="Quitar versión"
+                title="Elimina esta versión."
+                onClick={() => onChange({ ...song, versions: song.versions.filter((item) => item.id !== version.id) })}
+              >
+                <Trash2 />
+              </Button>
+            </WithHint>
           </div>
-          <p className="mb-1 text-xs font-medium text-muted-foreground">Notas abiertas al empezar</p>
+          <p className="mb-1 inline-flex items-center gap-1 text-xs font-medium text-muted-foreground">
+            Notas abiertas al empezar
+            <ControlHint text="Qué marcas se ven abiertas al empezar esta versión." />
+          </p>
           <div className="mb-3 flex flex-wrap gap-1">
             {NOTE_TYPES.map((type) => {
               const on = version.openNotes.includes(type)
@@ -791,6 +901,7 @@ function VersionsEditor({ song, onChange }: { song: Song; onChange: (song: Song)
                   key={type}
                   type="button"
                   aria-pressed={on}
+                  title={`Muestra u oculta «${NOTE_LABEL[type]}» al empezar.`}
                   onClick={() =>
                     onChange({
                       ...song,
@@ -819,10 +930,12 @@ function VersionsEditor({ song, onChange }: { song: Song; onChange: (song: Song)
               return (
                 <li key={`${version.id}-${id}-${index}`} className="flex items-center gap-2 text-sm">
                   <span className="min-w-0 flex-1 truncate">{section?.label ?? id}</span>
+                  <WithHint text="Sube esta parte en el orden de la versión.">
                   <Button
                     size="icon"
                     variant="ghost"
                     aria-label="Subir en la versión"
+                    title="Sube esta parte en el orden de la versión."
                     onClick={() =>
                       onChange({
                         ...song,
@@ -834,10 +947,13 @@ function VersionsEditor({ song, onChange }: { song: Song; onChange: (song: Song)
                   >
                     <ChevronUp />
                   </Button>
+                  </WithHint>
+                  <WithHint text="Baja esta parte en el orden de la versión.">
                   <Button
                     size="icon"
                     variant="ghost"
                     aria-label="Bajar en la versión"
+                    title="Baja esta parte en el orden de la versión."
                     onClick={() =>
                       onChange({
                         ...song,
@@ -849,6 +965,7 @@ function VersionsEditor({ song, onChange }: { song: Song; onChange: (song: Song)
                   >
                     <ChevronDown />
                   </Button>
+                  </WithHint>
                 </li>
               )
             })}
@@ -859,12 +976,72 @@ function VersionsEditor({ song, onChange }: { song: Song; onChange: (song: Song)
   )
 }
 
-function Field({ label, children, className = '' }: { label: string; children: ReactNode; className?: string }) {
+function Field({
+  label,
+  hint,
+  children,
+  className = '',
+}: {
+  label: string
+  hint?: string
+  children: ReactNode
+  className?: string
+}) {
   return (
     <label className={`flex flex-col gap-1 text-sm font-medium ${className}`}>
-      {label}
+      <span className="inline-flex items-center gap-1">
+        {label}
+        {hint ? <ControlHint text={hint} /> : null}
+      </span>
       {children}
     </label>
+  )
+}
+
+function KeyCombobox({
+  label,
+  hint,
+  value,
+  onCommit,
+}: {
+  label: string
+  hint: string
+  value: string
+  onCommit: (next: string) => void
+}) {
+  const listId = useId()
+  const [text, setText] = useState(value)
+  useEffect(() => {
+    setText(value)
+  }, [value])
+  return (
+    <Field label={label} hint={hint}>
+      <Input
+        list={listId}
+        value={text}
+        aria-label={label}
+        autoCapitalize="off"
+        autoCorrect="off"
+        spellCheck={false}
+        onChange={(event) => {
+          const next = event.target.value
+          setText(next)
+          const native = event.nativeEvent
+          if (native instanceof InputEvent && native.inputType === 'insertReplacementText') {
+            onCommit(normalizeKeyText(next))
+          }
+        }}
+        onBlur={(event) => onCommit(normalizeKeyText(event.target.value))}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') event.currentTarget.blur()
+        }}
+      />
+      <datalist id={listId}>
+        {keyChoices().map((choice) => (
+          <option key={choice} value={choice} />
+        ))}
+      </datalist>
+    </Field>
   )
 }
 

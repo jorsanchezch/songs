@@ -44,6 +44,11 @@ export function circleKeys(minor: boolean): StudyKey[] {
   return CIRCLE.map((pc) => ({ pc: minor ? mod12(pc + 9) : pc, minor }))
 }
 
+/** Major keys around the circle, then minor keys. Values match `parseKey`. */
+export function keyChoices(): string[] {
+  return [...circleKeys(false), ...circleKeys(true)].map((key) => keyName(key))
+}
+
 /** Sharps or flats in the key signature, read from the relative major. */
 export function signature(key: StudyKey): string {
   const major = key.minor ? mod12(key.pc + 3) : key.pc

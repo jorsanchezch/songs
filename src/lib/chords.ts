@@ -61,6 +61,16 @@ export function spellPitch(pc: number, flats: boolean): string {
   return table[(pc % 12 + 12) % 12] ?? 'C'
 }
 
+/** Move a chord symbol by semitones. `flats` follows the destination key. */
+export function transposeChordSymbol(raw: string, semitones: number, flats?: boolean): string {
+  const steps = mod12(semitones)
+  if (steps === 0) return raw.trim()
+  const chord = splitChord(raw)
+  const rootPc = pitchClass(chord.root)
+  if (rootPc == null) return chord.raw
+  return letterChord(chord, steps, flats ?? prefersFlats(mod12(rootPc + steps), false))
+}
+
 export function transposeKeyName(key: string, semitones: number): string {
   const parsed = parseKey(key)
   if (!parsed.valid) return key.trim() || '—'

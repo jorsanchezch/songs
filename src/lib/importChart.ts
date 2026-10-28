@@ -47,11 +47,13 @@ export function songToMarkdown(song: Song): string {
     : song.source.trim()
       ? [{ url: song.source.trim(), label: 'Fuente' }]
       : []
+  const originalKey = song.originalKey?.trim() ?? ''
   const fields = [
     ['title', song.title],
     ['artist', song.artist],
     ['composer', song.composer],
     ['key', song.key],
+    ['original_key', originalKey && originalKey !== song.key.trim() ? originalKey : ''],
     ['source', sources[0]?.url ?? ''],
   ].filter(([, value]) => value.trim())
   const sourceLines = sources.length

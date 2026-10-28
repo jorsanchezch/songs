@@ -310,12 +310,15 @@ function finishSong(
     .join('\n')
     .replace(/_+/g, ' ')
   const sources = mergeSources(sourceEntries, meta.source ?? '')
+  const key = (meta.key ?? '').trim()
+  const originalKey = (meta.original_key ?? '').trim()
   return {
     id: filePath.replace(/\.(song\.md|chopro|cho)$/i, ''),
     title,
     artist,
     composer: meta.composer ?? '',
-    key: (meta.key ?? '').trim(),
+    key,
+    originalKey: originalKey && originalKey !== key ? originalKey : undefined,
     source: sources[0]?.url ?? '',
     sources,
     sections,
