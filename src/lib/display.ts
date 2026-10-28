@@ -1,6 +1,16 @@
 import type { ChartLine, Song, SongSection } from '@/lib/types'
 
-export type FoldMode = 'full' | 'concise' | 'music'
+export type FoldMode = 'collapse' | 'byChords' | 'chordsOnly' | 'openChords' | 'full'
+
+/** Identical parts, or same chords, share one header chip. */
+export function foldGroupsParts(fold: FoldMode): boolean {
+  return fold === 'collapse' || fold === 'byChords' || fold === 'chordsOnly'
+}
+
+/** Chords-only modes drop the lyric lines. */
+export function foldHidesLyrics(fold: FoldMode): boolean {
+  return fold === 'chordsOnly' || fold === 'openChords'
+}
 
 export type DisplayBlock = {
   id: string
@@ -167,8 +177,10 @@ export function blocksFor(song: Song, flow: string[] | null, fold: FoldMode = 'f
       const sameMusic = seenMusic.get(music)
       if (!seenExact.has(exactKey)) seenExact.set(exactKey, { label: block.label, id: block.id })
       if (!music.startsWith('empty:') && !seenMusic.has(music)) seenMusic.set(music, { label: block.label, id: block.id })
-      if (fold === 'concise' && exact) return { ...block, duplicateOf: exact.label, duplicateOfId: exact.id }
-      if (fold === 'music' && sameMusic) return { ...block, duplicateOf: sameMusic.label, duplicateOfId: sameMusic.id }
+      if ((fold === 'collapse' || fold === 'chordsOnly') && exact) {
+        return { ...block, duplicateOf: exact.label, duplicateOfId: exact.id }
+      }
+      if (fold === 'byChords' && sameMusic) return { ...block, duplicateOf: sameMusic.label, duplicateOfId: sameMusic.id }
     }
     return block
   })

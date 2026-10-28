@@ -1,10 +1,10 @@
 import { useMemo, useState } from 'react'
 import { ChartRow, NoteRow } from '@/components/ChartLines'
-import { foldMessage, FoldToggle } from '@/components/FoldToggle'
+import { FoldToggle } from '@/components/FoldToggle'
 import { SpellingToggle } from '@/components/SpellingToggle'
 import { Button } from '@/components/ui/button'
 import { formatChord, transposeKeyName } from '@/lib/chords'
-import { blocksFor, chordSequence, headerChips, headerChipText, type FoldMode } from '@/lib/display'
+import { blocksFor, chordSequence, foldGroupsParts, foldHidesLyrics, headerChips, headerChipText, type FoldMode } from '@/lib/display'
 import { NOTE_LABEL, NOTE_TYPES, type NoteType, type Song, type Spelling } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
@@ -15,7 +15,6 @@ export function ChartPreview({ song }: { song: Song }) {
   const [visibleNotes, setVisibleNotes] = useState<NoteType[]>([...NOTE_TYPES])
   const [versionId, setVersionId] = useState<string | null>(song.versions[0]?.id ?? null)
   const [current, setCurrent] = useState<string | null>(null)
-  const [expanded, setExpanded] = useState<string[]>([])
   const [openNote, setOpenNote] = useState<string | null>(null)
   const [semitones, setSemitones] = useState(0)
 
@@ -24,7 +23,7 @@ export function ChartPreview({ song }: { song: Song }) {
     () => blocksFor(song, version?.flow ?? null, fold),
     [fold, song, version],
   )
-  const nav = useMemo(() => headerChips(blocks, fold !== 'full'), [blocks, fold])
+  const nav = useMemo(() => headerChips(blocks, foldGroupsParts(fold)), [blocks, fold])
   const activeId = current && blocks.some((block) => block.id === current) ? current : (blocks[0]?.id ?? null)
   const names = chordSequence(blocks.flatMap((block) => block.section.lines)).map((name) =>
     formatChord(name, song.key, semitones, spelling),
@@ -46,14 +45,7 @@ export function ChartPreview({ song }: { song: Song }) {
         <Button size="sm" variant={showChords ? 'default' : 'outline'} onClick={() => setShowChords((value) => !value)}>
           Acordes
         </Button>
-        <FoldToggle
-          size="sm"
-          value={fold}
-          onChange={(next) => {
-            setExpanded([])
-            setFold(next)
-          }}
-        />
+        <FoldToggle size="sm" value={fold} onChange={setFold} />
       </div>
       <div className="flex flex-wrap gap-1.5">
         {NOTE_TYPES.map((type) => {
@@ -124,13 +116,12 @@ export function ChartPreview({ song }: { song: Song }) {
       <div className="space-y-8 font-mono text-[1.35rem]">
         {blocks.map((block) => {
           const active = block.id === activeId
-          const folded = fold !== 'full' && Boolean(block.duplicateOf) && !expanded.includes(block.id)
-          const earlier =
-            fold === 'music' && block.duplicateOfId
-              ? blocks.find((item) => item.id === block.duplicateOfId)?.section
-              : undefined
+          const earlier = block.duplicateOfId
+            ? blocks.find((item) => item.id === block.duplicateOfId)?.section
+            : undefined
           const lines = (earlier ?? block.section).lines
           const shown = earlier ? { ...block, section: { ...block.section, lines: earlier.lines } } : block
+          const showLyrics = !foldHidesLyrics(fold)
           return (
             <section key={block.id} className={cn(active && 'border-l-2 border-primary pl-3')}>
               <h2 className="mb-2 font-sans text-sm font-semibold tracking-wide text-primary uppercase">
@@ -144,30 +135,21 @@ export function ChartPreview({ song }: { song: Song }) {
                 prefix={`${block.id}:section`}
                 onToggle={setOpenNote}
               />
-              {folded ? (
-                <button
-                  type="button"
-                  className="font-sans text-sm text-muted-foreground underline-offset-2 hover:underline"
-                  onClick={() => setExpanded((ids) => [...ids, block.id])}
-                >
-                  {foldMessage(fold, block.duplicateOf ?? '')}
-                </button>
-              ) : (
-                lines.map((line, index) => (
-                  <ChartRow
-                    key={`${block.id}-${index}`}
-                    block={shown}
-                    lineIndex={index}
-                    showChords={showChords || line.lyric == null}
-                    spelling={spelling}
-                    semitones={semitones}
-                    songKey={song.key}
-                    visible={visibleNotes}
-                    openNote={openNote}
-                    onToggle={setOpenNote}
-                  />
-                ))
-              )}
+              {lines.map((line, index) => (
+                <ChartRow
+                  key={`${block.id}-${index}`}
+                  block={shown}
+                  lineIndex={index}
+                  showChords={showChords || line.lyric == null}
+                  showLyrics={showLyrics}
+                  spelling={spelling}
+                  semitones={semitones}
+                  songKey={song.key}
+                  visible={visibleNotes}
+                  openNote={openNote}
+                  onToggle={setOpenNote}
+                />
+              ))}
             </section>
           )
         })}

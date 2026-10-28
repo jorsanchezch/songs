@@ -37,8 +37,18 @@ function savedSpelling(value: unknown): Spelling {
 }
 
 function savedFold(parsed: { fold?: unknown; concise?: unknown }): FoldMode {
-  if (parsed.fold === 'full' || parsed.fold === 'concise' || parsed.fold === 'music') return parsed.fold
-  return parsed.concise === true ? 'concise' : 'full'
+  if (
+    parsed.fold === 'collapse' ||
+    parsed.fold === 'byChords' ||
+    parsed.fold === 'chordsOnly' ||
+    parsed.fold === 'openChords' ||
+    parsed.fold === 'full'
+  ) {
+    return parsed.fold
+  }
+  if (parsed.fold === 'concise' || parsed.concise === true) return 'collapse'
+  if (parsed.fold === 'music') return 'byChords'
+  return 'full'
 }
 
 export function loadSettings(): ViewSettings {

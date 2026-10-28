@@ -113,9 +113,11 @@ const chorusPair = parseChart(
   ['---', 'title: T', '---', '', '## Coro {#coro}', '[C]', 'Hola', '', '## Verso {#verso}', '[G]', 'Otra', '', '## Coro x2 {#coro-x2}', '[C]', 'Hola', ''].join('\n'),
   'coro-x2.song.md',
 )
-const chorusBlocks = blocksFor(chorusPair, null, 'concise')
+const chorusBlocks = blocksFor(chorusPair, null, 'collapse')
 assert(chorusBlocks.find((block) => block.label === 'Coro x2')?.duplicateOf === 'Coro', 'chorus x2 collapses with the chorus')
+assert(blocksFor(chorusPair, null, 'chordsOnly').find((block) => block.label === 'Coro x2')?.duplicateOf === 'Coro', 'chords-only collapse still folds identical parts')
 assert(!blocksFor(chorusPair, null, 'full').some((block) => block.duplicateOf), 'completo leaves repeated parts open')
+assert(!blocksFor(chorusPair, null, 'openChords').some((block) => block.duplicateOf), 'completo sin letra leaves parts open')
 const openHeader = headerChips(blocksFor(chorusPair, null, 'full'), false)
 assert(openHeader.length === 3, 'full header lists every part')
 assert(headerChipText(openHeader[2]!) === 'Coro x2', 'x2 stays written on its own chip')
@@ -127,28 +129,28 @@ const repeatedChorus = parseChart(
   'repeat-coro.song.md',
 )
 assert(
-  headerChipText(headerChips(blocksFor(repeatedChorus, null, 'concise'), true)[0]!) === 'Coro ×2 · 2',
+  headerChipText(headerChips(blocksFor(repeatedChorus, null, 'collapse'), true)[0]!) === 'Coro ×2 · 2',
   'a repeated chorus keeps the count on the folded chip',
 )
 const unlike = parseChart(
   ['---', 'title: T', '---', '', '## Coro {#a}', '[C]', 'Hola', '', '## Coro {#b}', '[G]', 'Otra', ''].join('\n'),
   'unlike-coro.song.md',
 )
-assert(headerChips(blocksFor(unlike, null, 'concise'), true).length === 2, 'different choruses stay apart')
-assert(headerChips(blocksFor(unlike, null, 'music'), true).length === 2, 'different chords stay apart in music mode')
+assert(headerChips(blocksFor(unlike, null, 'collapse'), true).length === 2, 'different choruses stay apart')
+assert(headerChips(blocksFor(unlike, null, 'byChords'), true).length === 2, 'different chords stay apart in chord collapse')
 const sameMusic = parseChart(
   ['---', 'title: T', '---', '', '## Coro {#a}', '[C]', 'Hola', '', '## Verso {#b}', '[C]', 'Hola amigo', ''].join('\n'),
   'same-music.song.md',
 )
-const musicBlocks = blocksFor(sameMusic, null, 'music')
-assert(musicBlocks.find((block) => block.label === 'Verso')?.duplicateOf === 'Coro', 'music fold ignores a small lyric change')
-assert(musicBlocks.find((block) => block.label === 'Verso')?.duplicateOfId === musicBlocks[0]?.id, 'music fold points at the earlier part')
-assert(!blocksFor(sameMusic, null, 'concise').some((block) => block.duplicateOf), 'concise keeps different lyrics apart')
+const musicBlocks = blocksFor(sameMusic, null, 'byChords')
+assert(musicBlocks.find((block) => block.label === 'Verso')?.duplicateOf === 'Coro', 'chord collapse ignores a small lyric change')
+assert(musicBlocks.find((block) => block.label === 'Verso')?.duplicateOfId === musicBlocks[0]?.id, 'chord collapse points at the earlier part')
+assert(!blocksFor(sameMusic, null, 'collapse').some((block) => block.duplicateOf), 'colapsar keeps different lyrics apart')
 const longer = parseChart(
   ['---', 'title: T', '---', '', '## Coro {#a}', '[C]', 'Hola', '', '## Verso {#b}', '[C]', 'Hola', '[G]', 'amigo', ''].join('\n'),
   'longer.song.md',
 )
-assert(!blocksFor(longer, null, 'music').some((block) => block.duplicateOf), 'a different line count stays open')
+assert(!blocksFor(longer, null, 'byChords').some((block) => block.duplicateOf), 'a different line count stays open')
 assert(markdown.sections.some((section) => section.label === 'Verso'), 'plantilla says verso')
 assert(!markdown.sections.some((section) => /estrofa/i.test(section.label)), 'plantilla has no estrofa label')
 

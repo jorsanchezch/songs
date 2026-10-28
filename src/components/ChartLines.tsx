@@ -68,6 +68,7 @@ export function ChartRow({
   openNote,
   onToggle,
   wrapAt,
+  showLyrics = true,
 }: {
   block: DisplayBlock
   lineIndex: number
@@ -80,10 +81,12 @@ export function ChartRow({
   onToggle: (id: string | null) => void
   /** Columns that fit on screen. Longer lines continue below, chords with their syllables. */
   wrapAt?: number
+  /** Chords-only modes keep the chord row and drop the lyric line. */
+  showLyrics?: boolean
 }) {
   const line = block.section.lines[lineIndex]
   if (!line) return null
-  const lyric = line.lyric == null ? null : displayLyric(line.lyric)
+  const lyric = !showLyrics || line.lyric == null ? null : displayLyric(line.lyric)
   const placed = placeChords(
     line.chords.map((chord) => ({
       ...chord,
@@ -91,6 +94,7 @@ export function ChartRow({
     })),
   )
   const chordsShown = showChords && placed.items.length > 0
+  if (!chordsShown && lyric == null && line.notes.length === 0) return null
   const segments = wrapSegments(lyric, chordsShown ? placed.items : [], wrapAt)
 
   return (

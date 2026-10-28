@@ -17,7 +17,7 @@ import {
 } from 'lucide-react'
 import { ChartRow, NoteRow, placeChords } from '@/components/ChartLines'
 import { ControlHint, WithHint } from '@/components/ControlHint'
-import { foldMessage, FoldToggle } from '@/components/FoldToggle'
+import { FoldToggle } from '@/components/FoldToggle'
 import { SongMark } from '@/components/SongMark'
 import { InstrumentCharts } from '@/components/InstrumentCharts'
 import { InstrumentSwitch } from '@/components/InstrumentSwitch'
@@ -30,6 +30,8 @@ import {
   blocksFor,
   chordSequence,
   displayLyric,
+  foldGroupsParts,
+  foldHidesLyrics,
   headerChips,
   headerChipText,
   partKind,
@@ -60,7 +62,6 @@ export function SongView() {
   const [openNote, setOpenNote] = useState<string | null>(null)
   const [current, setCurrent] = useState<string | null>(null)
   const [versionId, setVersionId] = useState<string | null>(null)
-  const [expanded, setExpanded] = useState<string[]>([])
   const [headerOpen, setHeaderOpen] = useState(false)
   const [announce, setAnnounce] = useState('')
   const [headerHeight, setHeaderHeight] = useState(0)
@@ -91,7 +92,6 @@ export function SongView() {
 
   useEffect(() => {
     setOpenNote(null)
-    setExpanded([])
     setHeaderOpen(false)
     setVersionId(null)
     setCurrent(null)
@@ -108,7 +108,7 @@ export function SongView() {
     () => (chart ? blocksFor(chart, version?.flow ?? null, settings.fold) : []),
     [chart, settings.fold, version],
   )
-  const nav = useMemo(() => headerChips(blocks, settings.fold !== 'full'), [blocks, settings.fold])
+  const nav = useMemo(() => headerChips(blocks, foldGroupsParts(settings.fold)), [blocks, settings.fold])
 
   const activeId =
     current && blocks.some((block) => block.id === current)
@@ -496,20 +496,37 @@ export function SongView() {
     <div
       role="group"
       aria-label="Tono"
-      className={cn('flex shrink-0 items-center rounded-md border bg-card', compact ? 'gap-0' : 'gap-1 self-start px-1 py-1')}
+      className={cn(
+        'flex shrink-0 items-center rounded-md border bg-card',
+        compact ? 'h-7 gap-0' : 'gap-1 self-start px-1 py-1',
+      )}
     >
-      <Button variant="ghost" size="icon" aria-label="Bajar un semitono" title="Baja un semitono." onClick={() => setSemitones(semitones - 1)}>
-        <Minus />
+      <Button
+        variant="ghost"
+        size="icon"
+        className={cn(compact && 'size-7')}
+        aria-label="Bajar un semitono"
+        title="Baja un semitono."
+        onClick={() => setSemitones(semitones - 1)}
+      >
+        <Minus className={cn(compact && 'size-3')} />
       </Button>
-      <span className={cn('text-center font-semibold', compact ? 'min-w-10 text-base' : 'min-w-16 text-sm')} aria-live="polite">
+      <span className={cn('text-center font-semibold', compact ? 'min-w-5 px-0.5 text-xs' : 'min-w-16 text-sm')} aria-live="polite">
         <span className="sr-only">Tono </span>
         {soundingKey || '—'}
         {semitones !== 0 && songKey ? (
           <span className={cn('block text-xs font-normal text-muted-foreground', compact && 'sr-only')}>orig. {songKey}</span>
         ) : null}
       </span>
-      <Button variant="ghost" size="icon" aria-label="Subir un semitono" title="Sube un semitono." onClick={() => setSemitones(semitones + 1)}>
-        <Plus />
+      <Button
+        variant="ghost"
+        size="icon"
+        className={cn(compact && 'size-7')}
+        aria-label="Subir un semitono"
+        title="Sube un semitono."
+        onClick={() => setSemitones(semitones + 1)}
+      >
+        <Plus className={cn(compact && 'size-3')} />
       </Button>
     </div>
   )
@@ -539,10 +556,11 @@ export function SongView() {
                 <SongMark songId={song.id} />
                 <h1 className="min-w-0 shrink truncate text-lg font-semibold">{song.title}</h1>
                 {author && <p className="min-w-0 shrink-[2] truncate text-sm text-muted-foreground">{author}</p>}
+                {transposer(true)}
               </div>
             </div>
           )}
-          {transposer(false)}
+          {headerOpen && transposer(false)}
           {headerOpen && (
           <>
           <div className="flex flex-wrap items-center gap-2">
@@ -664,13 +682,7 @@ export function SongView() {
                 <Eye />
               </Button>
             </WithHint>
-            <FoldToggle
-              value={settings.fold}
-              onChange={(fold) => {
-                setExpanded([])
-                update({ fold })
-              }}
-            />
+            <FoldToggle value={settings.fold} onChange={(fold) => update({ fold })} />
           </div>
 
           <div className="flex flex-wrap gap-1.5">
@@ -831,13 +843,12 @@ export function SongView() {
           {blocks.map((block, index) => {
             const active = block.id === activeId
             const kind = partKind(block.label)
-            const folded = settings.fold !== 'full' && Boolean(block.duplicateOf) && !expanded.includes(block.id)
-            const earlier =
-              settings.fold === 'music' && block.duplicateOfId
-                ? blocks.find((item) => item.id === block.duplicateOfId)?.section
-                : undefined
+            const earlier = block.duplicateOfId
+              ? blocks.find((item) => item.id === block.duplicateOfId)?.section
+              : undefined
             const lines = (earlier ?? block.section).lines
             const shown = earlier ? { ...block, section: { ...block.section, lines: earlier.lines } } : block
+            const showLyrics = !foldHidesLyrics(settings.fold)
             const following = blocks[index + 1]
             const followingChord = following ? chordSequence(following.section.lines)[0] : undefined
             return (
@@ -876,38 +887,29 @@ export function SongView() {
                   prefix={`${block.id}:section`}
                   onToggle={setOpenNote}
                 />
-                {folded ? (
-                  <button
-                    type="button"
-                    className="font-sans text-[0.7em] text-muted-foreground underline-offset-2 hover:underline"
-                    onClick={() => setExpanded((ids) => [...ids, block.id])}
-                  >
-                    {foldMessage(settings.fold, block.duplicateOf ?? '')}
-                  </button>
-                ) : (
-                  <div className="overflow-x-auto">
-                    {lines.map((line, index) => (
-                      <ChartRow
-                        key={`${block.id}-${index}`}
-                        block={shown}
-                        lineIndex={index}
-                        showChords={settings.showChords || line.lyric == null}
-                        spelling={spelling}
-                        semitones={semitones}
-                        songKey={(chart ?? song).key}
-                        visible={settings.visibleNotes}
-                        openNote={openNote}
-                        onToggle={setOpenNote}
-                        wrapAt={wrapAt}
-                      />
-                    ))}
-                    {block.section.sameAs && block.section.lines.length === 0 && (
-                      <p className="font-sans text-[0.65em] text-muted-foreground">
-                        No se encontró la parte «{block.section.sameAs}».
-                      </p>
-                    )}
-                  </div>
-                )}
+                <div className="overflow-x-auto">
+                  {lines.map((line, lineIndex) => (
+                    <ChartRow
+                      key={`${block.id}-${lineIndex}`}
+                      block={shown}
+                      lineIndex={lineIndex}
+                      showChords={settings.showChords || line.lyric == null}
+                      showLyrics={showLyrics}
+                      spelling={spelling}
+                      semitones={semitones}
+                      songKey={(chart ?? song).key}
+                      visible={settings.visibleNotes}
+                      openNote={openNote}
+                      onToggle={setOpenNote}
+                      wrapAt={wrapAt}
+                    />
+                  ))}
+                  {block.section.sameAs && block.section.lines.length === 0 && (
+                    <p className="font-sans text-[0.65em] text-muted-foreground">
+                      No se encontró la parte «{block.section.sameAs}».
+                    </p>
+                  )}
+                </div>
                 {following && (
                   <button
                     type="button"

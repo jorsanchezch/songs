@@ -3,19 +3,29 @@ import type { FoldMode } from '@/lib/display'
 
 const OPTIONS: { id: FoldMode; label: string; title: string }[] = [
   {
+    id: 'collapse',
+    label: 'Colapsar',
+    title: 'Pliega las partes idénticas. Muestra la letra de la primera, con los acordes encima.',
+  },
+  {
+    id: 'byChords',
+    label: 'Colapsar por acordes',
+    title: 'Pliega si los acordes y el número de líneas coinciden, aunque la letra cambie. Muestra la letra de antes bajo los acordes.',
+  },
+  {
+    id: 'chordsOnly',
+    label: 'Colapsar sin letra',
+    title: 'Pliega las partes idénticas. Solo las partes y los acordes, sin letra.',
+  },
+  {
+    id: 'openChords',
+    label: 'Completo sin letra',
+    title: 'Muestra cada parte abierta, solo acordes, sin letra.',
+  },
+  {
     id: 'full',
     label: 'Completo',
-    title: 'Muestra cada parte abierta, también las que se repiten.',
-  },
-  {
-    id: 'concise',
-    label: 'Conciso',
-    title: 'Pliega las partes idénticas, como Coro y Coro ×2.',
-  },
-  {
-    id: 'music',
-    label: 'Conciso (música)',
-    title: 'Pliega si los acordes y el número de líneas coinciden, aunque la letra cambie. Muestra la letra de antes.',
+    title: 'Muestra cada parte abierta, con la letra.',
   },
 ]
 
@@ -34,7 +44,7 @@ export function FoldToggle({
   size?: 'default' | 'sm'
 }) {
   const index = Math.max(0, OPTIONS.findIndex((option) => option.id === value))
-  const option = OPTIONS[index] ?? OPTIONS[0]!
+  const option = OPTIONS[index] ?? OPTIONS[4]!
   return (
     <CycleButton
       label={option.label}
@@ -45,9 +55,4 @@ export function FoldToggle({
       onClick={() => onChange(nextFold(value))}
     />
   )
-}
-
-export function foldMessage(fold: FoldMode, label: string): string {
-  if (fold === 'music') return `Misma música que ${label}. Muestra esa letra.`
-  return `Igual que ${label}. Mostrar.`
 }
