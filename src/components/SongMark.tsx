@@ -27,7 +27,7 @@ export function SongMark({
   return (
     <span
       className={cn(
-        'inline-flex h-12 shrink-0 items-center gap-2 rounded-lg pr-3 pl-2 text-base font-bold leading-none tracking-wide',
+        'inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md pr-2 pl-1.5 text-sm font-bold leading-none tracking-wide',
         className,
       )}
       style={{
@@ -37,7 +37,7 @@ export function SongMark({
       }}
       aria-hidden="true"
     >
-      <svg viewBox="0 0 16 16" className="size-8" fill="currentColor" stroke="none">
+      <svg viewBox="0 0 16 16" className="size-6" fill="currentColor" stroke="none">
         {shape?.map((part, index) => {
           if (part.type === 'circle') return <circle key={index} cx={part.cx} cy={part.cy} r={part.r} />
           if (part.type === 'rect') {
