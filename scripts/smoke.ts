@@ -9,6 +9,7 @@ import { shareLyrics } from '../server/lyrics.ts'
 import { nextServiceDate, planEvergreenAdd, serviceListName, weekdayMark } from '../src/lib/setlists.ts'
 import { can, currentUser, roleLabel } from '../src/lib/access.ts'
 import { parseChart } from '../src/lib/parseChart.ts'
+import { songIconIndex, songMarkLetters, SONG_ICON_SHAPES, titleLetters } from '../src/lib/songMark.ts'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const parentCharts = path.resolve(root, '..')
@@ -221,14 +222,67 @@ assert(fromMd.key === 'C', 'markdown keeps the key')
 assert(fromMd.sections.find((section) => section.label === 'Intro')?.lines[0]?.chords[1]?.column === 5, 'markdown keeps chord columns')
 assert(fromMd.sections.find((section) => section.label === 'Coro')?.lines[0]?.lyric?.includes('Bienvenido'), 'markdown keeps the lyric')
 
+assert(titleLetters('Amazing Grace') === 'AG', 'two title words')
+assert(titleLetters('Hosanna') === 'HO', 'one title word')
+assert(titleLetters('El Gozo de Dios') === 'GD', 'spanish article')
+assert(titleLetters('The Blessing') === 'BL', 'english article')
+assert(titleLetters('Los Cielos Cuentan') === 'CC', 'plural article')
+assert(titleLetters('Señor Eres Fiel') === 'SE', 'accented title')
+assert(titleLetters('Al Que Está Sentado En El Trono') === 'AQ', 'keeps al, skips el')
+assert(titleLetters('¡Santo!') === 'SA', 'punctuation')
+assert(titleLetters('') === 'XX', 'empty title')
+assert(titleLetters('El') === 'EL', 'article-only title')
+assert(songIconIndex('hosanna') === songIconIndex('hosanna'), 'icon is a pure function of the id')
+assert(SONG_ICON_SHAPES.length >= 8, 'fixed icon set')
+const iconShapes = new Set(SONG_ICON_SHAPES.map((shape) => JSON.stringify(shape)))
+assert(iconShapes.size === SONG_ICON_SHAPES.length, 'icons are distinct')
+
+function idForIcon(icon: number, prefix: string): string {
+  for (let n = 0; n < 5000; n += 1) {
+    const id = `${prefix}-${n}`
+    if (songIconIndex(id) === icon) return id
+  }
+  throw new Error(`no id for icon ${icon}`)
+}
+
+const sharedIcon = songIconIndex('mark-seed')
+const earlier = idForIcon(sharedIcon, 'earlier')
+const later = idForIcon(sharedIcon, 'later')
+const clashing = [
+  { id: earlier, title: 'Danzo En El Río' },
+  { id: later, title: 'Digno Eres Tu' },
+]
+const forwardMarks = songMarkLetters(clashing)
+const reverseMarks = songMarkLetters([...clashing].reverse())
+const [kept, adjusted] = [earlier, later].sort((a, b) => a.localeCompare(b, 'en'))
+assert(forwardMarks.get(kept) === reverseMarks.get(kept), 'letter tie-break ignores list order')
+assert(forwardMarks.get(adjusted) === reverseMarks.get(adjusted), 'adjusted letters ignore list order')
+assert(forwardMarks.get(kept) === 'DE', 'earlier song keeps the title letters')
+assert(forwardMarks.get(adjusted) !== 'DE', 'later song takes letters from its id')
+assert(
+  `${sharedIcon}:${forwardMarks.get(kept)}` !== `${sharedIcon}:${forwardMarks.get(adjusted)}`,
+  'icon and letters stay unique',
+)
+
 const names = await readdir(charts)
 const files = names.filter((name) => /\.(cho|chopro)$/i.test(name))
 assert(files.length >= 30, `expected charts, got ${files.length}`)
+const catalogMarks: { id: string; title: string }[] = []
 for (const name of files) {
   const song = parseChart(await readFile(path.join(charts, name), 'utf8'), name)
   const lines = song.sections.reduce((sum, section) => sum + section.lines.length, 0)
   assert(song.title.trim(), `${name} title`)
   assert(lines > 0, `${name} has no lines`)
+  catalogMarks.push({ id: name, title: song.title })
+}
+const resolved = songMarkLetters(catalogMarks)
+const pairs = new Set<string>()
+for (const song of catalogMarks) {
+  const letters = resolved.get(song.id)
+  assert(letters && /^[A-Z]{2}$/.test(letters), `${song.title} letters ${letters}`)
+  const pair = `${songIconIndex(song.id)}:${letters}`
+  assert(!pairs.has(pair), `duplicate mark ${pair} on ${song.title}`)
+  pairs.add(pair)
 }
 
 const hosannaText = await readFile(path.join(charts, 'Hosanna - Hillsong en Español.cho'), 'utf8')

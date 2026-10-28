@@ -14,6 +14,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import { ChartRow, NoteRow } from '@/components/ChartLines'
+import { markLetters, SongMark, useSongMarks } from '@/components/SongMark'
 import { InstrumentCharts } from '@/components/InstrumentCharts'
 import { InstrumentSwitch } from '@/components/InstrumentSwitch'
 import { Kbd, ShortcutLegend } from '@/components/KeyHint'
@@ -51,6 +52,7 @@ export function SongView() {
   const pendingScroll = useRef<string | null>(null)
 
   const instrument = settings.instrument
+  const marks = useSongMarks(state.status === 'ready' ? state.songs : [])
 
   useEffect(() => {
     setSettings(loadSettings())
@@ -251,8 +253,11 @@ export function SongView() {
     <div className="min-h-svh pb-32">
       <header className="sticky top-0 z-20 border-b bg-background/95 backdrop-blur">
         <div className="mx-auto flex max-w-[70.4rem] flex-col gap-3 px-4 py-2">
-          <div className="flex items-center gap-3">
-            <h1 className="min-w-0 flex-1 truncate text-lg font-semibold">{song.title}</h1>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:min-w-[12rem] sm:flex-1">
+              <SongMark songId={song.id} letters={markLetters(marks, song)} />
+              <h1 className="min-w-0 flex-1 truncate text-lg font-semibold">{song.title}</h1>
+            </div>
             {activeList && (
               <Link
                 to={`/listas/${encodeURIComponent(activeList.id)}`}
