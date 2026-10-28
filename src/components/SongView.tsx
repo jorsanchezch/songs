@@ -16,7 +16,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import { ChartRow, NoteRow, placeChords } from '@/components/ChartLines'
-import { ControlHint, WithHint } from '@/components/ControlHint'
+import { WithHint } from '@/components/ControlHint'
 import { FoldToggle } from '@/components/FoldToggle'
 import { SongMark } from '@/components/SongMark'
 import { InstrumentCharts } from '@/components/InstrumentCharts'
@@ -648,7 +648,8 @@ export function SongView() {
               </Button>
             </div>
           )}
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Vista de la cifra">
+            <Eye className="size-4 shrink-0 text-muted-foreground" aria-hidden />
             <SpellingToggle value={spelling} onChange={(next) => update({ spelling: next })} />
             <WithHint text="Achica la letra de la cifra.">
               <Button variant="outline" title="Achica la letra de la cifra." onClick={() => update({ fontSize: Math.max(16, settings.fontSize - 2) })}>
@@ -673,19 +674,14 @@ export function SongView() {
             <WithHint text="Muestra u oculta los diagramas del instrumento.">
               <Button
                 variant={settings.showDiagrams ? 'default' : 'outline'}
-                size="icon"
                 aria-pressed={settings.showDiagrams}
-                aria-label="Diagramas"
                 title="Muestra u oculta los diagramas del instrumento."
                 onClick={() => update({ showDiagrams: !settings.showDiagrams })}
               >
-                <Eye />
+                Diagrama
               </Button>
             </WithHint>
             <FoldToggle value={settings.fold} onChange={(fold) => update({ fold })} />
-          </div>
-
-          <div className="flex flex-wrap gap-1.5">
             {NOTE_TYPES.map((type) => {
               const on = settings.visibleNotes.includes(type)
               return (
@@ -738,28 +734,25 @@ export function SongView() {
             {nav.map((chip, index) => {
               const kind = partKind(chip.label)
               const active = chip.ids.includes(activeId ?? '')
-              const hint = partHint(chip.label, chip.copies, chip.repeat, index)
               return (
-                <span key={chip.id} className="inline-flex shrink-0 items-center gap-0.5">
-                  <button
-                    type="button"
-                    aria-current={active ? 'step' : undefined}
-                    aria-keyshortcuts={index < 9 ? String(index + 1) : undefined}
-                    title={hint}
-                    onClick={() => go(chip.id)}
-                    className={cn(
-                      'inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-sm focus-visible:ring-[3px] focus-visible:ring-ring/60 focus-visible:outline-none',
-                      active ? 'border-primary bg-primary text-primary-foreground' : 'bg-card',
-                    )}
-                  >
-                    {kind !== 'other' && (
-                      <span className={cn('size-1.5 rounded-full', active ? 'bg-primary-foreground' : kindPip(kind))} />
-                    )}
-                    {index < 9 && <Kbd>{index + 1}</Kbd>}
-                    {headerChipText(chip)}
-                  </button>
-                  <ControlHint text={hint} />
-                </span>
+                <button
+                  key={chip.id}
+                  type="button"
+                  aria-current={active ? 'step' : undefined}
+                  aria-keyshortcuts={index < 9 ? String(index + 1) : undefined}
+                  title={partHint(chip.label, chip.copies, chip.repeat, index)}
+                  onClick={() => go(chip.id)}
+                  className={cn(
+                    'inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-sm focus-visible:ring-[3px] focus-visible:ring-ring/60 focus-visible:outline-none',
+                    active ? 'border-primary bg-primary text-primary-foreground' : 'bg-card',
+                  )}
+                >
+                  {kind !== 'other' && (
+                    <span className={cn('size-1.5 rounded-full', active ? 'bg-primary-foreground' : kindPip(kind))} />
+                  )}
+                  {index < 9 && <Kbd>{index + 1}</Kbd>}
+                  {headerChipText(chip)}
+                </button>
               )
             })}
           </nav>
