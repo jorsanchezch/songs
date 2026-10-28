@@ -19,7 +19,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import { ChartRow, NoteRow, placeChords } from '@/components/ChartLines'
-import { markLetters, SongMark, useSongMarks } from '@/components/SongMark'
+import { SongMark } from '@/components/SongMark'
 import { InstrumentCharts } from '@/components/InstrumentCharts'
 import { InstrumentSwitch } from '@/components/InstrumentSwitch'
 import { Kbd, ShortcutLegend } from '@/components/KeyHint'
@@ -69,7 +69,6 @@ export function SongView() {
 
   const instrument = settings.instrument
   const live = settings.mode === 'live'
-  const marks = useSongMarks(state.status === 'ready' ? state.songs : [])
 
   useEffect(() => {
     setSettings(loadSettings())
@@ -492,7 +491,7 @@ export function SongView() {
           {live && !headerOpen ? (
             <div className="flex min-w-0 items-center gap-2">
               <span className="hidden sm:contents">
-                <SongMark songId={song.id} letters={markLetters(marks, song)} />
+                <SongMark songId={song.id} />
               </span>
               <div className="min-w-0 flex-1">
                 <h1 className="truncate text-lg leading-tight font-semibold">{song.title}</h1>
@@ -523,7 +522,7 @@ export function SongView() {
           ) : headerOpen ? (
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
               <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:min-w-[12rem] sm:flex-1">
-                <SongMark songId={song.id} letters={markLetters(marks, song)} />
+                <SongMark songId={song.id} />
                 <h1 className="min-w-0 flex-1 truncate text-lg font-semibold">{song.title}</h1>
               </div>
               {toolbarFloat}
@@ -535,7 +534,7 @@ export function SongView() {
                 {toolbarFloat}
               </div>
               <div className="flex min-w-0 items-center gap-2">
-                <SongMark songId={song.id} letters={markLetters(marks, song)} />
+                <SongMark songId={song.id} />
                 <h1 className="min-w-0 flex-1 truncate text-lg font-semibold">{song.title}</h1>
                 {author && <p className="max-w-[40%] shrink-0 truncate text-sm text-muted-foreground">{author}</p>}
               </div>

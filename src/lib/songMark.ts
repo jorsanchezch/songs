@@ -1,8 +1,3 @@
-export type SongRef = {
-  id: string
-  title: string
-}
-
 export type IconPart =
   | { type: 'circle'; cx: number; cy: number; r: number }
   | { type: 'rect'; x: number; y: number; width: number; height: number; rx: number }
@@ -28,23 +23,6 @@ export const SONG_ICON_SHAPES: IconPart[][] = [
     { type: 'path', d: 'M9.65 1.7C13.2 2.35 14.45 4.55 14.2 6.45C12.55 5.55 11.15 4.7 9.65 4.2Z' },
   ],
 ]
-
-const ARTICLES = new Set([
-  'a',
-  'an',
-  'the',
-  'el',
-  'la',
-  'los',
-  'las',
-  'lo',
-  'un',
-  'una',
-  'unos',
-  'unas',
-])
-
-const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
 
 export function hashSongId(id: string): number {
   let hash = 2166136261
@@ -89,69 +67,4 @@ export function songMarkTone(id: string): SongMarkTone {
     background: `oklch(${lightness} ${chroma} ${hue})`,
     foreground: deep ? `oklch(0.985 0.012 ${hue})` : `oklch(0.27 0.05 ${hue})`,
   }
-}
-
-function letterWords(title: string): string[] {
-  return title
-    .normalize('NFD')
-    .replace(/\p{M}/gu, '')
-    .split(/[^A-Za-z]+/)
-    .map((word) => word.trim())
-    .filter((word) => word.length > 0)
-}
-
-function pairFrom(words: string[]): string | null {
-  if (words.length >= 2) {
-    const first = words[0]
-    const second = words[1]
-    if (!first || !second) return null
-    return `${first[0] ?? ''}${second[0] ?? ''}`.toUpperCase()
-  }
-  const word = words[0]
-  if (!word) return null
-  const first = word[0] ?? ''
-  const second = word[1] ?? first
-  return `${first}${second}`.toUpperCase()
-}
-
-export function titleLetters(title: string): string {
-  const words = letterWords(title)
-  const significant = words.filter((word) => !ARTICLES.has(word.toLowerCase()))
-  return pairFrom(significant) ?? pairFrom(words) ?? 'XX'
-}
-
-function lettersFromId(id: string, step: number): string {
-  const slot = (hashSongId(id) + step) % (ALPHABET.length * ALPHABET.length)
-  const first = ALPHABET[Math.floor(slot / ALPHABET.length)] ?? 'A'
-  const second = ALPHABET[slot % ALPHABET.length] ?? 'A'
-  return `${first}${second}`
-}
-
-// Title letters stay when that icon and pair are free in this list.
-// A clash keeps the earlier id and takes the next free pair from the later id.
-export function songMarkLetters(songs: SongRef[]): Map<string, string> {
-  const ordered = [...songs].sort((a, b) => a.id.localeCompare(b.id, 'en'))
-  const used = new Set<string>()
-  const marks = new Map<string, string>()
-  for (const song of ordered) {
-    if (marks.has(song.id)) continue
-    const icon = songIconIndex(song.id)
-    let letters = titleLetters(song.title)
-    if (used.has(`${icon}:${letters}`)) {
-      for (let step = 0; step < ALPHABET.length * ALPHABET.length; step += 1) {
-        const next = lettersFromId(song.id, step)
-        if (!used.has(`${icon}:${next}`)) {
-          letters = next
-          break
-        }
-      }
-    }
-    used.add(`${icon}:${letters}`)
-    marks.set(song.id, letters)
-  }
-  return marks
-}
-
-export function lettersForSong(marks: Map<string, string>, song: SongRef): string {
-  return marks.get(song.id) ?? titleLetters(song.title)
 }

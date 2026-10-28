@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, Check, ChevronDown, ChevronUp, GripVertical, Plus, Trash2 } from 'lucide-react'
 import { Kbd, ShortcutLegend } from '@/components/KeyHint'
-import { markLetters, SongMark, useSongMarks } from '@/components/SongMark'
+import { SongMark } from '@/components/SongMark'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { UserBadge } from '@/components/UserBadge'
@@ -34,7 +34,6 @@ export function SetlistView() {
   const { state } = useSongs()
   const list = setlists.find((item) => item.id === setlistId)
   const songs = state.status === 'ready' ? state.songs : []
-  const marks = useSongMarks(songs)
   const [query, setQuery] = useState('')
   const [picked, setPicked] = useState<string[]>([])
   const [dragIndex, setDragIndex] = useState<number | null>(null)
@@ -256,7 +255,7 @@ export function SetlistView() {
                     <span className="min-w-0 flex-1 text-sm text-muted-foreground">Cargando…</span>
                   ) : song ? (
                     <Link to={songPath(song.id, list.id)} className="group flex min-w-[13rem] flex-1 items-center gap-2">
-                      <SongMark songId={song.id} letters={markLetters(marks, song)} />
+                      <SongMark songId={song.id} />
                       <span className="min-w-0 flex-1">
                         <span className="block truncate font-medium group-hover:underline">{song.title}</span>
                         <span className="block truncate text-sm text-muted-foreground">{song.artist || 'Sin artista'}</span>

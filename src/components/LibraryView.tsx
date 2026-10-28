@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { ListMusic, Loader2, Music, Plus, RefreshCw, Search, Shield } from 'lucide-react'
 import { Kbd, ShortcutLegend } from '@/components/KeyHint'
-import { markLetters, SongMark, useSongMarks } from '@/components/SongMark'
+import { SongMark } from '@/components/SongMark'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { UserBadge } from '@/components/UserBadge'
@@ -20,7 +20,6 @@ export function LibraryView() {
   const [keyName, setKeyName] = useState('')
 
   const songs = state.status === 'ready' ? state.songs : []
-  const marks = useSongMarks(songs)
   const artists = useMemo(
     () => [...new Set(songs.map((song) => song.artist).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es')),
     [songs],
@@ -201,7 +200,7 @@ export function LibraryView() {
                       to={`/c/${encodeURIComponent(song.id)}`}
                       className="flex items-center gap-3 px-4 py-3 hover:bg-accent/60"
                     >
-                      <SongMark songId={song.id} letters={markLetters(marks, song)} />
+                      <SongMark songId={song.id} />
                       <span className="min-w-0 flex-1">
                         <span className="flex flex-wrap items-center gap-2">
                           <span className="font-medium">{song.title}</span>

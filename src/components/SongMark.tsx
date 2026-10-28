@@ -1,33 +1,14 @@
-import { useMemo } from 'react'
-import {
-  lettersForSong,
-  songIconIndex,
-  songMarkLetters,
-  songMarkTone,
-  SONG_ICON_SHAPES,
-  type SongRef,
-} from '@/lib/songMark'
+import { songIconIndex, songMarkTone, SONG_ICON_SHAPES } from '@/lib/songMark'
 import { cn } from '@/lib/utils'
 
-export function useSongMarks(songs: SongRef[]) {
-  return useMemo(() => songMarkLetters(songs), [songs])
-}
-
-export function SongMark({
-  songId,
-  letters,
-  className,
-}: {
-  songId: string
-  letters: string
-  className?: string
-}) {
+/** A colored tile with the song's shape. Both come from the id, so a song always looks the same. */
+export function SongMark({ songId, className }: { songId: string; className?: string }) {
   const shape = SONG_ICON_SHAPES[songIconIndex(songId)] ?? SONG_ICON_SHAPES[0]
   const tone = songMarkTone(songId)
   return (
     <span
       className={cn(
-        'inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md pr-2 pl-1.5 text-sm font-bold leading-none tracking-wide',
+        'inline-flex size-9 shrink-0 items-center justify-center rounded-md',
         className,
       )}
       style={{
@@ -37,7 +18,7 @@ export function SongMark({
       }}
       aria-hidden="true"
     >
-      <svg viewBox="0 0 16 16" className="size-6" fill="currentColor" stroke="none">
+      <svg viewBox="0 0 16 16" className="size-5" fill="currentColor" stroke="none">
         {shape?.map((part, index) => {
           if (part.type === 'circle') return <circle key={index} cx={part.cx} cy={part.cy} r={part.r} />
           if (part.type === 'rect') {
@@ -58,11 +39,6 @@ export function SongMark({
           return <path key={index} d={part.d} />
         })}
       </svg>
-      <span>{letters}</span>
     </span>
   )
-}
-
-export function markLetters(marks: Map<string, string>, song: SongRef): string {
-  return lettersForSong(marks, song)
 }
