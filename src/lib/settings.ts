@@ -17,7 +17,7 @@ export type ViewSettings = {
   semitones: Record<string, number>
   chordShapes: Record<string, Record<string, string>>
   instrument: InstrumentId
-  /** Guitar charts: a slash chord shows its degree, and the written slash stays hidden. */
+  /** Guitar charts: hide a slash chord's bass and keep the chord itself. */
   slashAsDegree: boolean
 }
 

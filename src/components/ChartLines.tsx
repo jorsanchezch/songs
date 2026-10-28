@@ -75,7 +75,7 @@ export function ChartRow({
   lineIndex: number
   showChords: boolean
   spelling: ViewSettings['spelling']
-  /** On guitar, replace C/E with its degree and hide the written slash. */
+  /** On guitar, hide the slash bass and keep the chord. Spelling still chooses letters or degrees. */
   slashAsDegree?: boolean
   semitones: number
   songKey: string
