@@ -1,5 +1,7 @@
 import type { ChartLine, Song, SongSection } from '@/lib/types'
 
+export type FoldMode = 'full' | 'concise' | 'music'
+
 export type DisplayBlock = {
   id: string
   ids: string[]
@@ -7,6 +9,7 @@ export type DisplayBlock = {
   repeat: number
   section: SongSection
   duplicateOf?: string
+  duplicateOfId?: string
 }
 
 export function resolveSections(sections: SongSection[]): SongSection[] {
@@ -68,6 +71,12 @@ export function sectionSignature(section: SongSection): string {
     .join('\n')
 }
 
+// Chords per line, lyrics ignored. Same length means the same number of lines.
+function musicSignature(section: SongSection): string {
+  if (!section.lines.length) return `empty:${section.id}`
+  return section.lines.map((line) => line.chords.map((chord) => chord.raw).join(',')).join('\n')
+}
+
 export type HeaderChip = {
   id: string
   label: string
@@ -88,34 +97,30 @@ function playedTimes(block: DisplayBlock): number {
   return Math.max(block.repeat, trailingRepeat(block.label))
 }
 
-// Concise mode keeps one chip per identical part. The × on the label, and how
+// Concise modes keep one chip per folded part. The × on the label, and how
 // many times that part comes back, stay on the chip.
-export function headerChips(blocks: DisplayBlock[], concise: boolean): HeaderChip[] {
-  const chips: { chip: HeaderChip; signature: string }[] = []
+export function headerChips(blocks: DisplayBlock[], fold: boolean): HeaderChip[] {
+  const chips: HeaderChip[] = []
   for (const block of blocks) {
-    const signature = sectionSignature(block.section)
     const previous =
-      concise && block.duplicateOf
-        ? [...chips].reverse().find((item) => item.chip.label === block.duplicateOf && item.signature === signature)
+      fold && block.duplicateOfId
+        ? chips.find((chip) => chip.id === block.duplicateOfId || chip.ids.includes(block.duplicateOfId ?? ''))
         : undefined
     if (previous) {
-      previous.chip.repeat = Math.max(previous.chip.repeat, playedTimes(block))
-      previous.chip.copies += 1
-      previous.chip.ids.push(block.id)
+      previous.repeat = Math.max(previous.repeat, playedTimes(block))
+      previous.copies += 1
+      previous.ids.push(block.id)
       continue
     }
     chips.push({
-      signature,
-      chip: {
-        id: block.id,
-        label: block.label,
-        repeat: playedTimes(block),
-        copies: 1,
-        ids: [block.id],
-      },
+      id: block.id,
+      label: block.label,
+      repeat: playedTimes(block),
+      copies: 1,
+      ids: [block.id],
     })
   }
-  return chips.map((item) => item.chip)
+  return chips
 }
 
 export function headerChipText(chip: HeaderChip): string {
@@ -125,7 +130,7 @@ export function headerChipText(chip: HeaderChip): string {
   return `${chip.label}${repeat}${copies}`
 }
 
-export function blocksFor(song: Song, flow: string[] | null): DisplayBlock[] {
+export function blocksFor(song: Song, flow: string[] | null, fold: FoldMode = 'full'): DisplayBlock[] {
   const resolved = resolveSections(song.sections)
   const ordered = orderSections(resolved, flow)
   const merged: DisplayBlock[] = []
@@ -151,14 +156,20 @@ export function blocksFor(song: Song, flow: string[] | null): DisplayBlock[] {
     })
   }
 
-  const seen = new Map<string, string>()
+  const seenExact = new Map<string, { label: string; id: string }>()
+  const seenMusic = new Map<string, { label: string; id: string }>()
   return merged.map((block) => {
     const signature = sectionSignature(block.section)
-    if (signature.startsWith('empty:')) return block
-    const key = `${collapseIdentity(block.label)}\n${signature}`
-    const first = seen.get(key)
-    if (first) return { ...block, duplicateOf: first }
-    seen.set(key, block.label)
+    const music = musicSignature(block.section)
+    if (!signature.startsWith('empty:')) {
+      const exactKey = `${collapseIdentity(block.label)}\n${signature}`
+      const exact = seenExact.get(exactKey)
+      const sameMusic = seenMusic.get(music)
+      if (!seenExact.has(exactKey)) seenExact.set(exactKey, { label: block.label, id: block.id })
+      if (!music.startsWith('empty:') && !seenMusic.has(music)) seenMusic.set(music, { label: block.label, id: block.id })
+      if (fold === 'concise' && exact) return { ...block, duplicateOf: exact.label, duplicateOfId: exact.id }
+      if (fold === 'music' && sameMusic) return { ...block, duplicateOf: sameMusic.label, duplicateOfId: sameMusic.id }
+    }
     return block
   })
 }

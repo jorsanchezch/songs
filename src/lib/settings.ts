@@ -1,3 +1,4 @@
+import type { FoldMode } from '@/lib/display'
 import { DEFAULT_INSTRUMENT, isInstrument, type InstrumentId } from '@/lib/instruments'
 import type { NoteType, Spelling } from '@/lib/types'
 import { NOTE_TYPES } from '@/lib/types'
@@ -5,19 +6,13 @@ import { NOTE_TYPES } from '@/lib/types'
 const STORAGE = 'songbook-v1'
 export const THEME_KEY = 'songbook-theme'
 
-export type ViewMode = 'live' | 'learn'
-
 export type ViewSettings = {
   theme: 'dark' | 'light'
-  /** live: least on screen while the song plays. learn: diagrams, notes, sources. */
-  mode: ViewMode
   spelling: Spelling
-  /** Live mode reads at a glance, so it keeps its own spelling. Letters by default. */
-  liveSpelling: Spelling
   fontSize: number
   showChords: boolean
   showDiagrams: boolean
-  concise: boolean
+  fold: FoldMode
   visibleNotes: NoteType[]
   semitones: Record<string, number>
   chordShapes: Record<string, Record<string, string>>
@@ -26,34 +21,40 @@ export type ViewSettings = {
 
 const DEFAULTS: ViewSettings = {
   theme: 'dark',
-  mode: 'live',
   spelling: 'both',
-  liveSpelling: 'letters',
   fontSize: 22,
   showChords: true,
   showDiagrams: true,
-  concise: false,
+  fold: 'full',
   visibleNotes: [...NOTE_TYPES],
   semitones: {},
   chordShapes: {},
   instrument: DEFAULT_INSTRUMENT,
 }
 
+function savedSpelling(value: unknown): Spelling {
+  return value === 'letters' || value === 'degrees' || value === 'both' ? value : 'both'
+}
+
+function savedFold(parsed: { fold?: unknown; concise?: unknown }): FoldMode {
+  if (parsed.fold === 'full' || parsed.fold === 'concise' || parsed.fold === 'music') return parsed.fold
+  return parsed.concise === true ? 'concise' : 'full'
+}
+
 export function loadSettings(): ViewSettings {
   try {
     const raw = localStorage.getItem(STORAGE)
     if (!raw) return { ...DEFAULTS, visibleNotes: [...NOTE_TYPES], semitones: {}, chordShapes: {} }
-    const parsed = JSON.parse(raw) as Partial<ViewSettings>
+    const parsed = JSON.parse(raw) as Partial<ViewSettings> & { concise?: boolean }
     return {
       ...DEFAULTS,
       ...parsed,
-      spelling: 'both',
+      spelling: savedSpelling(parsed.spelling),
       showChords: true,
       visibleNotes: parsed.visibleNotes?.length ? parsed.visibleNotes : [...NOTE_TYPES],
       semitones: parsed.semitones ?? {},
       chordShapes: parsed.chordShapes ?? {},
-      mode: parsed.mode === 'learn' ? 'learn' : 'live',
-      liveSpelling: parsed.liveSpelling ?? 'letters',
+      fold: savedFold(parsed),
       instrument: isInstrument(parsed.instrument) ? parsed.instrument : DEFAULT_INSTRUMENT,
     }
   } catch {

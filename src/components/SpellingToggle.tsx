@@ -1,4 +1,4 @@
-import { Button } from '@/components/ui/button'
+import { CycleButton } from '@/components/ControlHint'
 import type { Spelling } from '@/lib/types'
 
 const OPTIONS: { id: Spelling; label: string; title: string }[] = [
@@ -16,20 +16,17 @@ export function SpellingToggle({
   onChange: (value: Spelling) => void
   size?: 'default' | 'sm'
 }) {
+  const index = Math.max(0, OPTIONS.findIndex((option) => option.id === value))
+  const option = OPTIONS[index] ?? OPTIONS[2]!
+  const next = OPTIONS[(index + 1) % OPTIONS.length] ?? OPTIONS[0]!
   return (
-    <div className="flex rounded-lg border p-0.5">
-      {OPTIONS.map((option) => (
-        <Button
-          key={option.id}
-          size={size}
-          variant={value === option.id ? 'default' : 'ghost'}
-          aria-pressed={value === option.id}
-          title={option.title}
-          onClick={() => onChange(option.id)}
-        >
-          {option.label}
-        </Button>
-      ))}
-    </div>
+    <CycleButton
+      label={option.label}
+      title={option.title}
+      index={index}
+      count={OPTIONS.length}
+      size={size}
+      onClick={() => onChange(next.id)}
+    />
   )
 }

@@ -2,23 +2,22 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   ArrowLeft,
-  BookOpen,
   ChevronLeft,
   ChevronRight,
   ExternalLink,
   Eye,
-  Guitar,
   Info,
   Loader2,
   Minus,
   Moon,
   Pencil,
   Plus,
-  SlidersHorizontal,
   Sun,
   Trash2,
 } from 'lucide-react'
 import { ChartRow, NoteRow, placeChords } from '@/components/ChartLines'
+import { ControlHint, WithHint } from '@/components/ControlHint'
+import { foldMessage, FoldToggle } from '@/components/FoldToggle'
 import { SongMark } from '@/components/SongMark'
 import { InstrumentCharts } from '@/components/InstrumentCharts'
 import { InstrumentSwitch } from '@/components/InstrumentSwitch'
@@ -77,7 +76,6 @@ export function SongView() {
   const spyPausedUntil = useRef(0)
 
   const instrument = settings.instrument
-  const live = settings.mode === 'live'
 
   useEffect(() => {
     setSettings(loadSettings())
@@ -98,8 +96,8 @@ export function SongView() {
     setVersionId(null)
     setCurrent(null)
     setSettings((prev) => {
-      if (prev.spelling === 'both' && prev.showChords) return prev
-      const next = { ...prev, spelling: 'both' as const, showChords: true }
+      if (prev.showChords) return prev
+      const next = { ...prev, showChords: true }
       saveSettings(next)
       return next
     })
@@ -107,10 +105,10 @@ export function SongView() {
 
   const version = chart?.versions.find((item) => item.id === versionId) ?? chart?.versions[0]
   const blocks = useMemo(
-    () => (chart ? blocksFor(chart, version?.flow ?? null) : []),
-    [chart, version],
+    () => (chart ? blocksFor(chart, version?.flow ?? null, settings.fold) : []),
+    [chart, settings.fold, version],
   )
-  const nav = useMemo(() => headerChips(blocks, settings.concise), [blocks, settings.concise])
+  const nav = useMemo(() => headerChips(blocks, settings.fold !== 'full'), [blocks, settings.fold])
 
   const activeId =
     current && blocks.some((block) => block.id === current)
@@ -209,10 +207,6 @@ export function SongView() {
 
   // When the end of the current part is on screen, the change is coming: the footer says so.
   useEffect(() => {
-    if (!live) {
-      setNearEnd(false)
-      return
-    }
     let frame = 0
     const check = () => {
       cancelAnimationFrame(frame)
@@ -231,7 +225,7 @@ export function SongView() {
       window.removeEventListener('scroll', check)
       window.removeEventListener('resize', check)
     }
-  }, [activeId, blocks, live])
+  }, [activeId, blocks])
 
   // Keep the current part chip in view in the scrolling row.
   useEffect(() => {
@@ -244,7 +238,7 @@ export function SongView() {
     }
   }, [activeId])
 
-  // In live mode the chart fits the width, so nothing scrolls sideways mid-song.
+  // The chart fits the width, so nothing scrolls sideways mid-song.
   useLayoutEffect(() => {
     const chartEl = chartRef.current
     if (!chartEl) return
@@ -259,9 +253,9 @@ export function SongView() {
     return () => observer.disconnect()
   }, [settings.fontSize, chart])
 
-  // The screen stays on while a song is being played.
+  // The screen stays on while a song is open.
   useEffect(() => {
-    if (!live || !('wakeLock' in navigator)) return
+    if (!('wakeLock' in navigator)) return
     let lock: WakeLockSentinel | null = null
     let gone = false
     const request = () => {
@@ -281,7 +275,7 @@ export function SongView() {
       document.removeEventListener('visibilitychange', request)
       void lock?.release()
     }
-  }, [live])
+  }, [])
 
   const stepSection = (direction: -1 | 1) => {
     const index = blocks.findIndex((block) => block.id === activeId)
@@ -312,11 +306,6 @@ export function SongView() {
         go(block.id)
         return
       }
-      if (event.key === 'm' || event.key === 'M') {
-        event.preventDefault()
-        update({ mode: settings.mode === 'live' ? 'learn' : 'live' })
-        return
-      }
       // Bluetooth page turner pedals send PageUp and PageDown.
       const back = event.key === 'ArrowLeft' || event.key === 'PageUp'
       const forward = event.key === 'ArrowRight' || event.key === 'PageDown'
@@ -326,7 +315,7 @@ export function SongView() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [blocks, activeId, nav, settings.mode])
+  }, [blocks, activeId, nav])
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -395,7 +384,7 @@ export function SongView() {
   const partCountLabel =
     partLabel && partTotal > 0 ? `${partLabel} ${partIndex + 1}/${partTotal}` : partLabel
   const songKey = (chart ?? song).key
-  const spelling = live ? settings.liveSpelling : settings.spelling
+  const spelling = settings.spelling
   const nextBlock = blocks[partIndex + 1]
   const nextChords = nextBlock
     ? chordSequence(nextBlock.section.lines)
@@ -405,11 +394,9 @@ export function SongView() {
   const widestLine = widestLineCh(blocks, songKey, semitones, spelling)
   // Section border and padding take about 16px of the width.
   const fitted = chartWidth && widestLine ? Math.floor((chartWidth - 16) / (widestLine * chPerPx)) : settings.fontSize
-  // Live mode shrinks a little to keep lines whole, then wraps what is still too long.
-  const chartFontSize = live
-    ? Math.max(Math.round(settings.fontSize * 0.85), Math.min(settings.fontSize, fitted))
-    : settings.fontSize
-  const wrapAt = live && chartWidth ? Math.floor((chartWidth - 16) / (chPerPx * chartFontSize)) : undefined
+  // Shrink a little to keep lines whole, then wrap what is still too long.
+  const chartFontSize = Math.max(Math.round(settings.fontSize * 0.85), Math.min(settings.fontSize, fitted))
+  const wrapAt = chartWidth ? Math.floor((chartWidth - 16) / (chPerPx * chartFontSize)) : undefined
   const author = song.artist.trim() || song.composer.trim()
   const names = chordSequence(blocks.flatMap((block) => block.section.lines)).map((raw) =>
     formatChord(raw, songKey, semitones, spelling),
@@ -423,8 +410,57 @@ export function SongView() {
     ),
   ]
 
+  const shareControls =
+    song.origin !== 'catalog' && (song.ownerId === user.id || isStaff(user)) ? (
+      <span className="inline-flex max-w-full flex-wrap items-center justify-end gap-1.5 text-sm">
+        <Button
+          size="sm"
+          variant={song.shared ? 'default' : 'outline'}
+          aria-pressed={song.shared}
+          onClick={() => void shareSong(song.id, { shared: !song.shared })}
+        >
+          Compartida
+        </Button>
+        <InfoTip label="Qué significa compartir" text={SHARE_HINT} />
+        {isStaff(user) && (
+          <select
+            className="h-8 max-w-40 rounded-md border bg-background px-2 text-xs"
+            aria-label="Compartir con"
+            value=""
+            onChange={(event) => {
+              const userId = event.target.value
+              if (userId) void shareSong(song.id, { userId, include: true })
+            }}
+          >
+            <option value="">Compartir con…</option>
+            {people
+              .filter((person) => person.id !== song.ownerId)
+              .map((person) => (
+                <option key={person.id} value={person.id}>
+                  {person.name}
+                </option>
+              ))}
+          </select>
+        )}
+        {song.shares?.map((userId) => {
+          const person = people.find((item) => item.id === userId)
+          return (
+            <button
+              key={userId}
+              type="button"
+              className="rounded-full border px-2 py-1 text-xs"
+              title="Quitar a esta persona de la copia."
+              onClick={() => void shareSong(song.id, { userId, include: false })}
+            >
+              {person?.name ?? userId} ×
+            </button>
+          )
+        })}
+      </span>
+    ) : null
+
   const toolbarFloat = (
-    <>
+    <div className="ml-auto flex max-w-full flex-wrap items-center justify-end gap-x-3 gap-y-2">
       {activeList && (
         <Link
           to={`/listas/${encodeURIComponent(activeList.id)}`}
@@ -438,6 +474,7 @@ export function SongView() {
         </Link>
       )}
       <p className="shrink-0 text-base font-semibold text-primary tabular-nums">{partCountLabel}</p>
+      {shareControls}
       <span className="inline-flex items-center gap-1">
         <UserBadge />
         <InfoTip label="Qué es una persona" text={USER_HINT} />
@@ -452,21 +489,7 @@ export function SongView() {
         {headerOpen ? 'Ocultar' : 'Controles'}
         <Kbd>Espacio</Kbd>
       </Button>
-    </>
-  )
-
-  const modeButton = (
-    <Button
-      size="sm"
-      variant="outline"
-      aria-keyshortcuts="M"
-      title={live ? 'Modo aprender: diagramas, notas y referencias.' : 'Modo tocar: solo la cifra, grande y sin distracciones.'}
-      onClick={() => update({ mode: live ? 'learn' : 'live' })}
-    >
-      {live ? <BookOpen /> : <Guitar />}
-      <span className={cn(live && !headerOpen && 'sr-only sm:not-sr-only')}>{live ? 'Aprender' : 'Tocar'}</span>
-      {headerOpen && <Kbd>M</Kbd>}
-    </Button>
+    </div>
   )
 
   const transposer = (compact: boolean) => (
@@ -497,39 +520,8 @@ export function SongView() {
         {announce}
       </p>
       <header ref={headerRef} className="sticky top-0 z-20 border-b bg-background/95 backdrop-blur">
-        <div className={cn('mx-auto flex max-w-[70.4rem] flex-col px-4 py-2', live && !headerOpen ? 'gap-2' : 'gap-3')}>
-          {live && !headerOpen ? (
-            <div className="flex min-w-0 items-center gap-2">
-              <span className="hidden sm:contents">
-                <SongMark songId={song.id} />
-              </span>
-              <div className="min-w-0 flex-1">
-                <h1 className="truncate text-lg leading-tight font-semibold">{song.title}</h1>
-                {activeList && (
-                  <Link
-                    to={`/listas/${encodeURIComponent(activeList.id)}`}
-                    className="block truncate text-xs text-muted-foreground hover:underline"
-                  >
-                    {setlistItemIndex + 1}/{activeList.items.length} {activeList.name}
-                  </Link>
-                )}
-              </div>
-              {transposer(true)}
-              {modeButton}
-              <Button
-                size="sm"
-                variant="ghost"
-                aria-expanded={headerOpen}
-                aria-keyshortcuts="Space"
-                aria-label="Controles"
-                title="Controles (Espacio)"
-                onClick={() => setHeaderOpen(true)}
-              >
-                <SlidersHorizontal />
-                <span className="sr-only sm:not-sr-only">Controles</span>
-              </Button>
-            </div>
-          ) : headerOpen ? (
+        <div className="mx-auto flex max-w-[70.4rem] flex-col gap-3 px-4 py-2">
+          {headerOpen ? (
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
               <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:min-w-[12rem] sm:flex-1">
                 <SongMark songId={song.id} />
@@ -540,7 +532,6 @@ export function SongView() {
           ) : (
             <div className="flex flex-col gap-2">
               <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-2">
-                {modeButton}
                 {toolbarFloat}
               </div>
               <div className="flex min-w-0 items-center gap-2">
@@ -550,11 +541,10 @@ export function SongView() {
               </div>
             </div>
           )}
-          {!(live && !headerOpen) && transposer(false)}
+          {transposer(false)}
           {headerOpen && (
           <>
           <div className="flex flex-wrap items-center gap-2">
-            {modeButton}
             <InstrumentSwitch value={instrument} onChange={(next: InstrumentId) => update({ instrument: next })} />
             {!song.editable && (
               <Button
@@ -639,118 +629,73 @@ export function SongView() {
               </Button>
             </div>
           )}
-          {song.origin !== 'catalog' && (song.ownerId === user.id || isStaff(user)) && (
-            <div className="flex flex-wrap items-center gap-2 text-sm">
-              <Button
-                size="sm"
-                variant={song.shared ? 'default' : 'outline'}
-                aria-pressed={song.shared}
-                onClick={() => void shareSong(song.id, { shared: !song.shared })}
-              >
-                Compartida
-              </Button>
-              <InfoTip label="Qué significa compartir" text={SHARE_HINT} />
-              {isStaff(user) && (
-                <select
-                  className="h-8 rounded-md border bg-background px-2 text-xs"
-                  aria-label="Compartir con"
-                  value=""
-                  onChange={(event) => {
-                    const userId = event.target.value
-                    if (userId) void shareSong(song.id, { userId, include: true })
-                  }}
-                >
-                  <option value="">Compartir con…</option>
-                  {people
-                    .filter((person) => person.id !== song.ownerId)
-                    .map((person) => (
-                      <option key={person.id} value={person.id}>
-                        {person.name}
-                      </option>
-                    ))}
-                </select>
-              )}
-              {song.shares?.map((userId) => {
-                const person = people.find((item) => item.id === userId)
-                return (
-                  <button
-                    key={userId}
-                    type="button"
-                    className="rounded-full border px-2 py-1 text-xs"
-                    title="Quitar a esta persona de la copia."
-                    onClick={() => void shareSong(song.id, { userId, include: false })}
-                  >
-                    {person?.name ?? userId} ×
-                  </button>
-                )
-              })}
-            </div>
-          )}
-
           <div className="flex flex-wrap items-center gap-2">
-            <SpellingToggle
-              value={spelling}
-              onChange={(next) => update(live ? { liveSpelling: next } : { spelling: next })}
+            <SpellingToggle value={spelling} onChange={(next) => update({ spelling: next })} />
+            <WithHint text="Achica la letra de la cifra.">
+              <Button variant="outline" title="Achica la letra de la cifra." onClick={() => update({ fontSize: Math.max(16, settings.fontSize - 2) })}>
+                A−
+              </Button>
+            </WithHint>
+            <WithHint text="Aumenta la letra de la cifra.">
+              <Button variant="outline" title="Aumenta la letra de la cifra." onClick={() => update({ fontSize: Math.min(40, settings.fontSize + 2) })}>
+                A+
+              </Button>
+            </WithHint>
+            <WithHint text="Muestra u oculta los acordes sobre la letra.">
+              <Button
+                variant={settings.showChords ? 'default' : 'outline'}
+                title="Muestra u oculta los acordes sobre la letra."
+                aria-pressed={settings.showChords}
+                onClick={() => update({ showChords: !settings.showChords })}
+              >
+                Acordes
+              </Button>
+            </WithHint>
+            <WithHint text="Muestra u oculta los diagramas del instrumento.">
+              <Button
+                variant={settings.showDiagrams ? 'default' : 'outline'}
+                size="icon"
+                aria-pressed={settings.showDiagrams}
+                aria-label="Diagramas"
+                title="Muestra u oculta los diagramas del instrumento."
+                onClick={() => update({ showDiagrams: !settings.showDiagrams })}
+              >
+                <Eye />
+              </Button>
+            </WithHint>
+            <FoldToggle
+              value={settings.fold}
+              onChange={(fold) => {
+                setExpanded([])
+                update({ fold })
+              }}
             />
-            <Button variant="outline" title="Achica la letra de la cifra." onClick={() => update({ fontSize: Math.max(16, settings.fontSize - 2) })}>
-              A−
-            </Button>
-            <Button variant="outline" title="Aumenta la letra de la cifra." onClick={() => update({ fontSize: Math.min(40, settings.fontSize + 2) })}>
-              A+
-            </Button>
-            <Button
-              variant={settings.showChords ? 'default' : 'outline'}
-              title="Muestra u oculta los acordes sobre la letra."
-              onClick={() => update({ showChords: !settings.showChords })}
-            >
-              Acordes
-            </Button>
-            <Button
-              variant={settings.showDiagrams ? 'default' : 'outline'}
-              size="icon"
-              aria-pressed={settings.showDiagrams}
-              aria-label="Diagramas"
-              title="Muestra u oculta los diagramas del instrumento."
-              onClick={() => update({ showDiagrams: !settings.showDiagrams })}
-            >
-              <Eye />
-            </Button>
-            <Button
-              variant={settings.concise ? 'default' : 'outline'}
-              title={
-                settings.concise
-                  ? 'Pliega las partes iguales en la cifra y en la lista de arriba. El ×2 se queda.'
-                  : 'Muestra cada parte, también las que se repiten.'
-              }
-              onClick={() => update({ concise: !settings.concise })}
-            >
-              {settings.concise ? 'Conciso' : 'Completo'}
-            </Button>
           </div>
 
           <div className="flex flex-wrap gap-1.5">
             {NOTE_TYPES.map((type) => {
               const on = settings.visibleNotes.includes(type)
               return (
-                <button
-                  key={type}
-                  type="button"
-                  aria-pressed={on}
-                  title={NOTE_HINT[type]}
-                  onClick={() =>
-                    update({
-                      visibleNotes: on
-                        ? settings.visibleNotes.filter((item) => item !== type)
-                        : [...settings.visibleNotes, type],
-                    })
-                  }
-                  className={cn(
-                    'rounded-full border px-2.5 py-1 text-xs font-medium',
-                    on ? 'border-primary bg-primary/15 text-foreground' : 'text-muted-foreground',
-                  )}
-                >
-                  {NOTE_LABEL[type]}
-                </button>
+                <WithHint key={type} text={NOTE_HINT[type]}>
+                  <button
+                    type="button"
+                    aria-pressed={on}
+                    title={NOTE_HINT[type]}
+                    onClick={() =>
+                      update({
+                        visibleNotes: on
+                          ? settings.visibleNotes.filter((item) => item !== type)
+                          : [...settings.visibleNotes, type],
+                      })
+                    }
+                    className={cn(
+                      'rounded-full border px-2.5 py-1 text-xs font-medium',
+                      on ? 'border-primary bg-primary/15 text-foreground' : 'text-muted-foreground',
+                    )}
+                  >
+                    {NOTE_LABEL[type]}
+                  </button>
+                </WithHint>
               )
             })}
           </div>
@@ -780,39 +725,35 @@ export function SongView() {
             {nav.map((chip, index) => {
               const kind = partKind(chip.label)
               const active = chip.ids.includes(activeId ?? '')
+              const hint = partHint(chip.label, chip.copies, chip.repeat, index)
               return (
-                <button
-                  key={chip.id}
-                  type="button"
-                  aria-current={active ? 'step' : undefined}
-                  aria-keyshortcuts={index < 9 ? String(index + 1) : undefined}
-                  title={
-                    chip.copies > 1
-                      ? `Sale ${chip.copies} veces${chip.repeat > 1 ? `. Se repite ×${chip.repeat}` : ''}.`
-                      : undefined
-                  }
-                  onClick={() => go(chip.id)}
-                  className={cn(
-                    'inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 text-sm focus-visible:ring-[3px] focus-visible:ring-ring/60 focus-visible:outline-none',
-                    live ? 'min-h-11 text-base' : 'py-1',
-                    active ? 'border-primary bg-primary text-primary-foreground' : 'bg-card',
-                  )}
-                >
-                  {kind !== 'other' && (
-                    <span className={cn('size-1.5 rounded-full', active ? 'bg-primary-foreground' : kindPip(kind))} />
-                  )}
-                  {index < 9 && <Kbd>{index + 1}</Kbd>}
-                  {headerChipText(chip)}
-                </button>
+                <span key={chip.id} className="inline-flex shrink-0 items-center gap-0.5">
+                  <button
+                    type="button"
+                    aria-current={active ? 'step' : undefined}
+                    aria-keyshortcuts={index < 9 ? String(index + 1) : undefined}
+                    title={hint}
+                    onClick={() => go(chip.id)}
+                    className={cn(
+                      'inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-sm focus-visible:ring-[3px] focus-visible:ring-ring/60 focus-visible:outline-none',
+                      active ? 'border-primary bg-primary text-primary-foreground' : 'bg-card',
+                    )}
+                  >
+                    {kind !== 'other' && (
+                      <span className={cn('size-1.5 rounded-full', active ? 'bg-primary-foreground' : kindPip(kind))} />
+                    )}
+                    {index < 9 && <Kbd>{index + 1}</Kbd>}
+                    {headerChipText(chip)}
+                  </button>
+                  <ControlHint text={hint} />
+                </span>
               )
             })}
           </nav>
-          {(!live || headerOpen) && (
           <ShortcutLegend
             className="border-t pt-2"
             items={[
               { id: 'space', keys: <Kbd>Espacio</Kbd>, label: 'Controles' },
-              { id: 'mode', keys: <Kbd>M</Kbd>, label: live ? 'Modo aprender' : 'Modo tocar' },
               {
                 id: 'pedal',
                 keys: (
@@ -851,13 +792,12 @@ export function SongView() {
               },
             ]}
           />
-          )}
         </div>
       </header>
 
       <main className="mx-auto max-w-[70.4rem] px-4 py-4">
         {!chart && <p className="mb-4 text-sm text-muted-foreground">Cargando {instrumentLabel(instrument)}…</p>}
-        {chart && !live && settings.showDiagrams && (instrument === 'drums' || diagramNames.length > 0) && (
+        {chart && settings.showDiagrams && (instrument === 'drums' || diagramNames.length > 0) && (
           <InstrumentCharts
             instrument={instrument}
             names={diagramNames}
@@ -881,7 +821,7 @@ export function SongView() {
 
         <div
           ref={chartRef}
-          className={cn('relative font-mono', live ? 'space-y-5' : 'space-y-8')}
+          className="relative space-y-8 font-mono"
           style={{ fontSize: `${chartFontSize}px` }}
         >
           <span ref={probeRef} aria-hidden className="invisible absolute whitespace-pre" style={{ fontSize: `${settings.fontSize}px` }}>
@@ -890,7 +830,13 @@ export function SongView() {
           {blocks.map((block, index) => {
             const active = block.id === activeId
             const kind = partKind(block.label)
-            const folded = settings.concise && Boolean(block.duplicateOf) && !expanded.includes(block.id)
+            const folded = settings.fold !== 'full' && Boolean(block.duplicateOf) && !expanded.includes(block.id)
+            const earlier =
+              settings.fold === 'music' && block.duplicateOfId
+                ? blocks.find((item) => item.id === block.duplicateOfId)?.section
+                : undefined
+            const lines = (earlier ?? block.section).lines
+            const shown = earlier ? { ...block, section: { ...block.section, lines: earlier.lines } } : block
             const following = blocks[index + 1]
             const followingChord = following ? chordSequence(following.section.lines)[0] : undefined
             return (
@@ -915,10 +861,7 @@ export function SongView() {
                   </h2>
                   {block.repeat > 1 && (
                     <span
-                      className={cn(
-                        'rounded-md px-1.5 py-0.5 font-sans font-bold',
-                        live ? 'bg-primary text-[0.7em] text-primary-foreground' : 'bg-primary/15 text-[0.55em]',
-                      )}
+                      className="rounded-md bg-primary/15 px-1.5 py-0.5 font-sans text-[0.55em] font-bold"
                     >
                       <span aria-hidden>×{block.repeat}</span>
                       <span className="sr-only">se repite {block.repeat} veces</span>
@@ -938,14 +881,14 @@ export function SongView() {
                     className="font-sans text-[0.7em] text-muted-foreground underline-offset-2 hover:underline"
                     onClick={() => setExpanded((ids) => [...ids, block.id])}
                   >
-                    Igual que {block.duplicateOf}. Mostrar.
+                    {foldMessage(settings.fold, block.duplicateOf ?? '')}
                   </button>
                 ) : (
                   <div className="overflow-x-auto">
-                    {block.section.lines.map((line, index) => (
+                    {lines.map((line, index) => (
                       <ChartRow
                         key={`${block.id}-${index}`}
-                        block={block}
+                        block={shown}
                         lineIndex={index}
                         showChords={settings.showChords || line.lyric == null}
                         spelling={spelling}
@@ -964,7 +907,7 @@ export function SongView() {
                     )}
                   </div>
                 )}
-                {live && following && (
+                {following && (
                   <button
                     type="button"
                     data-cue
@@ -990,7 +933,7 @@ export function SongView() {
           })}
         </div>
 
-        {!live && (song.sources.length > 0 || song.source) && (
+        {(song.sources.length > 0 || song.source) && (
           <section className="mt-8 font-sans text-sm">
             <h2 className="mb-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
               Referencias y tutoriales
@@ -1051,11 +994,10 @@ export function SongView() {
             aria-label="Parte anterior"
             aria-keyshortcuts="ArrowLeft PageUp"
             disabled={partIndex <= 0}
-            className={cn(live && 'h-14 px-4')}
             onClick={() => stepSection(-1)}
           >
             <ChevronLeft />
-            <span className={cn(live && 'sr-only sm:not-sr-only')}>Anterior</span>
+            Anterior
             {headerOpen && <Kbd>←</Kbd>}
           </Button>
           <p className="flex min-w-0 flex-1 flex-col items-center justify-center text-center">
@@ -1091,7 +1033,6 @@ export function SongView() {
             aria-label={nextBlock ? `Parte siguiente: ${nextBlock.label}` : 'Parte siguiente'}
             aria-keyshortcuts="ArrowRight PageDown"
             disabled={partIndex >= blocks.length - 1}
-            className={cn(live && 'h-14 min-w-28 px-5')}
             onClick={() => stepSection(1)}
           >
             {headerOpen && <Kbd>→</Kbd>}
@@ -1133,6 +1074,21 @@ function InfoTip({ label, text }: { label: string; text: string }) {
       )}
     </span>
   )
+}
+
+function partHint(label: string, copies: number, repeat: number, index: number): string {
+  const goes: Record<PartKind, string> = {
+    intro: 'Va a la intro.',
+    verse: 'Va al verso.',
+    chorus: 'Va al coro.',
+    bridge: 'Va al puente.',
+    other: 'Va a esta parte.',
+  }
+  const bits = [goes[partKind(label)]]
+  if (copies > 1) bits.push(`Sale ${copies} veces.`)
+  if (repeat > 1) bits.push(`Se repite ×${repeat}.`)
+  if (index < 9) bits.push(`Tecla ${index + 1}.`)
+  return bits.join(' ')
 }
 
 function kindPip(kind: PartKind): string {
