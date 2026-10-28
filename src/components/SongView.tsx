@@ -159,8 +159,9 @@ export function SongView() {
     const index = blocks.findIndex((block) => block.id === id)
     const block = blocks[index]
     if (!block) return
+    const shown = nav.findIndex((chip) => chip.id === id || chip.ids.includes(id))
     setCurrent(id)
-    setAnnounce(`${block.label}${block.repeat > 1 ? ` por ${block.repeat}` : ''}, parte ${index + 1} de ${blocks.length}`)
+    setAnnounce(`${block.label}${block.repeat > 1 ? ` por ${block.repeat}` : ''}, parte ${shown + 1} de ${nav.length}`)
     const smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches
     spyPausedUntil.current = Date.now() + (smooth ? 900 : 100)
     document.getElementById(`sec-${id}`)?.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', block: 'start' })
@@ -213,7 +214,8 @@ export function SongView() {
       frame = requestAnimationFrame(() => {
         const section = activeId ? document.getElementById(`sec-${activeId}`) : null
         const footerTop = footerRef.current?.getBoundingClientRect().top ?? window.innerHeight
-        const last = activeId !== blocks[blocks.length - 1]?.id
+        const lastChip = nav[nav.length - 1]
+        const last = !lastChip?.ids.includes(activeId ?? '')
         setNearEnd(Boolean(section && last && section.getBoundingClientRect().bottom <= footerTop))
       })
     }
@@ -225,7 +227,7 @@ export function SongView() {
       window.removeEventListener('scroll', check)
       window.removeEventListener('resize', check)
     }
-  }, [activeId, blocks])
+  }, [activeId, nav])
 
   // Keep the current part chip in view in the scrolling row.
   useEffect(() => {
@@ -278,8 +280,8 @@ export function SongView() {
   }, [])
 
   const stepSection = (direction: -1 | 1) => {
-    const index = blocks.findIndex((block) => block.id === activeId)
-    const next = blocks[index + direction]
+    const index = nav.findIndex((chip) => chip.ids.includes(activeId ?? ''))
+    const next = nav[Math.max(0, index) + direction]
     if (next) go(next.id)
   }
 
@@ -378,14 +380,16 @@ export function SongView() {
   }
 
   const soundingKey = transposeKeyName((chart ?? song).key, semitones)
-  const partIndex = blocks.findIndex((block) => block.id === activeId)
-  const partLabel = blocks[partIndex]?.label ?? ''
-  const partTotal = blocks.length
+  const partIndex = Math.max(0, nav.findIndex((chip) => chip.ids.includes(activeId ?? '')))
+  const currentChip = nav[partIndex]
+  const partLabel = currentChip ? headerChipText(currentChip) : ''
+  const partTotal = nav.length
   const partCountLabel =
     partLabel && partTotal > 0 ? `${partLabel} ${partIndex + 1}/${partTotal}` : partLabel
   const songKey = (chart ?? song).key
   const spelling = settings.spelling
-  const nextBlock = blocks[partIndex + 1]
+  const nextChip = nav[partIndex + 1]
+  const nextBlock = nextChip ? blocks.find((block) => block.id === nextChip.id) : undefined
   const nextChords = nextBlock
     ? chordSequence(nextBlock.section.lines)
         .slice(0, 4)
@@ -967,21 +971,26 @@ export function SongView() {
             aria-valuenow={partTotal ? Math.max(partIndex + 1, 1) : 1}
             aria-valuetext={partLabel ? `${partLabel}, parte ${Math.max(partIndex + 1, 1)} de ${partTotal}` : undefined}
           >
-            {/* One segment per part, as long as its lines times its repeats. */}
-            {blocks.map((block, index) => (
-              <span
-                key={block.id}
-                className={cn(
-                  'rounded-full transition-[height,background-color] motion-reduce:transition-none',
-                  index === partIndex
-                    ? 'h-2.5 bg-primary'
-                    : index < partIndex
-                      ? 'h-1.5 bg-primary/45'
-                      : 'h-1.5 bg-muted-foreground/30',
-                )}
-                style={{ flexGrow: Math.max(1, block.section.lines.length) * Math.max(1, block.repeat), flexBasis: 0 }}
-              />
-            ))}
+            {/* One segment per section the current fold still shows. */}
+            {nav.map((chip, index) => {
+              const weight = blocks
+                .filter((block) => chip.ids.includes(block.id))
+                .reduce((sum, block) => sum + Math.max(1, block.section.lines.length) * Math.max(1, block.repeat), 0)
+              return (
+                <span
+                  key={chip.id}
+                  className={cn(
+                    'rounded-full transition-[height,background-color] motion-reduce:transition-none',
+                    index === partIndex
+                      ? 'h-2.5 bg-primary'
+                      : index < partIndex
+                        ? 'h-1.5 bg-primary/45'
+                        : 'h-1.5 bg-muted-foreground/30',
+                  )}
+                  style={{ flexGrow: Math.max(1, weight), flexBasis: 0 }}
+                />
+              )
+            })}
           </div>
           <div className="flex items-stretch gap-2">
           <Button
@@ -1028,7 +1037,7 @@ export function SongView() {
             size="lg"
             aria-label={nextBlock ? `Parte siguiente: ${nextBlock.label}` : 'Parte siguiente'}
             aria-keyshortcuts="ArrowRight PageDown"
-            disabled={partIndex >= blocks.length - 1}
+            disabled={!nextChip}
             onClick={() => stepSection(1)}
           >
             {headerOpen && <Kbd>→</Kbd>}
