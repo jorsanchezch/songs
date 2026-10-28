@@ -55,6 +55,12 @@ assert(formatChord('C#m7(11)', 'E', 0, 'both') === '6(C#m7(11))', 'both keeps th
 assert(formatChord('C9', 'G', 0, 'both') === '4(C9)', 'both leaves a numbered quality on the chord')
 assert(formatChord('E', 'E', 2, 'both') === '1(F#)', 'both keeps the degree and transposes the chord')
 assert(formatChord('E/G#', 'E', 2, 'both') === '1/3(F#/A#)', 'both slash transposes only the chord')
+assert(formatChord('E/G#', 'E', 0, 'letters', true) === '1', 'guitar slash is the chord degree')
+assert(formatChord('C/E', 'C', 0, 'both', true) === '1', 'C/E is 1, not the bass')
+assert(formatChord('C#m7/B', 'A', 0, 'degrees', true) === '3m7', 'slash keeps the chord quality')
+assert(formatChord('D/F#', 'A', 0, 'letters', true) === '4', 'D/F# in A is 4')
+assert(formatChord('G', 'C', 0, 'letters', true) === 'G', 'plain chords ignore the slash switch')
+assert(formatChord('E/G#', 'E', 2, 'letters') === 'F#/A#', 'slash spelling returns when the switch is off')
 
 const santo = parseChart(
   await readFile(path.join(charts, 'Santo Por Siempre.chopro'), 'utf8'),

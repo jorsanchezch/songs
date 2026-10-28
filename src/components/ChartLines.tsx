@@ -62,6 +62,7 @@ export function ChartRow({
   lineIndex,
   showChords,
   spelling,
+  slashAsDegree = false,
   semitones,
   songKey,
   visible,
@@ -74,6 +75,8 @@ export function ChartRow({
   lineIndex: number
   showChords: boolean
   spelling: ViewSettings['spelling']
+  /** On guitar, replace C/E with its degree and hide the written slash. */
+  slashAsDegree?: boolean
   semitones: number
   songKey: string
   visible: NoteType[]
@@ -90,7 +93,7 @@ export function ChartRow({
   const placed = placeChords(
     line.chords.map((chord) => ({
       ...chord,
-      name: formatChord(chord.raw, songKey, semitones, spelling),
+      name: formatChord(chord.raw, songKey, semitones, spelling, slashAsDegree),
     })),
   )
   const chordsShown = showChords && placed.items.length > 0

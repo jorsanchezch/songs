@@ -38,7 +38,7 @@ import {
   type DisplayBlock,
   type PartKind,
 } from '@/lib/display'
-import { instrumentLabel, type InstrumentId } from '@/lib/instruments'
+import { instrumentLabel, isGuitar, type InstrumentId } from '@/lib/instruments'
 import { putPrefs } from '@/lib/api'
 import { loadSettings, saveSettings, type ViewSettings } from '@/lib/settings'
 import { NOTE_HINT, NOTE_LABEL, NOTE_TYPES } from '@/lib/types'
@@ -388,23 +388,23 @@ export function SongView() {
     partLabel && partTotal > 0 ? `${partLabel} ${partIndex + 1}/${partTotal}` : partLabel
   const songKey = (chart ?? song).key
   const spelling = settings.spelling
+  const slashAsDegree = isGuitar(instrument) && settings.slashAsDegree
+  const showChord = (raw: string) => formatChord(raw, songKey, semitones, spelling, slashAsDegree)
   const nextChip = nav[partIndex + 1]
   const nextBlock = nextChip ? blocks.find((block) => block.id === nextChip.id) : undefined
   const nextChords = nextBlock
     ? chordSequence(nextBlock.section.lines)
         .slice(0, 4)
-        .map((raw) => formatChord(raw, songKey, semitones, spelling))
+        .map((raw) => showChord(raw))
     : []
-  const widestLine = widestLineCh(blocks, songKey, semitones, spelling)
+  const widestLine = widestLineCh(blocks, songKey, semitones, spelling, slashAsDegree)
   // Section border and padding take about 16px of the width.
   const fitted = chartWidth && widestLine ? Math.floor((chartWidth - 16) / (widestLine * chPerPx)) : settings.fontSize
   // Shrink a little to keep lines whole, then wrap what is still too long.
   const chartFontSize = Math.max(Math.round(settings.fontSize * 0.85), Math.min(settings.fontSize, fitted))
   const wrapAt = chartWidth ? Math.floor((chartWidth - 16) / (chPerPx * chartFontSize)) : undefined
   const author = song.artist.trim() || song.composer.trim()
-  const names = chordSequence(blocks.flatMap((block) => block.section.lines)).map((raw) =>
-    formatChord(raw, songKey, semitones, spelling),
-  )
+  const names = chordSequence(blocks.flatMap((block) => block.section.lines)).map((raw) => showChord(raw))
   const uniqueNames = [...new Set(names)]
   const diagramNames = [
     ...new Set(
@@ -651,6 +651,18 @@ export function SongView() {
           <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Vista de la cifra">
             <Eye className="size-4 shrink-0 text-muted-foreground" aria-hidden />
             <SpellingToggle value={spelling} onChange={(next) => update({ spelling: next })} />
+            {isGuitar(instrument) && (
+              <WithHint text="En la guitarra, un acorde con barra (como C/E) muestra solo su grado, no la nota del bajo. Apagado, vuelve la cifra original.">
+                <Button
+                  variant={settings.slashAsDegree ? 'default' : 'outline'}
+                  title="En la guitarra, un acorde con barra (como C/E) muestra solo su grado, no la nota del bajo. Apagado, vuelve la cifra original."
+                  aria-pressed={settings.slashAsDegree}
+                  onClick={() => update({ slashAsDegree: !settings.slashAsDegree })}
+                >
+                  Solo grado
+                </Button>
+              </WithHint>
+            )}
             <WithHint text="Achica la letra de la cifra.">
               <Button variant="outline" title="Achica la letra de la cifra." onClick={() => update({ fontSize: Math.max(16, settings.fontSize - 2) })}>
                 A−
@@ -891,6 +903,7 @@ export function SongView() {
                       showChords={settings.showChords || line.lyric == null}
                       showLyrics={showLyrics}
                       spelling={spelling}
+                      slashAsDegree={slashAsDegree}
                       semitones={semitones}
                       songKey={(chart ?? song).key}
                       visible={settings.visibleNotes}
@@ -921,7 +934,7 @@ export function SongView() {
                     {following.repeat > 1 && <span>×{following.repeat}</span>}
                     {followingChord && (
                       <span className="font-mono font-semibold text-chart-chord">
-                        {formatChord(followingChord, songKey, semitones, spelling)}
+                        {showChord(followingChord)}
                       </span>
                     )}
                   </button>
@@ -1119,12 +1132,21 @@ function kindEdge(kind: PartKind): string {
 }
 
 /** Widest chart line in ch, chords included, as ChartRow lays it out. */
-function widestLineCh(blocks: DisplayBlock[], songKey: string, semitones: number, spelling: ViewSettings['spelling']): number {
+function widestLineCh(
+  blocks: DisplayBlock[],
+  songKey: string,
+  semitones: number,
+  spelling: ViewSettings['spelling'],
+  slashAsDegree: boolean,
+): number {
   let widest = 0
   for (const block of blocks) {
     for (const line of block.section.lines) {
       const placed = placeChords(
-        line.chords.map((chord) => ({ ...chord, name: formatChord(chord.raw, songKey, semitones, spelling) })),
+        line.chords.map((chord) => ({
+          ...chord,
+          name: formatChord(chord.raw, songKey, semitones, spelling, slashAsDegree),
+        })),
       )
       const lyric = line.lyric == null ? 0 : displayLyric(line.lyric).trimEnd().length
       widest = Math.max(widest, lyric, placed.cursor)

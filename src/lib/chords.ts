@@ -112,6 +112,7 @@ export function formatChord(
   key: string,
   semitones: number,
   spelling: Spelling,
+  slashAsDegree = false,
 ): string {
   const parsed = parseKey(key)
   const tonic = mod12(parsed.pc + semitones)
@@ -119,6 +120,12 @@ export function formatChord(
   const chord = splitChord(raw)
   const rootPc = pitchClass(chord.root)
   if (rootPc == null) return chord.raw
+
+  // Guitar: C/E in C is 1, the chord, never the bass note 3.
+  if (slashAsDegree && chord.bass) {
+    const head = degreeChord(chord, parsed.pc).split('/')[0]
+    if (head) return head
+  }
 
   const letters = letterChord(chord, semitones, flats)
   if (spelling === 'letters') return letters

@@ -17,3 +17,7 @@ export function isInstrument(value: string | null | undefined): value is Instrum
 export function instrumentLabel(id: InstrumentId): string {
   return INSTRUMENTS.find((item) => item.id === id)?.label ?? 'Guitarra eléctrica'
 }
+
+export function isGuitar(id: InstrumentId): boolean {
+  return id === 'guitar' || id === 'electric_guitar'
+}

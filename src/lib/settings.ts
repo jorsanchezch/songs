@@ -17,6 +17,8 @@ export type ViewSettings = {
   semitones: Record<string, number>
   chordShapes: Record<string, Record<string, string>>
   instrument: InstrumentId
+  /** Guitar charts: a slash chord shows its degree, and the written slash stays hidden. */
+  slashAsDegree: boolean
 }
 
 const DEFAULTS: ViewSettings = {
@@ -30,6 +32,7 @@ const DEFAULTS: ViewSettings = {
   semitones: {},
   chordShapes: {},
   instrument: DEFAULT_INSTRUMENT,
+  slashAsDegree: true,
 }
 
 function savedSpelling(value: unknown): Spelling {
@@ -66,6 +69,7 @@ export function loadSettings(): ViewSettings {
       chordShapes: parsed.chordShapes ?? {},
       fold: savedFold(parsed),
       instrument: isInstrument(parsed.instrument) ? parsed.instrument : DEFAULT_INSTRUMENT,
+      slashAsDegree: parsed.slashAsDegree !== false,
     }
   } catch {
     return { ...DEFAULTS, visibleNotes: [...NOTE_TYPES], semitones: {}, chordShapes: {} }
