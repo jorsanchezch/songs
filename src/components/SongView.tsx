@@ -62,6 +62,8 @@ export function SongView() {
   const chartRef = useRef<HTMLDivElement>(null)
   const probeRef = useRef<HTMLSpanElement>(null)
   const chipsRef = useRef<HTMLDivElement>(null)
+  const footerRef = useRef<HTMLElement>(null)
+  const [nearEnd, setNearEnd] = useState(false)
   // Smooth scrolling passes through other parts. The scroll spy waits until it lands.
   const spyPausedUntil = useRef(0)
 
@@ -195,6 +197,32 @@ export function SongView() {
       window.removeEventListener('scroll', onScroll)
     }
   }, [blocks, current, headerHeight])
+
+  // When the end of the current part is on screen, the change is coming: the footer says so.
+  useEffect(() => {
+    if (!live) {
+      setNearEnd(false)
+      return
+    }
+    let frame = 0
+    const check = () => {
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => {
+        const section = activeId ? document.getElementById(`sec-${activeId}`) : null
+        const footerTop = footerRef.current?.getBoundingClientRect().top ?? window.innerHeight
+        const last = activeId !== blocks[blocks.length - 1]?.id
+        setNearEnd(Boolean(section && last && section.getBoundingClientRect().bottom <= footerTop))
+      })
+    }
+    check()
+    window.addEventListener('scroll', check, { passive: true })
+    window.addEventListener('resize', check)
+    return () => {
+      cancelAnimationFrame(frame)
+      window.removeEventListener('scroll', check)
+      window.removeEventListener('resize', check)
+    }
+  }, [activeId, blocks, live])
 
   // Keep the current part chip in view in the scrolling row.
   useEffect(() => {
@@ -358,13 +386,14 @@ export function SongView() {
   const partCountLabel =
     partLabel && partTotal > 0 ? `${partLabel} ${partIndex + 1}/${partTotal}` : partLabel
   const songKey = (chart ?? song).key
+  const spelling = live ? settings.liveSpelling : settings.spelling
   const nextBlock = blocks[partIndex + 1]
   const nextChords = nextBlock
     ? chordSequence(nextBlock.section.lines)
         .slice(0, 4)
-        .map((raw) => formatChord(raw, songKey, semitones, settings.spelling))
+        .map((raw) => formatChord(raw, songKey, semitones, spelling))
     : []
-  const widestLine = widestLineCh(blocks, songKey, semitones, settings.spelling)
+  const widestLine = widestLineCh(blocks, songKey, semitones, spelling)
   // Section border and padding take about 16px of the width.
   const fitted = chartWidth && widestLine ? Math.floor((chartWidth - 16) / (widestLine * chPerPx)) : settings.fontSize
   // Live mode shrinks a little to keep lines whole, then wraps what is still too long.
@@ -374,7 +403,7 @@ export function SongView() {
   const wrapAt = live && chartWidth ? Math.floor((chartWidth - 16) / (chPerPx * chartFontSize)) : undefined
   const author = song.artist.trim() || song.composer.trim()
   const names = chordSequence(blocks.flatMap((block) => block.section.lines)).map((raw) =>
-    formatChord(raw, (chart ?? song).key, semitones, settings.spelling),
+    formatChord(raw, songKey, semitones, spelling),
   )
   const uniqueNames = [...new Set(names)]
   const diagramNames = [
@@ -650,7 +679,10 @@ export function SongView() {
           )}
 
           <div className="flex flex-wrap items-center gap-2">
-            <SpellingToggle value={settings.spelling} onChange={(spelling) => update({ spelling })} />
+            <SpellingToggle
+              value={spelling}
+              onChange={(next) => update(live ? { liveSpelling: next } : { spelling: next })}
+            />
             <Button variant="outline" title="Achica la letra de la cifra." onClick={() => update({ fontSize: Math.max(16, settings.fontSize - 2) })}>
               A−
             </Button>
@@ -846,6 +878,8 @@ export function SongView() {
             const active = block.id === activeId
             const kind = partKind(block.label)
             const folded = settings.concise && Boolean(block.duplicateOf) && !expanded.includes(block.id)
+            const following = blocks[index + 1]
+            const followingChord = following ? chordSequence(following.section.lines)[0] : undefined
             return (
               <section
                 key={block.id}
@@ -901,7 +935,7 @@ export function SongView() {
                         block={block}
                         lineIndex={index}
                         showChords={settings.showChords || line.lyric == null}
-                        spelling={settings.spelling}
+                        spelling={spelling}
                         semitones={semitones}
                         songKey={(chart ?? song).key}
                         visible={settings.visibleNotes}
@@ -916,6 +950,27 @@ export function SongView() {
                       </p>
                     )}
                   </div>
+                )}
+                {live && following && (
+                  <button
+                    type="button"
+                    data-cue
+                    aria-label={`Ir a la parte siguiente: ${following.label}`}
+                    onClick={() => go(following.id)}
+                    className={cn(
+                      'mt-1 inline-flex items-center gap-1.5 rounded-md border border-dashed px-2 py-1 font-sans text-[0.6em] focus-visible:ring-[3px] focus-visible:ring-ring/60 focus-visible:outline-none',
+                      active ? 'border-primary/60 text-foreground' : 'border-border text-muted-foreground',
+                    )}
+                  >
+                    <ChevronRight className="size-[1.1em]" aria-hidden />
+                    <span className="font-semibold">{following.label}</span>
+                    {following.repeat > 1 && <span>×{following.repeat}</span>}
+                    {followingChord && (
+                      <span className="font-mono font-semibold text-chart-chord">
+                        {formatChord(followingChord, songKey, semitones, spelling)}
+                      </span>
+                    )}
+                  </button>
                 )}
               </section>
             )
@@ -949,7 +1004,7 @@ export function SongView() {
         )}
       </main>
 
-      <footer className="fixed inset-x-0 bottom-8 z-20 border-t bg-background/95 px-4 py-3 backdrop-blur">
+      <footer ref={footerRef} className="fixed inset-x-0 bottom-8 z-20 border-t bg-background/95 px-4 py-3 backdrop-blur">
         <div className="mx-auto flex max-w-[70.4rem] flex-col gap-2">
           <div
             className="h-1 overflow-hidden rounded-full bg-muted"
@@ -987,7 +1042,12 @@ export function SongView() {
                 </span>
               )}
             </span>
-            <span className="block max-w-full truncate text-xs text-muted-foreground">
+            <span
+              className={cn(
+                'block max-w-full truncate rounded-md px-2 text-xs transition-colors motion-reduce:transition-none',
+                nearEnd ? 'bg-primary/20 py-0.5 text-sm text-foreground ring-1 ring-primary' : 'text-muted-foreground',
+              )}
+            >
               {nextBlock ? (
                 <>
                   Sigue <span className="font-semibold text-foreground">{nextBlock.label}</span>

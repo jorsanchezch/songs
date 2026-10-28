@@ -12,6 +12,8 @@ export type ViewSettings = {
   /** live: least on screen while the song plays. learn: diagrams, notes, sources. */
   mode: ViewMode
   spelling: Spelling
+  /** Live mode reads at a glance, so it keeps its own spelling. Letters by default. */
+  liveSpelling: Spelling
   fontSize: number
   showChords: boolean
   showDiagrams: boolean
@@ -26,6 +28,7 @@ const DEFAULTS: ViewSettings = {
   theme: 'dark',
   mode: 'live',
   spelling: 'both',
+  liveSpelling: 'letters',
   fontSize: 22,
   showChords: true,
   showDiagrams: true,
@@ -50,6 +53,7 @@ export function loadSettings(): ViewSettings {
       semitones: parsed.semitones ?? {},
       chordShapes: parsed.chordShapes ?? {},
       mode: parsed.mode === 'learn' ? 'learn' : 'live',
+      liveSpelling: parsed.liveSpelling ?? 'letters',
       instrument: isInstrument(parsed.instrument) ? parsed.instrument : DEFAULT_INSTRUMENT,
     }
   } catch {
