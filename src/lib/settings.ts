@@ -5,8 +5,12 @@ import { NOTE_TYPES } from '@/lib/types'
 const STORAGE = 'songbook-v1'
 export const THEME_KEY = 'songbook-theme'
 
+export type ViewMode = 'live' | 'learn'
+
 export type ViewSettings = {
   theme: 'dark' | 'light'
+  /** live: least on screen while the song plays. learn: diagrams, notes, sources. */
+  mode: ViewMode
   spelling: Spelling
   fontSize: number
   showChords: boolean
@@ -20,6 +24,7 @@ export type ViewSettings = {
 
 const DEFAULTS: ViewSettings = {
   theme: 'dark',
+  mode: 'live',
   spelling: 'both',
   fontSize: 22,
   showChords: true,
@@ -44,6 +49,7 @@ export function loadSettings(): ViewSettings {
       visibleNotes: parsed.visibleNotes?.length ? parsed.visibleNotes : [...NOTE_TYPES],
       semitones: parsed.semitones ?? {},
       chordShapes: parsed.chordShapes ?? {},
+      mode: parsed.mode === 'learn' ? 'learn' : 'live',
       instrument: isInstrument(parsed.instrument) ? parsed.instrument : DEFAULT_INSTRUMENT,
     }
   } catch {
