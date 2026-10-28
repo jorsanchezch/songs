@@ -68,6 +68,63 @@ export function sectionSignature(section: SongSection): string {
     .join('\n')
 }
 
+export type HeaderChip = {
+  id: string
+  label: string
+  repeat: number
+  copies: number
+  ids: string[]
+}
+
+function trailingRepeat(label: string): number {
+  const match = label
+    .trim()
+    .match(/(?:\(|\[)?(?:(?:x|×)\s*(\d+)|(\d+)\s*(?:x|×))(?:\)|\])?\s*$/i)
+  const value = Number(match?.[1] || match?.[2] || 0)
+  return value > 1 ? value : 1
+}
+
+function playedTimes(block: DisplayBlock): number {
+  return Math.max(block.repeat, trailingRepeat(block.label))
+}
+
+// Concise mode keeps one chip per identical part. The × on the label, and how
+// many times that part comes back, stay on the chip.
+export function headerChips(blocks: DisplayBlock[], concise: boolean): HeaderChip[] {
+  const chips: { chip: HeaderChip; signature: string }[] = []
+  for (const block of blocks) {
+    const signature = sectionSignature(block.section)
+    const previous =
+      concise && block.duplicateOf
+        ? [...chips].reverse().find((item) => item.chip.label === block.duplicateOf && item.signature === signature)
+        : undefined
+    if (previous) {
+      previous.chip.repeat = Math.max(previous.chip.repeat, playedTimes(block))
+      previous.chip.copies += 1
+      previous.chip.ids.push(block.id)
+      continue
+    }
+    chips.push({
+      signature,
+      chip: {
+        id: block.id,
+        label: block.label,
+        repeat: playedTimes(block),
+        copies: 1,
+        ids: [block.id],
+      },
+    })
+  }
+  return chips.map((item) => item.chip)
+}
+
+export function headerChipText(chip: HeaderChip): string {
+  const stated = trailingRepeat(chip.label)
+  const repeat = chip.repeat > 1 && stated <= 1 ? ` ×${chip.repeat}` : ''
+  const copies = chip.copies > 1 ? ` · ${chip.copies}` : ''
+  return `${chip.label}${repeat}${copies}`
+}
+
 export function blocksFor(song: Song, flow: string[] | null): DisplayBlock[] {
   const resolved = resolveSections(song.sections)
   const ordered = orderSections(resolved, flow)

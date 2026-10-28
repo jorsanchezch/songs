@@ -2,7 +2,7 @@ import { readFile, readdir } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { formatChord, transposeKeyName } from '../src/lib/chords.ts'
-import { blocksFor, partKind } from '../src/lib/display.ts'
+import { blocksFor, headerChips, headerChipText, partKind } from '../src/lib/display.ts'
 import { diagramFor, shapesFor } from '../src/lib/guitar.ts'
 import { chartToCho, chartToSongMd, isBlockedPage, isPlainChordLine, songToMarkdown, wrapPlainChordLine } from '../src/lib/importChart.ts'
 import { shareLyrics } from '../server/lyrics.ts'
@@ -115,6 +115,25 @@ const chorusPair = parseChart(
 )
 const chorusBlocks = blocksFor(chorusPair, null)
 assert(chorusBlocks.find((block) => block.label === 'Coro x2')?.duplicateOf === 'Coro', 'chorus x2 collapses with the chorus')
+const openHeader = headerChips(chorusBlocks, false)
+assert(openHeader.length === chorusBlocks.length, 'full header lists every part')
+assert(headerChipText(openHeader[2]!) === 'Coro x2', 'x2 stays written on its own chip')
+const compactHeader = headerChips(chorusBlocks, true)
+assert(compactHeader.map((chip) => headerChipText(chip)).join(' | ') === 'Coro ×2 · 2 | Verso', 'concise header folds the chorus and keeps x2')
+assert(compactHeader[0]?.ids.length === 2, 'folded chorus still covers both parts')
+const repeatedChorus = parseChart(
+  ['---', 'title: T', '---', '', '## Coro {#coro}', '[C]', 'Hola', '', '## Verso {#verso}', '[G]', 'Otra', '', '## Coro {#otra same=coro repeat=2}'].join('\n'),
+  'repeat-coro.song.md',
+)
+assert(
+  headerChipText(headerChips(blocksFor(repeatedChorus, null), true)[0]!) === 'Coro ×2 · 2',
+  'a repeated chorus keeps the count on the folded chip',
+)
+const unlike = parseChart(
+  ['---', 'title: T', '---', '', '## Coro {#a}', '[C]', 'Hola', '', '## Coro {#b}', '[G]', 'Otra', ''].join('\n'),
+  'unlike-coro.song.md',
+)
+assert(headerChips(blocksFor(unlike, null), true).length === 2, 'different choruses stay apart')
 assert(markdown.sections.some((section) => section.label === 'Verso'), 'plantilla says verso')
 assert(!markdown.sections.some((section) => /estrofa/i.test(section.label)), 'plantilla has no estrofa label')
 

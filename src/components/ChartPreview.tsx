@@ -3,7 +3,7 @@ import { ChartRow, NoteRow } from '@/components/ChartLines'
 import { SpellingToggle } from '@/components/SpellingToggle'
 import { Button } from '@/components/ui/button'
 import { formatChord, transposeKeyName } from '@/lib/chords'
-import { blocksFor, chordSequence } from '@/lib/display'
+import { blocksFor, chordSequence, headerChips, headerChipText } from '@/lib/display'
 import { NOTE_LABEL, NOTE_TYPES, type NoteType, type Song, type Spelling } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
@@ -23,6 +23,7 @@ export function ChartPreview({ song }: { song: Song }) {
     () => blocksFor(song, version?.flow ?? null),
     [song, version],
   )
+  const nav = useMemo(() => headerChips(blocks, concise), [blocks, concise])
   const activeId = current && blocks.some((block) => block.id === current) ? current : (blocks[0]?.id ?? null)
   const names = chordSequence(blocks.flatMap((block) => block.section.lines)).map((name) =>
     formatChord(name, song.key, semitones, spelling),
@@ -89,18 +90,22 @@ export function ChartPreview({ song }: { song: Song }) {
         </div>
       )}
       <div className="flex gap-1.5 overflow-x-auto">
-        {blocks.map((block) => (
+        {nav.map((chip) => (
           <button
-            key={block.id}
+            key={chip.id}
             type="button"
-            onClick={() => setCurrent(block.id)}
+            title={
+              chip.copies > 1
+                ? `Sale ${chip.copies} veces${chip.repeat > 1 ? `. Se repite ×${chip.repeat}` : ''}.`
+                : undefined
+            }
+            onClick={() => setCurrent(chip.id)}
             className={cn(
               'shrink-0 rounded-full border px-3 py-1 text-sm',
-              block.id === activeId ? 'border-primary bg-primary text-primary-foreground' : 'bg-card',
+              chip.ids.includes(activeId ?? '') ? 'border-primary bg-primary text-primary-foreground' : 'bg-card',
             )}
           >
-            {block.label}
-            {block.repeat > 1 ? ` ×${block.repeat}` : ''}
+            {headerChipText(chip)}
           </button>
         ))}
       </div>

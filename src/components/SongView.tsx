@@ -27,7 +27,16 @@ import { SpellingToggle } from '@/components/SpellingToggle'
 import { Button } from '@/components/ui/button'
 import { UserBadge } from '@/components/UserBadge'
 import { formatChord, transposeKeyName } from '@/lib/chords'
-import { blocksFor, chordSequence, displayLyric, partKind, type DisplayBlock, type PartKind } from '@/lib/display'
+import {
+  blocksFor,
+  chordSequence,
+  displayLyric,
+  headerChips,
+  headerChipText,
+  partKind,
+  type DisplayBlock,
+  type PartKind,
+} from '@/lib/display'
 import { instrumentLabel, type InstrumentId } from '@/lib/instruments'
 import { putPrefs } from '@/lib/api'
 import { loadSettings, saveSettings, type ViewSettings } from '@/lib/settings'
@@ -101,6 +110,7 @@ export function SongView() {
     () => (chart ? blocksFor(chart, version?.flow ?? null) : []),
     [chart, version],
   )
+  const nav = useMemo(() => headerChips(blocks, settings.concise), [blocks, settings.concise])
 
   const activeId =
     current && blocks.some((block) => block.id === current)
@@ -296,7 +306,7 @@ export function SongView() {
       }
       const partNumber = Number(event.key)
       if (event.key.length === 1 && partNumber >= 1 && partNumber <= 9) {
-        const block = blocks[partNumber - 1]
+        const block = nav[partNumber - 1]
         if (!block) return
         event.preventDefault()
         go(block.id)
@@ -316,7 +326,7 @@ export function SongView() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [blocks, activeId, settings.mode])
+  }, [blocks, activeId, nav, settings.mode])
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -709,8 +719,8 @@ export function SongView() {
               variant={settings.concise ? 'default' : 'outline'}
               title={
                 settings.concise
-                  ? 'Pliega todas las partes que se pueden plegar, no solo la seleccionada.'
-                  : 'Muestra la canción entera, con las partes repetidas abiertas.'
+                  ? 'Pliega las partes iguales en la cifra y en la lista de arriba. El ×2 se queda.'
+                  : 'Muestra cada parte, también las que se repiten.'
               }
               onClick={() => update({ concise: !settings.concise })}
             >
@@ -767,16 +777,21 @@ export function SongView() {
           )}
 
           <nav ref={chipsRef} aria-label="Partes de la canción" className="flex gap-1.5 overflow-x-auto pb-1">
-            {blocks.map((block, index) => {
-              const kind = partKind(block.label)
-              const active = block.id === activeId
+            {nav.map((chip, index) => {
+              const kind = partKind(chip.label)
+              const active = chip.ids.includes(activeId ?? '')
               return (
                 <button
-                  key={block.id}
+                  key={chip.id}
                   type="button"
                   aria-current={active ? 'step' : undefined}
                   aria-keyshortcuts={index < 9 ? String(index + 1) : undefined}
-                  onClick={() => go(block.id)}
+                  title={
+                    chip.copies > 1
+                      ? `Sale ${chip.copies} veces${chip.repeat > 1 ? `. Se repite ×${chip.repeat}` : ''}.`
+                      : undefined
+                  }
+                  onClick={() => go(chip.id)}
                   className={cn(
                     'inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 text-sm focus-visible:ring-[3px] focus-visible:ring-ring/60 focus-visible:outline-none',
                     live ? 'min-h-11 text-base' : 'py-1',
@@ -787,8 +802,7 @@ export function SongView() {
                     <span className={cn('size-1.5 rounded-full', active ? 'bg-primary-foreground' : kindPip(kind))} />
                   )}
                   {index < 9 && <Kbd>{index + 1}</Kbd>}
-                  {block.label}
-                  {block.repeat > 1 ? ` ×${block.repeat}` : ''}
+                  {headerChipText(chip)}
                 </button>
               )
             })}
