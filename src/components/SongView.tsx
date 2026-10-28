@@ -478,7 +478,7 @@ export function SongView() {
         </Link>
       )}
       <p className="shrink-0 text-base font-semibold text-primary tabular-nums">{partCountLabel}</p>
-      {shareControls}
+      {headerOpen && shareControls}
       <span className="inline-flex items-center gap-1">
         <UserBadge />
         <InfoTip label="Qué es una persona" text={USER_HINT} />
@@ -686,6 +686,8 @@ export function SongView() {
               </Button>
             </WithHint>
             <FoldToggle value={settings.fold} onChange={(fold) => update({ fold })} />
+          </div>
+          <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Marcas de la cifra">
             {NOTE_TYPES.map((type) => {
               const on = settings.visibleNotes.includes(type)
               return (
@@ -1003,7 +1005,7 @@ export function SongView() {
           >
             <ChevronLeft />
             Anterior
-            {headerOpen && <Kbd>←</Kbd>}
+            <Kbd>←</Kbd>
           </Button>
           <p className="flex min-w-0 flex-1 flex-col items-center justify-center text-center">
             <span className="block max-w-full truncate text-sm font-semibold">
@@ -1040,7 +1042,7 @@ export function SongView() {
             disabled={!nextChip}
             onClick={() => stepSection(1)}
           >
-            {headerOpen && <Kbd>→</Kbd>}
+            <Kbd>→</Kbd>
             Siguiente
             <ChevronRight />
           </Button>
