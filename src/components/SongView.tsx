@@ -1006,17 +1006,29 @@ export function SongView() {
       <footer ref={footerRef} className="fixed inset-x-0 bottom-8 z-20 border-t bg-background/95 px-4 py-3 backdrop-blur">
         <div className="mx-auto flex max-w-[70.4rem] flex-col gap-2">
           <div
-            className="h-1 overflow-hidden rounded-full bg-muted"
+            className="flex h-2.5 items-center gap-1"
             role="progressbar"
             aria-label="Avance de la canción"
             aria-valuemin={1}
             aria-valuemax={Math.max(partTotal, 1)}
             aria-valuenow={partTotal ? Math.max(partIndex + 1, 1) : 1}
+            aria-valuetext={partLabel ? `${partLabel}, parte ${Math.max(partIndex + 1, 1)} de ${partTotal}` : undefined}
           >
-            <div
-              className="h-full bg-primary/80"
-              style={{ width: partTotal ? `${((Math.max(partIndex, 0) + 1) / partTotal) * 100}%` : '0%' }}
-            />
+            {/* One segment per part, as long as its lines times its repeats. */}
+            {blocks.map((block, index) => (
+              <span
+                key={block.id}
+                className={cn(
+                  'rounded-full transition-[height,background-color] motion-reduce:transition-none',
+                  index === partIndex
+                    ? 'h-2.5 bg-primary'
+                    : index < partIndex
+                      ? 'h-1.5 bg-primary/45'
+                      : 'h-1.5 bg-muted-foreground/30',
+                )}
+                style={{ flexGrow: Math.max(1, block.section.lines.length) * Math.max(1, block.repeat), flexBasis: 0 }}
+              />
+            ))}
           </div>
           <div className="flex items-stretch gap-2">
           <Button
