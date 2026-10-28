@@ -8,7 +8,7 @@ import { UserBadge } from '@/components/UserBadge'
 import { useSetlists } from '@/hooks/useSetlists'
 import { useUser } from '@/hooks/useUser'
 import { can } from '@/lib/access'
-import { createSetlist, evergreenStatus, removeSetlist } from '@/lib/setlists'
+import { createSetlist, evergreenStatus, removeSetlist, WEEKDAYS, weekdayMark } from '@/lib/setlists'
 
 const page = 'mx-auto w-full max-w-[52.8rem] px-4'
 
@@ -112,12 +112,18 @@ function SetlistGroup({
     <ul className="divide-y overflow-hidden rounded-xl border bg-card">
       {lists.map((list) => (
         <li key={list.id} className="flex items-center gap-2">
-          <Link to={`/listas/${encodeURIComponent(list.id)}`} className="min-w-0 flex-1 px-4 py-3 hover:bg-accent/60">
-            <span className="block font-medium">{list.name}</span>
-            <span className="block text-sm text-muted-foreground">
-              {list.evergreen
-                ? `${evergreenStatus(list)} · ${list.items.length} ${list.items.length === 1 ? 'canción' : 'canciones'}`
-                : `${list.items.length} ${list.items.length === 1 ? 'canción' : 'canciones'}`}
+          <Link
+            to={`/listas/${encodeURIComponent(list.id)}`}
+            className="flex min-w-0 flex-1 items-center gap-3 px-4 py-3 hover:bg-accent/60"
+          >
+            <DayMark weekday={list.evergreen?.weekday} />
+            <span className="min-w-0">
+              <span className="block font-medium">{list.name}</span>
+              <span className="block text-sm text-muted-foreground">
+                {list.evergreen
+                  ? `${evergreenStatus(list)} · ${list.items.length} ${list.items.length === 1 ? 'canción' : 'canciones'}`
+                  : `${list.items.length} ${list.items.length === 1 ? 'canción' : 'canciones'}`}
+              </span>
             </span>
           </Link>
           {!list.evergreen && allowDelete && (
@@ -135,6 +141,21 @@ function SetlistGroup({
         </li>
       ))}
     </ul>
+  )
+}
+
+function DayMark({ weekday }: { weekday?: number }) {
+  const letter = weekdayMark(weekday)
+  if (!letter) return null
+  const name = WEEKDAYS.find((day) => day.id === weekday)?.name
+  return (
+    <span
+      className="flex size-7 shrink-0 items-center justify-center rounded-md bg-primary/10 text-sm font-semibold text-primary"
+      title={name}
+      aria-hidden="true"
+    >
+      {letter}
+    </span>
   )
 }
 

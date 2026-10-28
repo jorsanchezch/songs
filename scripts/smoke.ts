@@ -6,7 +6,7 @@ import { blocksFor } from '../src/lib/display.ts'
 import { diagramFor, shapesFor } from '../src/lib/guitar.ts'
 import { chartToCho, chartToSongMd, isBlockedPage, isPlainChordLine, songToMarkdown, wrapPlainChordLine } from '../src/lib/importChart.ts'
 import { shareLyrics } from '../server/lyrics.ts'
-import { nextServiceDate, planEvergreenAdd, serviceListName } from '../src/lib/setlists.ts'
+import { nextServiceDate, planEvergreenAdd, serviceListName, weekdayMark } from '../src/lib/setlists.ts'
 import { can, currentUser, roleLabel } from '../src/lib/access.ts'
 import { parseChart } from '../src/lib/parseChart.ts'
 
@@ -192,6 +192,8 @@ assert(nextServiceDate(friday, 6) === '2026-10-17', 'next Saturday from Friday i
 assert(nextServiceDate(saturday, 6) === '2026-10-17', 'Saturday service is that same Saturday')
 assert(serviceListName(3) === 'Servicio del próximo miércoles', 'wednesday service name')
 assert(serviceListName(0) === 'Servicio del próximo domingo', 'sunday service name')
+assert(weekdayMark(3) === 'M' && weekdayMark(6) === 'S' && weekdayMark(0) === 'D', 'service day initials')
+assert(weekdayMark(1) === 'L' && weekdayMark(undefined) === null && weekdayMark(9) === null, 'no initial without a known day')
 let planned = planEvergreenAdd({ weekday: 6, serviceDate: null }, [], 'a', friday)
 assert(planned.evergreen.serviceDate === '2026-10-17' && planned.items.length === 1, 'first add targets Saturday')
 planned = planEvergreenAdd(planned.evergreen, planned.items, 'b', friday)
