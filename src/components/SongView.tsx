@@ -770,48 +770,50 @@ export function SongView() {
               )
             })}
           </nav>
-          <ShortcutLegend
-            className="border-t pt-2"
-            items={[
-              { id: 'space', keys: <Kbd>Espacio</Kbd>, label: 'Controles' },
-              {
-                id: 'pedal',
-                keys: (
-                  <>
-                    <Kbd>RePág</Kbd>
-                    <Kbd>AvPág</Kbd>
-                  </>
-                ),
-                label: 'Pedal de páginas',
-              },
-              {
-                id: 'part',
-                keys: (
-                  <>
-                    <Kbd>←</Kbd>
-                    <Kbd>→</Kbd>
-                  </>
-                ),
-                label: 'Parte anterior o siguiente',
-              },
-              { id: 'jump', keys: <Kbd>1–9</Kbd>, label: 'Ir a esa parte' },
-              {
-                id: 'song',
-                keys: (
-                  <>
-                    <Kbd>⌘←</Kbd>
-                    <Kbd>⌘→</Kbd>
-                  </>
-                ),
-                label: listaId ? 'Canción en la lista' : 'Canción en la biblioteca',
-              },
-              {
-                id: 'leave',
-                keys: <Kbd>Esc</Kbd>,
-                label: listaId ? 'Volver a la lista' : 'Volver a las canciones',
-              },
-            ]}
-          />
+          {headerOpen && (
+            <ShortcutLegend
+              className="border-t pt-2"
+              items={[
+                { id: 'space', keys: <Kbd>Espacio</Kbd>, label: 'Controles' },
+                {
+                  id: 'pedal',
+                  keys: (
+                    <>
+                      <Kbd>RePág</Kbd>
+                      <Kbd>AvPág</Kbd>
+                    </>
+                  ),
+                  label: 'Pedal de páginas',
+                },
+                {
+                  id: 'part',
+                  keys: (
+                    <>
+                      <Kbd>←</Kbd>
+                      <Kbd>→</Kbd>
+                    </>
+                  ),
+                  label: 'Parte anterior o siguiente',
+                },
+                { id: 'jump', keys: <Kbd>1–9</Kbd>, label: 'Ir a esa parte' },
+                {
+                  id: 'song',
+                  keys: (
+                    <>
+                      <Kbd>⌘←</Kbd>
+                      <Kbd>⌘→</Kbd>
+                    </>
+                  ),
+                  label: listaId ? 'Canción en la lista' : 'Canción en la biblioteca',
+                },
+                {
+                  id: 'leave',
+                  keys: <Kbd>Esc</Kbd>,
+                  label: listaId ? 'Volver a la lista' : 'Volver a las canciones',
+                },
+              ]}
+            />
+          )}
         </div>
       </header>
 
