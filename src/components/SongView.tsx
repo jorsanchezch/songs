@@ -523,9 +523,10 @@ export function SongView() {
         <div className="mx-auto flex max-w-[70.4rem] flex-col gap-3 px-4 py-2">
           {headerOpen ? (
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-              <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:min-w-[12rem] sm:flex-1">
+              <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:min-w-0 sm:flex-1">
                 <SongMark songId={song.id} />
-                <h1 className="min-w-0 flex-1 truncate text-lg font-semibold">{song.title}</h1>
+                <h1 className="min-w-0 shrink truncate text-lg font-semibold">{song.title}</h1>
+                {author && <p className="min-w-0 shrink-[2] truncate text-sm text-muted-foreground">{author}</p>}
               </div>
               {toolbarFloat}
             </div>
@@ -536,8 +537,8 @@ export function SongView() {
               </div>
               <div className="flex min-w-0 items-center gap-2">
                 <SongMark songId={song.id} />
-                <h1 className="min-w-0 flex-1 truncate text-lg font-semibold">{song.title}</h1>
-                {author && <p className="max-w-[40%] shrink-0 truncate text-sm text-muted-foreground">{author}</p>}
+                <h1 className="min-w-0 shrink truncate text-lg font-semibold">{song.title}</h1>
+                {author && <p className="min-w-0 shrink-[2] truncate text-sm text-muted-foreground">{author}</p>}
               </div>
             </div>
           )}
