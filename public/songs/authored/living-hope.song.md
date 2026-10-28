@@ -13,7 +13,7 @@ sources:
 
 [D]   [G]   [D]   [G]
 
-## Estrofa {#estrofa}
+## Verso {#verso}
 
                  [D]                 [Asus4]
 How great the chasm that lay between us
@@ -39,7 +39,7 @@ The work is finished, the end is written
           [G]         [Asus4]   [D]
 Jesus Christ, my living hope
 
-## Estrofa {#estrofa-2}
+## Verso {#verso-2}
 
                [D]                  [Asus4]
 Who could imagine so great a mercy
@@ -81,7 +81,7 @@ Jesus Christ, my living hope
 
 ## Coro {#coro-2 same=coro}
 
-## Estrofa {#estrofa-3}
+## Verso {#verso-3}
 
                  [D]                        [A]
 Then came the morning that sealed the promise

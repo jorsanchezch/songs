@@ -219,7 +219,7 @@ async function checkImport(files: { id: string; sourceText: string }[]) {
     overrides: { [sample.id]: `${sample.sourceText.trimEnd()}\n{comment: importada}\n` },
     hidden: [hidden.id],
     created: {
-      'propia-importada': '{title: Propia}\n{key: C}\n\n{start_of_verse: Estrofa}\n[C]\nHola\n{end_of_verse}\n',
+      'propia-importada': '{title: Propia}\n{key: C}\n\n{start_of_verse: Verso}\n[C]\nHola\n{end_of_verse}\n',
     },
     hasLists: true,
     days: [2],
@@ -325,7 +325,7 @@ async function checkPasswords(files: { id: string; sourceText: string }[]) {
   assert((await enter(db, 'Nila Prueba')).status === 200, 'name alone works after clearing')
 
   const stuck = await call(db, token, 'PUT', '/api/admin/users/jorge', { role: 'admin' })
-  assert(stuck.status === 400, `only owner stays ${stuck.status} ${JSON.stringify(stuck.data)}`)
+  assert(stuck.status === 403, `admin account stays fixed ${stuck.status} ${JSON.stringify(stuck.data)}`)
 
   const made = await call(db, token, 'POST', '/api/admin/users', { name: 'Ivo Admin', role: 'admin' })
   assert(made.status === 200, `create admin ${made.status} ${JSON.stringify(made.data.error ?? '')}`)
@@ -397,10 +397,16 @@ async function checkPasswords(files: { id: string; sourceText: string }[]) {
   const ottoMade = await call(db, token, 'POST', '/api/admin/users', { name: 'Otto Duenio', role: 'owner' })
   assert(ottoMade.status === 200, 'a second owner can be created')
   const demoted = await call(db, token, 'PUT', '/api/admin/users/jorge', { role: 'admin' })
-  assert(demoted.status === 200, `owner can step down when another remains ${demoted.status}`)
+  assert(demoted.status === 403, `owner cannot change the admin role ${demoted.status} ${JSON.stringify(demoted.data)}`)
+  const passBlockedOwner = await call(db, token, 'PUT', '/api/admin/users/jorge', { password: 'clave-admin' })
+  assert(passBlockedOwner.status === 403, 'owner cannot change the admin password')
+  const selfPass = await call(db, token, 'PUT', '/api/profile/password', { password: 'clave-admin' })
+  assert(selfPass.status === 403, 'the admin cannot change their own password')
+  const dropAdmin = await call(db, token, 'DELETE', '/api/admin/users/jorge')
+  assert(dropAdmin.status === 403, 'the admin cannot be deleted')
   const otto = await enter(db, 'Otto Duenio')
-  const restored = await call(db, otto.data.token as string, 'PUT', '/api/admin/users/jorge', { role: 'owner' })
-  assert(restored.status === 200, 'the other owner can restore jorge')
+  const restored = await call(db, otto.data.token as string, 'PUT', '/api/admin/users/jorge', { role: 'viewer' })
+  assert(restored.status === 403, 'another owner cannot change the admin')
   const stillOwner = await call(db, token, 'DELETE', `/api/admin/users/${encodeURIComponent((otto.data.user as { id: string }).id)}`)
   assert(stillOwner.status === 403, 'an owner is not deleted')
   const stepped = await call(db, token, 'PUT', `/api/admin/users/${encodeURIComponent((otto.data.user as { id: string }).id)}`, {

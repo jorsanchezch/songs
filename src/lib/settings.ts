@@ -20,7 +20,7 @@ export type ViewSettings = {
 
 const DEFAULTS: ViewSettings = {
   theme: 'dark',
-  spelling: 'letters',
+  spelling: 'both',
   fontSize: 22,
   showChords: true,
   showDiagrams: true,
@@ -36,14 +36,11 @@ export function loadSettings(): ViewSettings {
     const raw = localStorage.getItem(STORAGE)
     if (!raw) return { ...DEFAULTS, visibleNotes: [...NOTE_TYPES], semitones: {}, chordShapes: {} }
     const parsed = JSON.parse(raw) as Partial<ViewSettings>
-    const spelling =
-      parsed.spelling === 'letters' || parsed.spelling === 'degrees' || parsed.spelling === 'both'
-        ? parsed.spelling
-        : DEFAULTS.spelling
     return {
       ...DEFAULTS,
       ...parsed,
-      spelling,
+      spelling: 'both',
+      showChords: true,
       visibleNotes: parsed.visibleNotes?.length ? parsed.visibleNotes : [...NOTE_TYPES],
       semitones: parsed.semitones ?? {},
       chordShapes: parsed.chordShapes ?? {},

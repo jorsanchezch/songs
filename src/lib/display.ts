@@ -30,6 +30,34 @@ export function resolveSections(sections: SongSection[]): SongSection[] {
   })
 }
 
+export type PartKind = 'intro' | 'verse' | 'chorus' | 'bridge' | 'other'
+
+/** Label used to treat "Coro" and "Coro x2" as the same part. */
+export function foldPartLabel(label: string): string {
+  return label
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .replace(/\s*(?:\(|\[)?(?:(?:x|×)\s*\d+|\d+\s*(?:x|×))(?:\)|\])?\s*$/i, '')
+    .replace(/\s+\d+\s*$/, '')
+    .trim()
+}
+
+export function partKind(label: string): PartKind {
+  const name = foldPartLabel(label)
+  if (/^(intro|introduccion)\b/.test(name)) return 'intro'
+  if (/^(verso|verse|estrofa)\b/.test(name)) return 'verse'
+  if (/^(coro|chorus|estribillo)\b/.test(name)) return 'chorus'
+  if (/^(puente|bridge)\b/.test(name)) return 'bridge'
+  return 'other'
+}
+
+function collapseIdentity(label: string): string {
+  const kind = partKind(label)
+  return kind === 'other' ? foldPartLabel(label) : kind
+}
+
 export function sectionSignature(section: SongSection): string {
   if (!section.lines.length) return `empty:${section.id}`
   return section.lines
@@ -70,11 +98,10 @@ export function blocksFor(song: Song, flow: string[] | null): DisplayBlock[] {
   return merged.map((block) => {
     const signature = sectionSignature(block.section)
     if (signature.startsWith('empty:')) return block
-    const first = seen.get(signature)
-    if (first && first !== block.label) {
-      return { ...block, duplicateOf: first }
-    }
-    seen.set(signature, block.label)
+    const key = `${collapseIdentity(block.label)}\n${signature}`
+    const first = seen.get(key)
+    if (first) return { ...block, duplicateOf: first }
+    seen.set(key, block.label)
     return block
   })
 }

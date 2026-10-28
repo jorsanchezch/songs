@@ -32,6 +32,11 @@ export function isStaff(user: Account): boolean {
   return user.role === 'owner' || user.role === 'admin'
 }
 
+/** Seeded Admin account. Nobody can change its role, password, or delete it. */
+export function isImmutableAdmin(id: string): boolean {
+  return id === currentUser.id
+}
+
 export function roleLabel(role: Role): string {
   if (role === 'owner') return 'Admin'
   if (role === 'admin') return 'Ayudante'

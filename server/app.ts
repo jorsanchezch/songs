@@ -3,6 +3,7 @@ import { DEFAULT_INSTRUMENT, INSTRUMENTS, isInstrument, type InstrumentId } from
 import { shareLyrics } from './lyrics.ts'
 import { chartMeta } from './meta.ts'
 import { hashPassword, verifyPassword } from './password.ts'
+import { OWNER_ID } from './schema.ts'
 import type { Sql } from './sql.ts'
 
 type Role = 'owner' | 'admin' | 'viewer'
@@ -782,7 +783,12 @@ async function count(sql: Sql, statement: string): Promise<number> {
   return Number(row?.n ?? 0)
 }
 
+function immutableAdmin(id: string): boolean {
+  return id === OWNER_ID
+}
+
 async function setOwnPassword(sql: Sql, user: User, request: Request): Promise<Response> {
+  if (immutableAdmin(user.id)) return json({ error: 'La cuenta de Admin no cambia de contraseña.' }, 403)
   const body = await readJson<{ password?: string | null }>(request)
   if (!Object.prototype.hasOwnProperty.call(body, 'password')) return json({ error: 'Falta la contraseña.' }, 400)
   const next = await storedPassword(body.password ?? null)
@@ -876,6 +882,7 @@ async function adminUpdateUser(sql: Sql, actor: User, id: string, request: Reque
   const touchesRole = Object.prototype.hasOwnProperty.call(body, 'role')
   const touchesPassword = Object.prototype.hasOwnProperty.call(body, 'password')
   if (!touchesRole && !touchesPassword) return json({ error: 'Nada que cambiar.' }, 400)
+  if (immutableAdmin(id)) return json({ error: 'La cuenta de Admin no se cambia.' }, 403)
 
   let role = target.role
   if (touchesRole) {
@@ -914,6 +921,7 @@ async function adminRemoveUser(sql: Sql, actor: User, id: string): Promise<Respo
   if (denied) return denied
   const target = await sql.get<{ id: string; role: Role }>(`SELECT id, role FROM users WHERE id = ?`, [id])
   if (!target) return json({ error: 'No está esa persona.' }, 404)
+  if (immutableAdmin(id)) return json({ error: 'La cuenta de Admin no se quita.' }, 403)
   if (target.role === 'owner') return json({ error: 'No se puede quitar a un dueño.' }, 403)
   const keeper = await sql.get<{ id: string }>(
     `SELECT id FROM users WHERE role = 'owner' ORDER BY CASE WHEN id = 'jorge' THEN 0 ELSE 1 END, name COLLATE NOCASE LIMIT 1`,

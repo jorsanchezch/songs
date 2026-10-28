@@ -2,7 +2,7 @@ import { readFile, readdir } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { formatChord, transposeKeyName } from '../src/lib/chords.ts'
-import { blocksFor } from '../src/lib/display.ts'
+import { blocksFor, partKind } from '../src/lib/display.ts'
 import { diagramFor, shapesFor } from '../src/lib/guitar.ts'
 import { chartToCho, chartToSongMd, isBlockedPage, isPlainChordLine, songToMarkdown, wrapPlainChordLine } from '../src/lib/importChart.ts'
 import { shareLyrics } from '../server/lyrics.ts'
@@ -107,6 +107,16 @@ assert(only[0].repeat === 2, 'repeat badge')
 const collapsed = blocksFor(markdown, ['coro', 'coro-2'])
 assert(collapsed.length === 1, 'adjacent chorus collapses')
 assert(collapsed[0]?.repeat === 3, 'repeat counts add')
+assert(partKind('Coro') === 'chorus' && partKind('Chorus x2') === 'chorus', 'chorus x2 is the same kind')
+assert(partKind('Verso') === 'verse' && partKind('Estrofa 2') === 'verse', 'estrofa folds as a verso')
+const chorusPair = parseChart(
+  ['---', 'title: T', '---', '', '## Coro {#coro}', '[C]', 'Hola', '', '## Verso {#verso}', '[G]', 'Otra', '', '## Coro x2 {#coro-x2}', '[C]', 'Hola', ''].join('\n'),
+  'coro-x2.song.md',
+)
+const chorusBlocks = blocksFor(chorusPair, null)
+assert(chorusBlocks.find((block) => block.label === 'Coro x2')?.duplicateOf === 'Coro', 'chorus x2 collapses with the chorus')
+assert(markdown.sections.some((section) => section.label === 'Verso'), 'plantilla says verso')
+assert(!markdown.sections.some((section) => /estrofa/i.test(section.label)), 'plantilla has no estrofa label')
 
 const openC = diagramFor('C')
 assert(openC?.frets.join(',') === '-1,3,2,0,1,0', 'open C shape')

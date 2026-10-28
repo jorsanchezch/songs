@@ -11,7 +11,7 @@ sources:
 
 [G]   [D]   [Em]   [C]
 
-## Estrofa {#estrofa}
+## Verso {#verso}
 
 > arrange: Guitarra fuera
 
@@ -31,9 +31,9 @@ Texto del coro
 ## Versions
 
 ### servicio
-- flow: intro, estrofa, coro
+- flow: intro, verso, coro
 - notes: cue
 
 ### ensayo
-- flow: intro, estrofa, coro, coro-2
+- flow: intro, verso, coro, coro-2
 - notes: cue, how, arrange

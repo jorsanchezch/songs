@@ -8,7 +8,7 @@ import { NOTE_LABEL, NOTE_TYPES, type NoteType, type Song, type Spelling } from 
 import { cn } from '@/lib/utils'
 
 export function ChartPreview({ song }: { song: Song }) {
-  const [spelling, setSpelling] = useState<Spelling>('letters')
+  const [spelling, setSpelling] = useState<Spelling>('both')
   const [showChords, setShowChords] = useState(true)
   const [concise, setConcise] = useState(false)
   const [visibleNotes, setVisibleNotes] = useState<NoteType[]>([...NOTE_TYPES])
@@ -113,8 +113,7 @@ export function ChartPreview({ song }: { song: Song }) {
       <div className="space-y-8 font-mono text-[1.35rem]">
         {blocks.map((block) => {
           const active = block.id === activeId
-          const folded = !concise && Boolean(block.duplicateOf) && !expanded.includes(block.id) && !active
-          if (concise && !active) return null
+          const folded = concise && Boolean(block.duplicateOf) && !expanded.includes(block.id)
           return (
             <section key={block.id} className={cn(active && 'border-l-2 border-primary pl-3')}>
               <h2 className="mb-2 font-sans text-sm font-semibold tracking-wide text-primary uppercase">

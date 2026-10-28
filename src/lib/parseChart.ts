@@ -11,7 +11,7 @@ import { NOTE_TYPES } from '@/lib/types'
 
 const TAG_LABEL: Record<string, string> = {
   intro: 'Intro',
-  verse: 'Estrofa',
+  verse: 'Verso',
   chorus: 'Coro',
   bridge: 'Puente',
   solo: 'Solo',

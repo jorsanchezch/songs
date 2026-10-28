@@ -13,7 +13,7 @@ sources:
 
 [A]   [A]   [A/F#]   [A/F#]
 
-## Estrofa {#estrofa}
+## Verso {#verso}
 
 [A]                      [D/F#]
 I raise a hallelujah, in the presence of my enemies
@@ -44,7 +44,7 @@ Up from the ashes, hope will arise
 [F#m]                    [E]
 Death is defeated, the King is alive
 
-## Estrofa {#estrofa-2}
+## Verso {#verso-2}
 
 [A]                      [D/F#]
 I raise a hallelujah, with everything inside of me

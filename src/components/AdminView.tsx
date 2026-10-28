@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { UserBadge } from '@/components/UserBadge'
 import { useSession, useUser } from '@/hooks/useUser'
-import { isStaff, roleLabel, type Role } from '@/lib/access'
+import { isImmutableAdmin, isStaff, roleLabel, type Role } from '@/lib/access'
 import {
   createPerson,
   getAdmin,
@@ -404,6 +404,7 @@ function PersonCard({
   const [busy, setBusy] = useState(false)
   const onlyOwner = person.role === 'owner' && owners <= 1
   const lockedOwner = actorRole !== 'owner' && person.role === 'owner'
+  const immutable = isImmutableAdmin(person.id)
   const roleChoices: Role[] = actorRole === 'owner' ? ['viewer', 'admin', 'owner'] : ['viewer', 'admin']
 
   const wrap = async (action: () => Promise<void>) => {
@@ -438,10 +439,13 @@ function PersonCard({
       {person.catalogCount > 0 && (
         <p className="text-sm text-muted-foreground">En el catálogo, a su nombre: {person.catalogCount}</p>
       )}
-      {lockedOwner && (
+      {immutable && (
+        <p className="text-sm text-muted-foreground">La cuenta de Admin no se cambia ni se quita.</p>
+      )}
+      {!immutable && lockedOwner && (
         <p className="text-sm text-muted-foreground">Un Ayudante no cambia el rol, la contraseña ni la cuenta del Admin.</p>
       )}
-      {!lockedOwner && (
+      {!immutable && !lockedOwner && (
         <form
           className="flex flex-wrap items-center gap-2"
           onSubmit={(event) => {
@@ -468,7 +472,7 @@ function PersonCard({
           {onlyOwner && <span className="text-xs text-muted-foreground">Es el único Admin. El rol se queda.</span>}
         </form>
       )}
-      {!lockedOwner && (
+      {!immutable && !lockedOwner && (
         <form
           className="flex flex-wrap items-center gap-2"
           onSubmit={(event) => {
@@ -502,7 +506,7 @@ function PersonCard({
           )}
         </form>
       )}
-      {person.role !== 'owner' && (
+      {!immutable && person.role !== 'owner' && (
         <div>
           <Button
             type="button"

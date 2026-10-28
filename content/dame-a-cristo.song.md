@@ -6,7 +6,7 @@ key: C
 source: "https://www.cifraclub.com/marcos-brunet/dame-a-cristo/"
 ---
 
-## Estrofa {#estrofa}
+## Verso {#verso}
 [C]
 No quiero a nadie más que a Ti
 
@@ -44,7 +44,7 @@ Dejo todo por Él
      [F]      [G]
 Dejo todo por Él
 
-## Estrofa {#estrofa-2}
+## Verso {#verso-2}
           [C]
 Más que la plata y oro es
 
@@ -59,7 +59,7 @@ Nada más me saciará
 
 ## Coro {#coro-2 same=coro}
 
-## Estrofa {#estrofa-3}
+## Verso {#verso-3}
 [C/E]
 No quiero a nadie más
 

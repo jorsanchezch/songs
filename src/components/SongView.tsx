@@ -5,6 +5,8 @@ import {
   ChevronLeft,
   ChevronRight,
   ExternalLink,
+  Eye,
+  Info,
   Loader2,
   Minus,
   Moon,
@@ -22,11 +24,11 @@ import { SpellingToggle } from '@/components/SpellingToggle'
 import { Button } from '@/components/ui/button'
 import { UserBadge } from '@/components/UserBadge'
 import { formatChord, transposeKeyName } from '@/lib/chords'
-import { blocksFor, chordSequence } from '@/lib/display'
+import { blocksFor, chordSequence, partKind, type PartKind } from '@/lib/display'
 import { instrumentLabel, type InstrumentId } from '@/lib/instruments'
 import { putPrefs } from '@/lib/api'
 import { loadSettings, saveSettings, type ViewSettings } from '@/lib/settings'
-import { NOTE_LABEL, NOTE_TYPES } from '@/lib/types'
+import { NOTE_HINT, NOTE_LABEL, NOTE_TYPES } from '@/lib/types'
 import { useSetlists } from '@/hooks/useSetlists'
 import { useSession, useUser } from '@/hooks/useUser'
 import { useSongs } from '@/hooks/useSongs'
@@ -72,6 +74,12 @@ export function SongView() {
     setHeaderOpen(false)
     setVersionId(null)
     setCurrent(null)
+    setSettings((prev) => {
+      if (prev.spelling === 'both' && prev.showChords) return prev
+      const next = { ...prev, spelling: 'both' as const, showChords: true }
+      saveSettings(next)
+      return next
+    })
   }, [songId])
 
   const version = chart?.versions.find((item) => item.id === versionId) ?? chart?.versions[0]
@@ -237,6 +245,10 @@ export function SongView() {
   const soundingKey = transposeKeyName((chart ?? song).key, semitones)
   const partIndex = blocks.findIndex((block) => block.id === activeId)
   const partLabel = blocks[partIndex]?.label ?? ''
+  const partTotal = blocks.length
+  const partCountLabel =
+    partLabel && partTotal > 0 ? `${partLabel} ${partIndex + 1}/${partTotal}` : partLabel
+  const author = song.artist.trim() || song.composer.trim()
   const names = chordSequence(blocks.flatMap((block) => block.section.lines)).map((raw) =>
     formatChord(raw, (chart ?? song).key, semitones, settings.spelling),
   )
@@ -249,40 +261,76 @@ export function SongView() {
     ),
   ]
 
+  const toolbarFloat = (
+    <>
+      {activeList && (
+        <Link
+          to={`/listas/${encodeURIComponent(activeList.id)}`}
+          aria-keyshortcuts="Escape"
+          className="inline-flex shrink-0 items-center gap-1.5 text-sm text-muted-foreground hover:underline"
+        >
+          <span>
+            {setlistItemIndex + 1}/{activeList.items.length} {activeList.name}
+          </span>
+          {headerOpen && <Kbd>Esc</Kbd>}
+        </Link>
+      )}
+      <p className="shrink-0 text-base font-semibold text-primary tabular-nums">{partCountLabel}</p>
+      <span className="inline-flex items-center gap-1">
+        <UserBadge />
+        <InfoTip label="Qué es una persona" text={USER_HINT} />
+      </span>
+      <Button
+        size="sm"
+        variant="ghost"
+        aria-expanded={headerOpen}
+        aria-keyshortcuts="Space"
+        onClick={() => setHeaderOpen((open) => !open)}
+      >
+        {headerOpen ? 'Ocultar' : 'Controles'}
+        <Kbd>Espacio</Kbd>
+      </Button>
+    </>
+  )
+
   return (
     <div className="min-h-svh pb-32">
       <header className="sticky top-0 z-20 border-b bg-background/95 backdrop-blur">
         <div className="mx-auto flex max-w-[70.4rem] flex-col gap-3 px-4 py-2">
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-            <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:min-w-[12rem] sm:flex-1">
-              <SongMark songId={song.id} letters={markLetters(marks, song)} />
-              <h1 className="min-w-0 flex-1 truncate text-lg font-semibold">{song.title}</h1>
+          {headerOpen ? (
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+              <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:min-w-[12rem] sm:flex-1">
+                <SongMark songId={song.id} letters={markLetters(marks, song)} />
+                <h1 className="min-w-0 flex-1 truncate text-lg font-semibold">{song.title}</h1>
+              </div>
+              {toolbarFloat}
             </div>
-            {activeList && (
-              <Link
-                to={`/listas/${encodeURIComponent(activeList.id)}`}
-                aria-keyshortcuts="Escape"
-                className="inline-flex shrink-0 items-center gap-1.5 text-sm text-muted-foreground hover:underline"
-              >
-                <span>
-                  {setlistItemIndex + 1}/{activeList.items.length} {activeList.name}
-                </span>
-                {headerOpen && <Kbd>Esc</Kbd>}
-              </Link>
-            )}
-            <p className="shrink-0 text-sm font-semibold text-primary">{partLabel}</p>
-            <UserBadge />
-            <Button
-              size="sm"
-              variant="ghost"
-              aria-expanded={headerOpen}
-              aria-keyshortcuts="Space"
-              onClick={() => setHeaderOpen((open) => !open)}
-            >
-              {headerOpen ? 'Ocultar' : 'Controles'}
-              <Kbd>Espacio</Kbd>
+          ) : (
+            <div className="flex flex-col gap-2">
+              <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-2">{toolbarFloat}</div>
+              <div className="flex min-w-0 items-center gap-2">
+                <SongMark songId={song.id} letters={markLetters(marks, song)} />
+                <h1 className="min-w-0 flex-1 truncate text-lg font-semibold">{song.title}</h1>
+                {author && <p className="max-w-[40%] shrink-0 truncate text-sm text-muted-foreground">{author}</p>}
+              </div>
+            </div>
+          )}
+          <div className="flex items-center gap-1 self-start rounded-md border bg-card px-1 py-1">
+            <Button variant="ghost" size="icon" aria-label="Bajar un semitono" title="Baja un semitono." onClick={() => setSemitones(semitones - 1)}>
+              <Minus />
+            </Button>
+            <span className="min-w-16 text-center text-sm font-semibold">
+              {soundingKey || '—'}
+              {semitones !== 0 && (chart ?? song).key ? (
+                <span className="block text-xs font-normal text-muted-foreground">orig. {(chart ?? song).key}</span>
+              ) : null}
+            </span>
+            <Button variant="ghost" size="icon" aria-label="Subir un semitono" title="Sube un semitono." onClick={() => setSemitones(semitones + 1)}>
+              <Plus />
             </Button>
           </div>
+          {headerOpen && (
+          <>
           <div className="flex flex-wrap items-center gap-2">
             <InstrumentSwitch value={instrument} onChange={(next: InstrumentId) => update({ instrument: next })} />
             {!song.editable && (
@@ -297,8 +345,6 @@ export function SongView() {
               </Button>
             )}
           </div>
-          {headerOpen && (
-          <>
           <div className="flex items-center gap-3">
             <span className="inline-flex items-center gap-1">
               <Button
@@ -306,6 +352,7 @@ export function SongView() {
                 size="icon"
                 asChild
                 aria-label="Volver"
+                title="Volver a las canciones."
                 aria-keyshortcuts={listaId ? undefined : 'Escape'}
               >
                 <Link to="/">
@@ -319,7 +366,7 @@ export function SongView() {
               {song.composer ? ` · ${song.composer}` : ''}
             </p>
             {song.editable && (
-              <Button variant="outline" size="icon" asChild aria-label="Editar">
+              <Button variant="outline" size="icon" asChild aria-label="Editar" title="Editar esta canción.">
                 <Link to={`/editar/${encodeURIComponent(song.id)}?inst=${instrument}`}>
                   <Pencil />
                 </Link>
@@ -355,6 +402,7 @@ export function SongView() {
               variant="outline"
               size="icon"
               aria-label={settings.theme === 'dark' ? 'Tema claro' : 'Tema oscuro'}
+              title={settings.theme === 'dark' ? 'Tema claro' : 'Tema oscuro'}
               onClick={() => update({ theme: settings.theme === 'dark' ? 'light' : 'dark' })}
             >
               {settings.theme === 'dark' ? <Sun /> : <Moon />}
@@ -378,6 +426,7 @@ export function SongView() {
               >
                 Compartida
               </Button>
+              <InfoTip label="Qué significa compartir" text={SHARE_HINT} />
               {isStaff(user) && (
                 <select
                   className="h-8 rounded-md border bg-background px-2 text-xs"
@@ -405,6 +454,7 @@ export function SongView() {
                     key={userId}
                     type="button"
                     className="rounded-full border px-2 py-1 text-xs"
+                    title="Quitar a esta persona de la copia."
                     onClick={() => void shareSong(song.id, { userId, include: false })}
                   >
                     {person?.name ?? userId} ×
@@ -415,43 +465,37 @@ export function SongView() {
           )}
 
           <div className="flex flex-wrap items-center gap-2">
-            <div className="flex items-center gap-1 rounded-md border bg-card px-1 py-1">
-              <Button variant="ghost" size="icon" aria-label="Bajar un semitono" onClick={() => setSemitones(semitones - 1)}>
-                <Minus />
-              </Button>
-              <span className="min-w-16 text-center text-sm font-semibold">
-                {soundingKey || '—'}
-                {semitones !== 0 && (chart ?? song).key ? (
-                  <span className="block text-xs font-normal text-muted-foreground">orig. {(chart ?? song).key}</span>
-                ) : null}
-              </span>
-              <Button variant="ghost" size="icon" aria-label="Subir un semitono" onClick={() => setSemitones(semitones + 1)}>
-                <Plus />
-              </Button>
-            </div>
-
             <SpellingToggle value={settings.spelling} onChange={(spelling) => update({ spelling })} />
-            <Button variant="outline" onClick={() => update({ fontSize: Math.max(16, settings.fontSize - 2) })}>
+            <Button variant="outline" title="Achica la letra de la cifra." onClick={() => update({ fontSize: Math.max(16, settings.fontSize - 2) })}>
               A−
             </Button>
-            <Button variant="outline" onClick={() => update({ fontSize: Math.min(40, settings.fontSize + 2) })}>
+            <Button variant="outline" title="Aumenta la letra de la cifra." onClick={() => update({ fontSize: Math.min(40, settings.fontSize + 2) })}>
               A+
             </Button>
             <Button
               variant={settings.showChords ? 'default' : 'outline'}
+              title="Muestra u oculta los acordes sobre la letra."
               onClick={() => update({ showChords: !settings.showChords })}
             >
               Acordes
             </Button>
             <Button
               variant={settings.showDiagrams ? 'default' : 'outline'}
+              size="icon"
               aria-pressed={settings.showDiagrams}
+              aria-label="Diagramas"
+              title="Muestra u oculta los diagramas del instrumento."
               onClick={() => update({ showDiagrams: !settings.showDiagrams })}
             >
-              Diagrama
+              <Eye />
             </Button>
             <Button
               variant={settings.concise ? 'default' : 'outline'}
+              title={
+                settings.concise
+                  ? 'Pliega todas las partes que se pueden plegar, no solo la seleccionada.'
+                  : 'Muestra la canción entera, con las partes repetidas abiertas.'
+              }
               onClick={() => update({ concise: !settings.concise })}
             >
               {settings.concise ? 'Conciso' : 'Completo'}
@@ -466,6 +510,7 @@ export function SongView() {
                   key={type}
                   type="button"
                   aria-pressed={on}
+                  title={NOTE_HINT[type]}
                   onClick={() =>
                     update({
                       visibleNotes: on
@@ -502,25 +547,33 @@ export function SongView() {
             </div>
           )}
 
+          </>
+          )}
+
           <div className="flex gap-1.5 overflow-x-auto pb-1">
-            {blocks.map((block, index) => (
-              <button
-                key={block.id}
-                type="button"
-                aria-keyshortcuts={index < 9 ? String(index + 1) : undefined}
-                onClick={() => go(block.id)}
-                className={cn(
-                  'inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-sm',
-                  block.id === activeId
-                    ? 'border-primary bg-primary text-primary-foreground'
-                    : 'bg-card',
-                )}
-              >
-                {index < 9 && <Kbd>{index + 1}</Kbd>}
-                {block.label}
-                {block.repeat > 1 ? ` ×${block.repeat}` : ''}
-              </button>
-            ))}
+            {blocks.map((block, index) => {
+              const kind = partKind(block.label)
+              const active = block.id === activeId
+              return (
+                <button
+                  key={block.id}
+                  type="button"
+                  aria-keyshortcuts={index < 9 ? String(index + 1) : undefined}
+                  onClick={() => go(block.id)}
+                  className={cn(
+                    'inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-sm',
+                    active ? 'border-primary bg-primary text-primary-foreground' : 'bg-card',
+                  )}
+                >
+                  {kind !== 'other' && (
+                    <span className={cn('size-1.5 rounded-full', active ? 'bg-primary-foreground' : kindPip(kind))} />
+                  )}
+                  {index < 9 && <Kbd>{index + 1}</Kbd>}
+                  {block.label}
+                  {block.repeat > 1 ? ` ×${block.repeat}` : ''}
+                </button>
+              )
+            })}
           </div>
           <ShortcutLegend
             className="border-t pt-2"
@@ -554,8 +607,6 @@ export function SongView() {
               },
             ]}
           />
-          </>
-          )}
         </div>
       </header>
 
@@ -586,20 +637,20 @@ export function SongView() {
         <div className="space-y-8 font-mono" style={{ fontSize: `${settings.fontSize}px` }}>
           {blocks.map((block) => {
             const active = block.id === activeId
-            const folded =
-              !settings.concise &&
-              Boolean(block.duplicateOf) &&
-              !expanded.includes(block.id) &&
-              !active
-            if (settings.concise && !active) return null
+            const kind = partKind(block.label)
+            const folded = settings.concise && Boolean(block.duplicateOf) && !expanded.includes(block.id)
             return (
               <section
                 key={block.id}
                 id={`sec-${block.id}`}
-                className={cn(headerOpen ? 'scroll-mt-64' : 'scroll-mt-14', active && 'border-l-2 border-primary pl-3')}
+                className={cn(
+                  headerOpen ? 'scroll-mt-64' : 'scroll-mt-56',
+                  'border-l-2 pl-3',
+                  active ? 'border-primary' : kindEdge(kind),
+                )}
               >
                 <div className="mb-2 flex flex-wrap items-baseline gap-2">
-                  <h2 className="font-sans text-[0.7em] font-semibold tracking-wide text-primary uppercase">
+                  <h2 className={cn('font-sans text-[0.7em] font-semibold tracking-wide uppercase', kindHeading(kind))}>
                     {block.label}
                   </h2>
                   {block.repeat > 1 && (
@@ -679,7 +730,21 @@ export function SongView() {
       </main>
 
       <footer className="fixed inset-x-0 bottom-8 z-20 border-t bg-background/95 px-4 py-3 backdrop-blur">
-        <div className="mx-auto flex max-w-[70.4rem] items-center gap-2">
+        <div className="mx-auto flex max-w-[70.4rem] flex-col gap-2">
+          <div
+            className="h-1 overflow-hidden rounded-full bg-muted"
+            role="progressbar"
+            aria-label="Avance de la canción"
+            aria-valuemin={1}
+            aria-valuemax={Math.max(partTotal, 1)}
+            aria-valuenow={partTotal ? Math.max(partIndex + 1, 1) : 1}
+          >
+            <div
+              className="h-full bg-primary/80"
+              style={{ width: partTotal ? `${((Math.max(partIndex, 0) + 1) / partTotal) * 100}%` : '0%' }}
+            />
+          </div>
+          <div className="flex items-center gap-2">
           <Button
             size="lg"
             variant="secondary"
@@ -692,7 +757,14 @@ export function SongView() {
             Anterior
             {headerOpen && <Kbd>←</Kbd>}
           </Button>
-          <p className="min-w-0 flex-1 truncate text-center text-sm font-semibold">{partLabel}</p>
+          <p className="min-w-0 flex-1 text-center">
+            <span className="block truncate text-sm font-semibold">{partLabel || 'Canción'}</span>
+            {partTotal > 0 && (
+              <span className="text-xs font-medium text-muted-foreground tabular-nums">
+                {Math.max(partIndex + 1, 1)} de {partTotal}
+              </span>
+            )}
+          </p>
           <Button
             size="lg"
             aria-label="Parte siguiente"
@@ -704,10 +776,65 @@ export function SongView() {
             Siguiente
             <ChevronRight />
           </Button>
+          </div>
         </div>
       </footer>
     </div>
   )
+}
+
+const SHARE_HINT =
+  'Una copia personal se puede compartir con todos o con una persona para que la vean. No publica el catálogo.'
+const USER_HINT = 'Una persona que entra con su nombre. Tiene un rol: dueño, admin o lectura.'
+
+function InfoTip({ label, text }: { label: string; text: string }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <span className="relative inline-flex">
+      <button
+        type="button"
+        className="inline-flex size-7 items-center justify-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground"
+        title={text}
+        aria-label={label}
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <Info className="size-4" />
+      </button>
+      {open && (
+        <span
+          role="tooltip"
+          className="absolute top-full right-0 z-30 mt-1 w-64 rounded-md border bg-popover px-2 py-1.5 text-xs leading-snug text-popover-foreground shadow-md"
+        >
+          {text}
+        </span>
+      )}
+    </span>
+  )
+}
+
+function kindPip(kind: PartKind): string {
+  if (kind === 'intro') return 'bg-muted-foreground/70'
+  if (kind === 'verse') return 'bg-chart-chord'
+  if (kind === 'chorus') return 'bg-primary'
+  if (kind === 'bridge') return 'bg-accent-foreground/80'
+  return 'bg-transparent'
+}
+
+function kindHeading(kind: PartKind): string {
+  if (kind === 'intro') return 'text-muted-foreground'
+  if (kind === 'verse') return 'text-chart-chord'
+  if (kind === 'chorus') return 'text-primary'
+  if (kind === 'bridge') return 'text-accent-foreground'
+  return 'text-foreground'
+}
+
+function kindEdge(kind: PartKind): string {
+  if (kind === 'intro') return 'border-muted-foreground/35'
+  if (kind === 'verse') return 'border-chart-chord/45'
+  if (kind === 'chorus') return 'border-primary/40'
+  if (kind === 'bridge') return 'border-accent-foreground/40'
+  return 'border-transparent'
 }
 
 function typing(target: EventTarget | null): boolean {

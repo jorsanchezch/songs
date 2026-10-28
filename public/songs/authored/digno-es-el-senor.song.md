@@ -13,7 +13,7 @@ sources:
 
 [A]   [D]   [A]   [D]   [E]
 
-## Estrofa {#estrofa}
+## Verso {#verso}
 
 [A]                [D]      [E]       [C#m7]
 Gracias por la cruz oh Dios
@@ -59,7 +59,7 @@ Digno es el Señor
                [Bm7]   [A/C#]   [E]
 Digno es el Señor
 
-## Estrofa {#estrofa-2 same=estrofa}
+## Verso {#verso-2 same=verso}
 
 ## Coro {#coro-2 same=coro}
 

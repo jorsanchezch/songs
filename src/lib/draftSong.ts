@@ -37,7 +37,7 @@ export function blankSong(): Song {
     key: '',
     source: '',
     sources: [],
-    sections: [blankSection('Estrofa', 'estrofa')],
+    sections: [blankSection('Verso', 'verso')],
     versions: [],
     lyricsText: '',
   }

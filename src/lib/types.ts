@@ -83,3 +83,12 @@ export const NOTE_LABEL: Record<NoteType, string> = {
   arrange: 'Arreglo',
   free: 'Nota',
 }
+
+/** What each marker is in the chart, from the parser’s note kinds. */
+export const NOTE_HINT: Record<NoteType, string> = {
+  cue: 'Muestra las entradas: comentarios en la línea que no son otra marca.',
+  how: 'Muestra cómo se toca: arpegio, muteado, slide o riff.',
+  repeat: 'Muestra las repeticiones: repeat, × o (//).',
+  arrange: 'Muestra el arreglo: solo, batería o guitarra fuera.',
+  free: 'Muestra las notas libres que no entran en las otras marcas.',
+}
