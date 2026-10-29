@@ -162,7 +162,7 @@ export function usePlayback({
         setStatus('playing')
       } else {
         // Playing from the first part plays the intro too.
-        const seek = from <= 0 ? 0 : from + leadRef.current
+        const seek = from <= 0 ? 0 : Math.max(0, from + leadRef.current)
         pendingRef.current = seek - leadRef.current
         setStatus('loading')
         clock.play(seek).catch((reason: unknown) => {
@@ -184,7 +184,8 @@ export function usePlayback({
         silentRef.current = { from: chartMs, at: performance.now() }
         return null
       }
-      const lead = Math.min(LEAD_MAX_MS, Math.max(0, elapsed() + leadRef.current - chartMs))
+      // Negative when the recording runs ahead of the chart's estimate.
+      const lead = Math.min(LEAD_MAX_MS, Math.max(-LEAD_MAX_MS, elapsed() + leadRef.current - chartMs))
       leadRef.current = lead
       return lead
     },

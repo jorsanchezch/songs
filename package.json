@@ -14,7 +14,8 @@
     "db:export-seed": "tsx scripts/export-seed.ts",
     "db:backup": "tsx scripts/db-backup.ts",
     "media:backfill": "tsx scripts/media-backfill.ts",
-    "media:extract-audio": "tsx scripts/extract-youtube-audio.ts"
+    "media:extract-audio": "tsx scripts/extract-youtube-audio.ts",
+    "media:sync": "tsx scripts/media-sync.ts"
   },
   "dependencies": {
     "class-variance-authority": "^0.7.1",

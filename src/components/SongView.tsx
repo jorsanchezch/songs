@@ -320,7 +320,7 @@ export function SongView() {
   }
 
   const setLead = (ms: number) =>
-    setSession({ leadMs: Math.min(LEAD_MAX_MS, Math.max(0, Math.round(ms))), speed: playSpeed })
+    setSession({ leadMs: Math.min(LEAD_MAX_MS, Math.max(-LEAD_MAX_MS, Math.round(ms))), speed: playSpeed })
   const setSpeed = (speed: number) => setSession({ leadMs, speed: Math.round(speed * 100) / 100 })
 
   /** "We are here now": the next cue (or this one again, or the one before). */
@@ -331,8 +331,30 @@ export function SongView() {
     const target =
       direction > 0 ? cues[index + 1] : here && t - here.at > 2000 ? here : cues[Math.max(0, index - 1)]
     if (!target) return
-    const lead = playback.resync(target.at)
-    if (lead != null) setSession({ leadMs: lead, speed: playSpeed })
+    const mediaNow = playback.mediaTime()
+    if (mediaNow == null) {
+      playback.resync(target.at)
+    } else {
+      // In duration mode the lead also rescales the parts, so settle it in a few passes.
+      const targetIndex = cues.indexOf(target)
+      let lead = mediaNow - target.at
+      for (let pass = 0; pass < 6; pass++) {
+        const at = cuePoints(
+          buildTimeline({
+            blocks,
+            settings: { pace, useBpm },
+            bpm: media.bpm,
+            durationMs: media.durationMs,
+            mediaMs: playback.mediaMs,
+            introMs: lead,
+            parts: trackParts,
+          }),
+        )[targetIndex]?.at
+        if (at == null) break
+        lead = mediaNow - at
+      }
+      setLead(lead)
+    }
     setAnnounce(`Ahora: ${target.label}${target.repeat > 1 ? ` ${target.pass}/${target.repeat}` : ''}`)
   }
 

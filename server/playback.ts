@@ -27,7 +27,8 @@ function track(value: unknown): PlaybackTrack | undefined {
       if (length != null && key.length <= 120 && PART_KEY.test(key)) parts[key] = length
     }
   }
-  return { src, introMs: wholeIn(raw.introMs, 0, 600_000) ?? 0, parts }
+  // Negative: the recording runs ahead of the chart (no intro, or parts longer than estimated).
+  return { src, introMs: wholeIn(raw.introMs, -600_000, 600_000) ?? 0, parts }
 }
 
 export function songPlayback(value: unknown): SongPlayback {

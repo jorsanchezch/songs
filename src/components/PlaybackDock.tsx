@@ -458,7 +458,7 @@ function SettingsPanel({
                 label="Entrada"
                 value={formatLead(sync.leadMs)}
                 onStep={(sign) => sync.onLead(sync.leadMs + sign * NUDGE_MS)}
-                canDown={sync.leadMs > 0}
+                canDown
                 canUp
               />
             </Field>

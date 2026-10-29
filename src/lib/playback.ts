@@ -65,7 +65,7 @@ export const SPEED_MAX = 1.25
 export const SPEED_STEP = 0.05
 /** The footer cue lights up this close to the next part. */
 export const NEAR_CUE_MS = 8000
-export const LEAD_MAX_MS = 120_000
+export const LEAD_MAX_MS = 600_000
 
 export type TimedLine = {
   lineIndex: number
@@ -314,11 +314,12 @@ export function formatClock(ms: number): string {
   return `${sign}${minutes}:${String(seconds).padStart(2, '0')}`
 }
 
-/** `0:04,5`: intro lengths to the tenth of a second. */
+/** `0:04,5`: intro lengths to the tenth of a second; negative when the recording runs ahead. */
 export function formatLead(ms: number): string {
-  const tenths = Math.round(Math.max(0, ms) / 100)
+  const sign = ms < 0 ? '\u2212' : ''
+  const tenths = Math.round(Math.abs(ms) / 100)
   const seconds = Math.floor(tenths / 10)
-  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')},${tenths % 10}`
+  return `${sign}${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')},${tenths % 10}`
 }
 
 /** Calibration for the audio that is playing; null when it was measured on another recording. */
