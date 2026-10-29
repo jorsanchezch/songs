@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { PasswordInput } from '@/components/ui/password-input'
 
 export function SignInGate({
   onEnter,
@@ -47,8 +48,7 @@ export function SignInGate({
           aria-label="Usuario"
           autoComplete="username"
         />
-        <Input
-          type="password"
+        <PasswordInput
           value={password}
           onChange={(event) => {
             setPassword(event.target.value)

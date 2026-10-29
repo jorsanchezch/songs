@@ -1,3 +1,5 @@
+import type { SourceEntry } from '@/lib/sourceEntry'
+
 export type NoteType = 'cue' | 'how' | 'repeat' | 'arrange' | 'free'
 
 export type Spelling = 'letters' | 'degrees' | 'both'
@@ -38,9 +40,9 @@ export type SongVersion = {
 
 export type SongOrigin = 'catalog' | 'local' | 'copy'
 
-export type SongSource = {
-  url: string
-  label: string
+export type SongSource = SourceEntry & {
+  /** Editor-only; never written to the chart. */
+  videoId?: string
 }
 
 export type Song = {
@@ -53,6 +55,14 @@ export type Song = {
   originalKey?: string
   source: string
   sources: SongSource[]
+  /** Beats per minute when known. */
+  bpm?: number | null
+  /** Full-song length in milliseconds when known. */
+  durationMs?: number | null
+  /** Optional MP3 (or other audio) URL for playback. */
+  audioUrl?: string
+  /** Playback calibration measured on a recording; stored beside the chart, not in it. */
+  playback?: SongPlayback
   sections: SongSection[]
   versions: SongVersion[]
   lyricsText: string
@@ -61,9 +71,17 @@ export type Song = {
   overridden?: boolean
   ownerId?: string
   ownerName?: string
+  creatorId?: string
+  creatorName?: string
   shared?: boolean
   catalogId?: string | null
   editable?: boolean
+  /** Saving keeps a personal version instead of changing the shared song. */
+  personal?: boolean
+  /** This person's version of this instrument, when there is one. */
+  draft?: { updatedAt: string; stale: boolean } | null
+  /** Staff only: how many people saved their own version. */
+  draftUsers?: number
   removable?: boolean
   shares?: string[]
   instrument?: string
@@ -94,3 +112,14 @@ export const NOTE_HINT: Record<NoteType, string> = {
   arrange: 'Muestra el arreglo: solo, batería o guitarra fuera.',
   free: 'Muestra las notas libres que no entran en las otras marcas.',
 }
+
+export type PlaybackTrack = {
+  /** YouTube video id or MP3 URL these numbers were measured on. */
+  src: string
+  /** Media time before the first part starts. */
+  introMs: number
+  /** Measured length of each part (all passes), by part key. */
+  parts: Record<string, number>
+}
+
+export type SongPlayback = { youtube?: PlaybackTrack; mp3?: PlaybackTrack; speed?: number }

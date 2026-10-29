@@ -29,6 +29,35 @@ async function call(sql: Sql, token: string, method: string, pathname: string, b
   return { status: response.status, data }
 }
 
+/** Test-only password; real passwords live only in the database. */
+const TEST_PASSWORD = 'prueba-1234'
+
+function usernameFor(name: string): string {
+  return name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '.').replace(/^\.|\.$/g, '')
+}
+
+/** Signs a person in by name, creating a viewer account first when there is none (the owner gets its test password). */
+async function account(db: Sql, name: string) {
+  const { hashPassword } = await import('../server/password.ts')
+  const hash = await hashPassword(TEST_PASSWORD)
+  if (name === 'Jorge Sanchez') {
+    await db.run(`UPDATE users SET password_hash = ? WHERE id = 'jorge' AND password_hash IS NULL`, [hash])
+    return signIn(db, 'jsanchezch', TEST_PASSWORD)
+  }
+  const username = usernameFor(name)
+  const row = await db.get<{ id: string }>(`SELECT id FROM users WHERE name = ? COLLATE NOCASE`, [name])
+  if (!row) {
+    await db.run(`INSERT INTO users (id, name, username, role, password_hash) VALUES (?, ?, ?, 'viewer', ?)`, [
+      username.replace(/\./g, '-'),
+      name,
+      username,
+      hash,
+    ])
+  }
+  const existing = await db.get<{ username: string }>(`SELECT username FROM users WHERE name = ? COLLATE NOCASE`, [name])
+  return signIn(db, existing!.username, TEST_PASSWORD)
+}
+
 async function signIn(sql: Sql, username: string, password: string) {
   const response = await call(sql, '', 'POST', '/api/session', { username, password })
   assert(response.status === 200, `sign in ${username} ${response.status} ${JSON.stringify(response.data)}`)
@@ -66,7 +95,7 @@ const files = await readCatalogFiles(root)
 assert(files.length >= 30, `catalog files ${files.length}`)
 await seedCatalog(sql, files)
 
-const owner = await signIn(sql, 'jsanchezch', '1231')
+const owner = await account(sql, 'Jorge Sanchez')
 assert(owner.user.role === 'owner', 'jorge is owner')
 assert(owner.user.username === 'jsanchezch' && owner.user.name === 'Jorge Sanchez', 'jorge account fields')
 assert(owner.user.hasPassword === true, 'jorge has a password')
@@ -227,13 +256,142 @@ await checkSeedLists(files)
 await checkDayListHistory(files)
 await checkPasswords(files)
 await checkDeleteSurvivesSeed(files)
+await checkDraftsAndCreators(files)
+await checkCreatorBackfill(files)
 
 console.log(`SQL ok: ${songs.length} catalog songs, copies and instruments checked`)
+
+async function checkDraftsAndCreators(files: { id: string; sourceText: string }[]) {
+  type Dto = {
+    id: string
+    title: string
+    sourceText: string
+    creatorId: string
+    editable: boolean
+    personal: boolean
+    draft: { stale: boolean } | null
+    draftUsers: number
+    revision: number
+    partRevision: number
+    durationMs: number | null
+  }
+  const db = openSqlite(':memory:')
+  await seedCatalog(db, files)
+  const boss = await account(db, 'Jorge Sanchez')
+  const ana = await account(db, 'Ana Borrador')
+  const luis = await account(db, 'Luis Borrador')
+  const sample = files.find((file) => file.sourceText.includes('title'))
+  assert(sample, 'catalog file with a title')
+  const path = `/api/songs/${encodeURIComponent(sample.id)}`
+
+  const seeded = await db.get<{ n: number }>(`SELECT COUNT(*) AS n FROM songs WHERE creator_id IS NULL OR creator_id != 'jorge'`)
+  assert(Number(seeded?.n) === 0, 'seeded catalog songs belong to jorge')
+
+  const created = await call(db, ana.token, 'POST', '/api/songs', {
+    sourceText: '{title: Canción de Ana}\n{bpm: 90}\n{duration_ms: 180000}\n[G]Hola\n',
+  })
+  assert(created.status === 201, `a viewer creates a song ${created.status}`)
+  const own = created.data.song as Dto
+  assert(own.creatorId === ana.user.id && own.editable && !own.personal, 'a new song is the viewer’s own')
+  const copied = await call(db, ana.token, 'POST', `${path}/copy`)
+  assert((copied.data.song as Dto).creatorId === ana.user.id, 'a copy is created by whoever copies')
+
+  const opened = (await call(db, ana.token, 'GET', `${path}?instrument=guitar`)).data.song as Dto
+  assert(opened.creatorId === 'jorge' && !opened.editable && opened.personal && !opened.draft, 'catalog opens as personal')
+  const original = opened.sourceText
+  const edited = original.replace(/\{title:[^}]*\}|^title:.*$/m, (line) =>
+    line.startsWith('{') ? '{title: Versión de Ana}' : 'title: Versión de Ana',
+  )
+  assert(edited !== original, 'the title line changed')
+  const hard = await call(db, ana.token, 'PUT', path, {
+    sourceText: edited,
+    instrument: 'guitar',
+    revision: opened.revision,
+    partRevision: opened.partRevision,
+  })
+  assert(hard.status === 403, 'a viewer still cannot hard-save the catalog')
+  const saved = await call(db, ana.token, 'PUT', `${path}/draft`, { sourceText: edited, instrument: 'guitar' })
+  assert(saved.status === 200, `draft save ${saved.status} ${JSON.stringify(saved.data)}`)
+  const mine = saved.data.song as Dto
+  assert(mine.title === 'Versión de Ana' && mine.draft && !mine.draft.stale, 'Ana sees her version')
+
+  const canonical = (await call(db, boss.token, 'GET', `${path}?instrument=guitar`)).data.song as Dto
+  assert(canonical.sourceText === original, 'the shared song is untouched')
+  assert(canonical.draftUsers === 1 && !canonical.draft, 'admin sees one user version, not as their own')
+  const other = (await call(db, luis.token, 'GET', `${path}?instrument=guitar`)).data.song as Dto
+  assert(other.sourceText === original && !other.draft, 'another viewer sees the shared song')
+  const anaList = await call(db, ana.token, 'GET', '/api/songs?instrument=guitar')
+  const listed = (anaList.data.songs as Dto[]).find((song) => song.id === sample.id)
+  assert(listed?.title === 'Versión de Ana', 'the library shows Ana her version')
+
+  const media = await call(db, ana.token, 'PUT', `${path}/media`, { durationMs: 123_000, instrument: 'bass' })
+  assert(media.status === 200, `viewer media patch ${media.status} ${JSON.stringify(media.data)}`)
+  assert((media.data.song as Dto).durationMs === 123_000, 'the duration lands in Ana’s version')
+  const bassShared = (await call(db, boss.token, 'GET', `${path}?instrument=bass`)).data.song as Dto
+  assert(bassShared.durationMs !== 123_000, 'the shared bass part keeps its duration')
+
+  const deniedList = await call(db, ana.token, 'GET', `${path}/drafts`)
+  assert(deniedList.status === 403, 'a viewer cannot list user versions')
+  const versions = await call(db, boss.token, 'GET', `${path}/drafts`)
+  const drafts = versions.data.drafts as { userId: string; instrument: string; sourceText: string; baseText: string }[]
+  assert(versions.status === 200 && drafts.length === 2, `two edited instruments ${JSON.stringify(drafts.map((d) => d.instrument))}`)
+  const guitarDraft = drafts.find((draft) => draft.instrument === 'guitar')
+  assert(guitarDraft?.userId === ana.user.id && guitarDraft.baseText === original, 'the guitar draft keeps its base')
+  assert(
+    guitarDraft.sourceText.includes('Versión de Ana') && guitarDraft.sourceText.includes('123000'),
+    'the guitar draft keeps Ana’s title and the duration she set',
+  )
+  const overview = await call(db, boss.token, 'GET', '/api/admin')
+  const summary = overview.data.drafts as { songId: string; users: { id: string }[] }[]
+  assert(summary.some((item) => item.songId === sample.id && item.users[0]?.id === ana.user.id), 'admin overview lists the version')
+
+  const bossSave = await call(db, boss.token, 'PUT', path, {
+    sourceText: `${original.trimEnd()}\n{comment: admin}\n`,
+    instrument: 'guitar',
+    revision: canonical.revision,
+    partRevision: canonical.partRevision,
+  })
+  assert(bossSave.status === 200, 'admin still hard-saves the catalog')
+  const stale = (await call(db, ana.token, 'GET', `${path}?instrument=guitar`)).data.song as Dto
+  assert(stale.title === 'Versión de Ana' && stale.draft?.stale === true, 'Ana keeps her version and learns it is behind')
+
+  const discarded = await call(db, ana.token, 'DELETE', `${path}/draft?instrument=guitar`)
+  assert(discarded.status === 200 && !(discarded.data.song as Dto).draft, 'Ana discards her version')
+  const after = (await call(db, boss.token, 'GET', `${path}/drafts`)).data.drafts as unknown[]
+  assert(after.length === 0, 'no versions left')
+
+  const electric = (await call(db, luis.token, 'GET', `${path}?instrument=electric_guitar`)).data.song as Dto
+  const asMarkdown = `---\ntitle: Versión de Luis\nbpm: 101\n---\n\n${electric.sourceText.replace(/^---\n[\s\S]*?\n---\n?/, '').replace(/^\{(title|artist|composer|key|bpm|duration_ms|source|audio_url):[^}]*\}\s*$/gim, '')}`
+  const luisSave = await call(db, luis.token, 'PUT', `${path}/draft`, { sourceText: asMarkdown, instrument: 'electric_guitar' })
+  assert(luisSave.status === 200, `electric draft ${luisSave.status} ${JSON.stringify(luisSave.data)}`)
+  const luisList = await call(db, luis.token, 'GET', '/api/songs?instrument=guitar')
+  const luisSong = (luisList.data.songs as Dto[]).find((song) => song.id === sample.id)
+  assert(luisSong?.title === 'Versión de Luis', `the library (acoustic) shows a title edited on electric ${luisSong?.title}`)
+  assert(luisSong.draft && luisSong.sourceText.includes('101'), 'the acoustic part carries the BPM too')
+  const removed = await call(db, boss.token, 'DELETE', `${path}/drafts/${encodeURIComponent(luis.user.id)}`)
+  assert(removed.status === 200 && (removed.data.drafts as unknown[]).length === 0, 'admin discards a user version')
+}
+
+async function checkCreatorBackfill(files: { id: string; sourceText: string }[]) {
+  const db = openSqlite(':memory:')
+  await seedCatalog(db, files)
+  const ana = await account(db, 'Ana Antigua')
+  const made = await call(db, ana.token, 'POST', '/api/songs', { sourceText: '{title: Vieja}\n[C]Hola\n' })
+  const id = (made.data.song as { id: string }).id
+  await db.run(`UPDATE songs SET creator_id = NULL`)
+  await seedCatalog(db, files)
+  const wrong = await db.get<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM songs WHERE origin = 'catalog' AND creator_id IS NOT 'jorge'`,
+  )
+  assert(Number(wrong?.n) === 0, 'backfill gives the catalog to jorge')
+  const own = await db.get<{ creator_id: string }>(`SELECT creator_id FROM songs WHERE id = ?`, [id])
+  assert(own?.creator_id === ana.user.id, 'backfill keeps a person’s own song with them')
+}
 
 async function checkDeleteSurvivesSeed(files: { id: string; sourceText: string }[]) {
   const db = openSqlite(':memory:')
   await seedCatalog(db, files)
-  const boss = await signIn(db, 'jsanchezch', '1231')
+  const boss = await account(db, 'Jorge Sanchez')
   const reader = await openAs(db, boss.token, { name: 'Lector Borrar', username: 'lector-borrar' })
   const sample = files[0]
   assert(sample, 'a catalog file to delete')
@@ -243,14 +401,20 @@ async function checkDeleteSurvivesSeed(files: { id: string; sourceText: string }
   const listed = await call(db, boss.token, 'PUT', '/api/setlists', {
     days: [0],
     setlists: [{ id: 'lista-borrar', name: 'Borrar', items: [{ songId: sample.id, semitones: 0 }] }],
+    history: [{ weekday: 0, serviceDate: '2026-10-19', items: [{ songId: sample.id, semitones: 1 }] }],
   })
-  assert(listed.status === 200, 'the song can sit on a list')
+  assert(listed.status === 200, 'the song can sit on a list and historial')
   const removed = await call(db, boss.token, 'DELETE', `/api/songs/${encodeURIComponent(sample.id)}`)
   assert(removed.status === 200 && removed.data.hidden === false, `delete removes the row ${JSON.stringify(removed.data)}`)
   assert(!(await db.get(`SELECT id FROM songs WHERE id = ?`, [sample.id])), 'the catalog row is gone')
   assert(await db.get(`SELECT id FROM deleted_songs WHERE id = ?`, [sample.id]), 'the id is remembered')
   const item = await db.get<{ n: number }>(`SELECT COUNT(*) AS n FROM setlist_items WHERE song_id = ?`, [sample.id])
   assert(Number(item?.n) === 0, 'a deleted song leaves the lists')
+  const historyItem = await db.get<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM day_list_history_items WHERE song_id = ?`,
+    [sample.id],
+  )
+  assert(Number(historyItem?.n) === 0, 'a deleted song leaves historial')
   const parts = await db.get<{ n: number }>(`SELECT COUNT(*) AS n FROM instrument_parts WHERE song_id = ?`, [sample.id])
   assert(Number(parts?.n) === 0, 'parts go with the song')
   await seedCatalog(db, files)
@@ -267,7 +431,7 @@ async function checkDeleteSurvivesSeed(files: { id: string; sourceText: string }
 async function checkImport(files: { id: string; sourceText: string }[]) {
   const db = openSqlite(':memory:')
   await seedCatalog(db, files)
-  const boss = await signIn(db, 'jsanchezch', '1231')
+  const boss = await account(db, 'Jorge Sanchez')
   const changed = await call(db, boss.token, 'PUT', '/api/setlists', {
     days: [1],
     setlists: [{ id: 'lista-x', name: 'Ensayo', items: [{ songId: 'a', semitones: 0 }] }],
@@ -322,7 +486,7 @@ async function checkImport(files: { id: string; sourceText: string }[]) {
 async function checkSeedLists(files: { id: string; sourceText: string }[]) {
   const db = openSqlite(':memory:')
   await seedCatalog(db, files)
-  const boss = await signIn(db, 'jsanchezch', '1231')
+  const boss = await account(db, 'Jorge Sanchez')
   const imported = await call(db, boss.token, 'POST', '/api/import-local', {
     overrides: {},
     hidden: [],
@@ -342,7 +506,7 @@ async function checkSeedLists(files: { id: string; sourceText: string }[]) {
 async function checkDayListHistory(files: { id: string; sourceText: string }[]) {
   const db = openSqlite(':memory:')
   await seedCatalog(db, files)
-  const boss = await signIn(db, 'jsanchezch', '1231')
+  const boss = await account(db, 'Jorge Sanchez')
   const before = await call(db, boss.token, 'GET', '/api/setlists')
   assert(Array.isArray(before.data.history) && (before.data.history as unknown[]).length === 0, 'history starts empty')
   const saved = await call(db, boss.token, 'PUT', '/api/setlists', {
@@ -409,11 +573,16 @@ async function checkPasswords(files: { id: string; sourceText: string }[]) {
   const migratedOwner = await migrated.get<{ username: string; password_hash: string | null }>(
     `SELECT username, password_hash FROM users WHERE id = 'jorge'`,
   )
-  assert(migratedOwner?.username === 'jsanchezch' && migratedOwner.password_hash?.startsWith('pbkdf2$'), 'migration seeds jorge')
+  // The password is never in the code: a fresh owner has none until db:set-password writes one.
+  assert(migratedOwner?.username === 'jsanchezch' && migratedOwner.password_hash == null, 'migration seeds jorge without a password')
 
   const db = openSqlite(':memory:')
   await seedCatalog(db, files)
-  const entered = await enter(db, 'jsanchezch', '1231')
+  const locked = await enter(db, 'jsanchezch', TEST_PASSWORD)
+  assert(locked.status === 401, 'an owner without a password cannot enter')
+  const { hashPassword } = await import('../server/password.ts')
+  await db.run(`UPDATE users SET password_hash = ? WHERE username = 'jsanchezch'`, [await hashPassword(TEST_PASSWORD)])
+  const entered = await enter(db, 'jsanchezch', TEST_PASSWORD)
   assert(entered.status === 200, 'jorge enters with username and password')
   const jorge = entered.data.user as {
     id: string
@@ -432,9 +601,17 @@ async function checkPasswords(files: { id: string; sourceText: string }[]) {
   assert(nameOnly.status === 401, 'password is required')
   const wrongOwner = await enter(db, 'jsanchezch', '0000')
   assert(wrongOwner.status === 401, 'a wrong password is refused')
+  for (let tries = 0; tries < 4; tries++) await enter(db, 'jsanchezch', `mal-${tries}`)
+  const lockedOut = await enter(db, 'jsanchezch', TEST_PASSWORD)
+  assert(lockedOut.status === 429, `five wrong tries lock the username ${lockedOut.status}`)
+  await db.run(`DELETE FROM login_failures`)
+  const back = await enter(db, 'jsanchezch', TEST_PASSWORD)
+  assert(back.status === 200, 'the lock lifts once the window passes')
+  const failuresLeft = await db.get<{ n: number }>(`SELECT COUNT(*) AS n FROM login_failures`)
+  assert(Number(failuresLeft?.n) === 0, 'a good login clears the failures')
   const byDisplayName = await call(db, '', 'POST', '/api/session', {
     name: 'Jorge Sanchez',
-    password: '1231',
+    password: TEST_PASSWORD,
   })
   assert(byDisplayName.status === 400 || byDisplayName.status === 401, 'display name alone is not a username')
 
@@ -589,7 +766,87 @@ async function checkPasswords(files: { id: string; sourceText: string }[]) {
   assert(left[0]?.username === 'jsanchezch', 'jorge keeps username')
   const finalHash = await db.get<{ password_hash: string | null }>(`SELECT password_hash FROM users WHERE id = 'jorge'`)
   assert(finalHash?.password_hash?.startsWith('pbkdf2$'), 'jorge still has a password')
-  assert((await enter(db, 'jsanchezch', '1231')).status === 200, 'jorge still enters with 1231')
+  assert((await enter(db, 'jsanchezch', TEST_PASSWORD)).status === 200, 'jorge still enters with 1231')
+}
+
+{
+  const { applyChartMedia } = await import('../server/chartMedia.ts')
+  const owner = await account(sql, 'Jorge Sanchez')
+  // Every catalog chart ships with YouTube now; take it off one so backfill has work.
+  const bare = await sql.get<{ id: string; catalog_source: string }>(
+    `SELECT id, catalog_source FROM songs WHERE origin = 'catalog' AND hidden = 0 ORDER BY id LIMIT 1`,
+  )
+  assert(bare, 'a catalog song to strip')
+  await sql.run(`UPDATE songs SET catalog_source = ? WHERE id = ?`, [
+    applyChartMedia(bare.catalog_source, { youtubeUrl: null }),
+    bare.id,
+  ])
+  for (const part of await sql.all<{ instrument: string; source_text: string }>(
+    `SELECT instrument, source_text FROM instrument_parts WHERE song_id = ?`,
+    [bare.id],
+  )) {
+    await sql.run(`UPDATE instrument_parts SET source_text = ? WHERE song_id = ? AND instrument = ?`, [
+      applyChartMedia(part.source_text, { youtubeUrl: null }),
+      bare.id,
+      part.instrument,
+    ])
+  }
+  const status = await call(sql, owner.token, 'GET', '/api/admin/media-backfill')
+  assert(status.status === 200, `media backfill status ${status.status}`)
+  assert(typeof status.data.missingBefore === 'number' && (status.data.missingBefore as number) > 0, 'songs missing youtube')
+  assert(status.data.apiKeyPresent === false, 'no youtube key in test env')
+  const viewer = await account(sql, 'Nila Backfill')
+  const denied = await call(sql, viewer.token, 'POST', '/api/admin/media-backfill', { dryRun: true, limit: 1 })
+  assert(denied.status === 403, 'viewer cannot backfill')
+
+  const sample = await sql.get<{ id: string; source_text: string; catalog_source: string }>(
+    `SELECT s.id, p.source_text, s.catalog_source
+     FROM songs s
+     JOIN instrument_parts p ON p.song_id = s.id AND p.instrument = 'guitar'
+     WHERE s.origin = 'catalog' AND p.source_text NOT LIKE '%youtu%'
+     LIMIT 1`,
+  )
+  assert(sample, 'catalog sample without youtube')
+  const patched = applyChartMedia(sample.source_text, {
+    youtubeUrl: 'https://www.youtube.com/watch?v=backfilltest1',
+    bpm: 96,
+    durationMs: 201_000,
+  })
+  await sql.transaction(async (tx) => {
+    await tx.run(`UPDATE instrument_parts SET source_text = ?, revision = revision + 1 WHERE song_id = ?`, [
+      patched,
+      sample.id,
+    ])
+    await tx.run(
+      `UPDATE songs SET bpm = ?, duration_ms = ?, catalog_source = ?, updated_at = ?, revision = revision + 1 WHERE id = ?`,
+      [96, 201_000, applyChartMedia(sample.catalog_source || sample.source_text, {
+        youtubeUrl: 'https://www.youtube.com/watch?v=backfilltest1',
+        bpm: 96,
+        durationMs: 201_000,
+      }), new Date().toISOString(), sample.id],
+    )
+  })
+  const got = await call(sql, owner.token, 'GET', `/api/songs/${encodeURIComponent(sample.id)}?instrument=guitar`)
+  assert(got.status === 200, 'fetch patched song')
+  const song = got.data.song as { bpm: number; durationMs: number; sourceText: string }
+  assert(song.bpm === 96 && song.durationMs === 201_000, 'dto carries bpm and duration')
+  assert(song.sourceText.includes('backfilltest1') && song.sourceText.includes('bpm: 96'), 'chart text carries media for playback')
+  const after = await call(sql, owner.token, 'GET', '/api/admin/media-backfill')
+  assert(
+    (after.data.missingBefore as number) < (status.data.missingBefore as number),
+    'missing youtube count drops after chart write',
+  )
+
+  const playback = { youtube: { src: 'backfilltest1', introMs: 4000, parts: { verso: 20_000 } } }
+  const before = await sql.get<{ revision: number }>(`SELECT revision FROM songs WHERE id = ?`, [sample.id])
+  const saved = await call(sql, owner.token, 'PUT', `/api/songs/${encodeURIComponent(sample.id)}/playback`, { playback })
+  assert(saved.status === 200, `owner saves playback ${saved.status}`)
+  const kept = await sql.get<{ revision: number }>(`SELECT revision FROM songs WHERE id = ?`, [sample.id])
+  assert(kept?.revision === before?.revision, 'saving playback leaves the revision alone')
+  const reread = await call(sql, owner.token, 'GET', `/api/songs/${encodeURIComponent(sample.id)}?instrument=guitar`)
+  assert(JSON.stringify((reread.data.song as { playback: unknown }).playback) === JSON.stringify(playback), 'dto carries playback')
+  const blocked = await call(sql, viewer.token, 'PUT', `/api/songs/${encodeURIComponent(sample.id)}/playback`, { playback: {} })
+  assert(blocked.status === 403, `viewer cannot save catalog playback ${blocked.status}`)
 }
 
 async function enter(sql: Sql, username: string, password?: string) {

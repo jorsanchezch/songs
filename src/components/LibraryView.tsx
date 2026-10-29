@@ -1,15 +1,45 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { GraduationCap, ListMusic, Loader2, Music, Plus, RefreshCw, Search, Shield } from 'lucide-react'
+import {
+  ChevronLeft,
+  ChevronRight,
+  GraduationCap,
+  ListMusic,
+  Loader2,
+  Music,
+  Plus,
+  RefreshCw,
+  Search,
+  Shield,
+} from 'lucide-react'
 import { Kbd, ShortcutLegend } from '@/components/KeyHint'
 import { SongMark } from '@/components/SongMark'
 import { Button } from '@/components/ui/button'
+import { Combobox } from '@/components/ui/combobox'
 import { Input } from '@/components/ui/input'
+import { Select, type SelectOption } from '@/components/ui/select'
 import { UserBadge } from '@/components/UserBadge'
 import { useSongs } from '@/hooks/useSongs'
 import { useUser } from '@/hooks/useUser'
 import { can, isStaff } from '@/lib/access'
 import type { Song } from '@/lib/types'
+
+const PAGE_SIZE = 50
+
+type SortOrder = 'title' | 'title-desc' | 'artist' | 'key'
+
+const SORT_OPTIONS: SelectOption<SortOrder>[] = [
+  { value: 'title', label: 'Alfabético' },
+  { value: 'title-desc', label: 'Alfabético Z–A' },
+  { value: 'artist', label: 'Por artista' },
+  { value: 'key', label: 'Por tono' },
+]
+
+/** Exact when picked from the list, partial while typing. */
+function artistMatches(name: string, filter: string, known: string[]) {
+  if (known.includes(filter)) return name === filter
+  return name.toLocaleLowerCase('es').includes(filter.trim().toLocaleLowerCase('es'))
+}
 
 export function LibraryView() {
   const navigate = useNavigate()
@@ -18,6 +48,8 @@ export function LibraryView() {
   const [query, setQuery] = useState('')
   const [artist, setArtist] = useState('')
   const [keyName, setKeyName] = useState('')
+  const [sortOrder, setSortOrder] = useState<SortOrder>('title')
+  const [page, setPage] = useState(0)
 
   const songs = state.status === 'ready' ? state.songs : []
   const artists = useMemo(
@@ -29,14 +61,26 @@ export function LibraryView() {
     [songs],
   )
 
-  const visible = songs.filter((song) => {
-    if (artist && song.artist !== artist) return false
-    if (keyName && song.key !== keyName) return false
-    const needle = query.trim().toLocaleLowerCase('es')
-    if (!needle) return true
-    const haystack = `${song.title} ${song.artist} ${song.lyricsText}`.toLocaleLowerCase('es')
-    return haystack.includes(needle)
-  })
+  const visible = useMemo(() => {
+    const filtered = songs.filter((song) => {
+      if (artist && !artistMatches(song.artist, artist, artists)) return false
+      if (keyName && song.key !== keyName) return false
+      const needle = query.trim().toLocaleLowerCase('es')
+      if (!needle) return true
+      const haystack = `${song.title} ${song.artist} ${song.lyricsText}`.toLocaleLowerCase('es')
+      return haystack.includes(needle)
+    })
+    return [...filtered].sort((a, b) => compareSongs(a, b, sortOrder))
+  }, [songs, artist, artists, keyName, query, sortOrder])
+
+  const pageCount = Math.max(1, Math.ceil(visible.length / PAGE_SIZE))
+  const currentPage = Math.min(page, pageCount - 1)
+  const pageSongs = visible.slice(currentPage * PAGE_SIZE, currentPage * PAGE_SIZE + PAGE_SIZE)
+  const filtered = Boolean(query.trim() || artist || keyName)
+
+  useEffect(() => {
+    setPage(0)
+  }, [query, artist, keyName, sortOrder])
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -63,7 +107,7 @@ export function LibraryView() {
           <div>
             <h1 className="text-lg font-semibold leading-tight">Songbook</h1>
             <p className="text-sm text-muted-foreground">
-              {state.status === 'ready' ? `${songs.length} canciones` : 'Acordes para cantar'}
+              {state.status === 'ready' ? songCounter(songs.length, visible.length, filtered) : 'Acordes para cantar'}
             </p>
           </div>
           <div className="ml-auto flex items-center gap-2">
@@ -149,33 +193,31 @@ export function LibraryView() {
                 </Button>
               </div>
             )}
-            <div className="mb-4 flex gap-2">
-              <select
+            <div className="mb-4 flex flex-wrap gap-2">
+              <Combobox
                 value={artist}
-                onChange={(event) => setArtist(event.target.value)}
-                className="h-10 min-w-0 flex-1 rounded-md border bg-background px-2 text-sm"
+                onChange={setArtist}
+                suggestions={artists}
+                placeholder="Todos los artistas"
+                clearLabel="Quitar filtro de artista"
                 aria-label="Filtrar por artista"
-              >
-                <option value="">Todos los artistas</option>
-                {artists.map((name) => (
-                  <option key={name} value={name}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-              <select
+                className="min-w-40 flex-1"
+                inputClassName="text-sm"
+              />
+              <Select
                 value={keyName}
-                onChange={(event) => setKeyName(event.target.value)}
-                className="h-10 rounded-md border bg-background px-2 text-sm"
+                onValueChange={setKeyName}
+                options={[{ value: '', label: 'Todos los tonos' }, ...keys.map((name) => ({ value: name, label: name }))]}
                 aria-label="Filtrar por tono"
-              >
-                <option value="">Tono</option>
-                {keys.map((name) => (
-                  <option key={name} value={name}>
-                    {name}
-                  </option>
-                ))}
-              </select>
+                className="w-40"
+              />
+              <Select
+                value={sortOrder}
+                onValueChange={setSortOrder}
+                options={SORT_OPTIONS}
+                aria-label="Ordenar canciones"
+                className="w-40"
+              />
             </div>
 
             {visible.length > 0 && (
@@ -185,12 +227,12 @@ export function LibraryView() {
                   {
                     id: 'last',
                     keys: <Kbd>⌘←</Kbd>,
-                    label: query.trim() || artist || keyName ? 'Última visible' : 'Última canción',
+                    label: filtered ? 'Última visible' : 'Última canción',
                   },
                   {
                     id: 'first',
                     keys: <Kbd>⌘→</Kbd>,
-                    label: query.trim() || artist || keyName ? 'Primera visible' : 'Primera canción',
+                    label: filtered ? 'Primera visible' : 'Primera canción',
                   },
                 ]}
               />
@@ -199,40 +241,95 @@ export function LibraryView() {
             {visible.length === 0 ? (
               <p className="py-16 text-center text-muted-foreground">Ninguna canción coincide.</p>
             ) : (
-              <ul className="divide-y overflow-hidden rounded-xl border bg-card">
-                {visible.map((song) => (
-                  <li key={song.id}>
-                    <Link
-                      to={`/c/${encodeURIComponent(song.id)}`}
-                      className="flex items-center gap-3 px-4 py-3 hover:bg-accent/60"
-                    >
-                      <SongMark songId={song.id} />
-                      <span className="min-w-0 flex-1">
-                        <span className="flex flex-wrap items-center gap-2">
-                          <span className="font-medium">{song.title}</span>
-                          {song.origin === 'catalog' && song.hasCopy ? (
-                            <span className="rounded-full bg-primary/15 px-2 py-0.5 text-xs font-semibold text-primary">
-                              Tienes copia
+              <>
+                <ul className="divide-y overflow-hidden rounded-xl border bg-card">
+                  {pageSongs.map((song, index) => {
+                    const sequence = currentPage * PAGE_SIZE + index + 1
+                    return (
+                      <li key={song.id}>
+                        <Link
+                          to={`/c/${encodeURIComponent(song.id)}`}
+                          className="flex items-center gap-3 px-4 py-3 hover:bg-accent/60"
+                        >
+                          <span
+                            className="w-7 shrink-0 text-right text-xs tabular-nums text-muted-foreground/70"
+                            aria-hidden
+                          >
+                            {sequence}
+                          </span>
+                          <SongMark songId={song.id} />
+                          <span className="min-w-0 flex-1">
+                            <span className="flex flex-wrap items-center gap-2">
+                              <span className="font-medium">{song.title}</span>
+                              {song.origin === 'catalog' && song.hasCopy ? (
+                                <span className="rounded-full bg-primary/15 px-2 py-0.5 text-xs font-semibold text-primary">
+                                  Tienes copia
+                                </span>
+                              ) : null}
                             </span>
-                          ) : null}
-                        </span>
-                        <span className="block text-sm text-muted-foreground">{songNote(song, user.id)}</span>
-                      </span>
-                      {song.key && (
-                        <span className="rounded-md bg-primary/10 px-2 py-1 text-sm font-semibold text-primary">
-                          {song.key}
-                        </span>
-                      )}
-                    </Link>
-                  </li>
-                ))}
-              </ul>
+                            <span className="block text-sm text-muted-foreground">{songNote(song, user.id)}</span>
+                          </span>
+                          {song.key && (
+                            <span className="rounded-md bg-primary/10 px-2 py-1 text-sm font-semibold text-primary">
+                              {song.key}
+                            </span>
+                          )}
+                        </Link>
+                      </li>
+                    )
+                  })}
+                </ul>
+
+                {pageCount > 1 && (
+                  <div className="mt-3 flex items-center justify-center gap-3 text-sm text-muted-foreground">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={currentPage <= 0}
+                      onClick={() => setPage((value) => Math.max(0, value - 1))}
+                      aria-label="Página anterior"
+                    >
+                      <ChevronLeft className="size-4" />
+                    </Button>
+                    <span className="tabular-nums">
+                      {currentPage + 1} / {pageCount}
+                    </span>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={currentPage >= pageCount - 1}
+                      onClick={() => setPage((value) => Math.min(pageCount - 1, value + 1))}
+                      aria-label="Página siguiente"
+                    >
+                      <ChevronRight className="size-4" />
+                    </Button>
+                  </div>
+                )}
+              </>
             )}
           </>
         )}
       </main>
     </div>
   )
+}
+
+function songCounter(total: number, visible: number, filtered: boolean): string {
+  if (filtered && visible !== total) return `${visible} de ${total}`
+  return `${total} canciones`
+}
+
+function compareSongs(a: Song, b: Song, order: SortOrder): number {
+  if (order === 'title') return a.title.localeCompare(b.title, 'es')
+  if (order === 'title-desc') return b.title.localeCompare(a.title, 'es')
+  if (order === 'artist') {
+    return (
+      (a.artist || '').localeCompare(b.artist || '', 'es') || a.title.localeCompare(b.title, 'es')
+    )
+  }
+  return (a.key || '').localeCompare(b.key || '', 'es') || a.title.localeCompare(b.title, 'es')
 }
 
 function songNote(song: Song, userId: string): string {

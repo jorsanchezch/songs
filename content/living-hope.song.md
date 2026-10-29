@@ -4,6 +4,8 @@ artist: Bethel Music / Phil Wickham
 composer: Brian Johnson y Phil Wickham
 key: D
 source: "https://youtu.be/iJDD49a6Q5k"
+bpm: 72
+duration_ms: 454000
 sources:
   - https://youtu.be/iJDD49a6Q5k | Tutorial en vivo (Brian Johnson)
   - https://www.bellschristmasmusic.com/living-hope-chords.html | Cifra (capo 1 = Eb)

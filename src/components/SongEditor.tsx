@@ -1,8 +1,10 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   ArrowLeft,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   ChevronUp,
   Eye,
   EyeOff,
@@ -12,11 +14,17 @@ import {
   Trash2,
 } from 'lucide-react'
 import { ChartPreview } from '@/components/ChartPreview'
-import { ControlHint } from '@/components/ControlHint'
+import { EditorHelp, HELP_PARTES, useEditorHelp } from '@/components/EditorHelp'
 import { InstrumentSwitch } from '@/components/InstrumentSwitch'
 import { Kbd, ShortcutLegend } from '@/components/KeyHint'
+import { NOTE_OPTIONS } from '@/components/NoteIcon'
+import { SongMediaInfoBanner } from '@/components/SongMediaInfoBanner'
+import { SongMediaEditor } from '@/components/SongMediaEditor'
 import { Button } from '@/components/ui/button'
+import { Combobox } from '@/components/ui/combobox'
 import { Input } from '@/components/ui/input'
+import { Select } from '@/components/ui/select'
+import { Stepper } from '@/components/ui/stepper'
 import { UserBadge } from '@/components/UserBadge'
 import { useSongs } from '@/hooks/useSongs'
 import { isInstrument, type InstrumentId } from '@/lib/instruments'
@@ -38,17 +46,20 @@ import {
   usedSectionIds,
 } from '@/lib/draftSong'
 import { parseKey, transposeKeyName } from '@/lib/chords'
-import { NOTE_LABEL, NOTE_TYPES, type NoteType, type Song, type SongNote, type SongSection } from '@/lib/types'
-
-const PARTES_HINT =
-  'Nombre y ×: cuántas veces se toca. Subir, bajar, plegar, incluir en la versión, duplicar o quitar. Id sirve para repetir la parte. Igual que muestra la letra de otra parte. + Línea agrega una línea y + Acorde lo pone en el cursor de la letra. Las marcas (entrada, cómo, repite, arreglo o nota) van en la parte, en la línea o sobre un acorde. El número junto al acorde es la columna: el carácter de la letra donde cae. 0 es el inicio de la línea.'
+import { getSongVersions } from '@/lib/api'
+import { useUser } from '@/hooks/useUser'
+import { isStaff } from '@/lib/access'
+import { SOURCE_LABELS, guessSourceLabel, isYoutubeEntry } from '@/lib/songMedia'
+import { NOTE_LABEL, NOTE_TYPES, type Song, type SongNote, type SongSection } from '@/lib/types'
 
 export function SongEditor() {
   const { songId = '' } = useParams()
   const [searchParams, setSearchParams] = useSearchParams()
   const navigate = useNavigate()
-  const { state, saveSong, restoreSong, copySong, songById, knowsSong, ensurePart } = useSongs()
+  const { state, saveSong, discardDraft, restoreSong, copySong, songById, knowsSong, ensurePart } = useSongs()
+  const user = useUser()
   const requested = searchParams.get('inst')
+  const versionOf = searchParams.get('version')
   const instrument: InstrumentId = isInstrument(requested) ? requested : loadSettings().instrument
   const song = state.status === 'ready' && songId ? songById(songId, instrument) : undefined
   const [draft, setDraft] = useState<Song>(blankSong)
@@ -58,7 +69,16 @@ export function SongEditor() {
   const [status, setStatus] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [lookupText, setLookupText] = useState('')
+  const help = useEditorHelp()
   const hydrated = useRef('')
+  const artists = useMemo(
+    () =>
+      state.status === 'ready'
+        ? [...new Set(state.songs.map((item) => item.artist).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es'))
+        : [],
+    [state],
+  )
   const ready = state.status === 'ready'
   const missing = Boolean(songId) && ready && !knowsSong(songId)
   const waiting = Boolean(songId) && ready && !missing && !song
@@ -83,6 +103,25 @@ export function SongEditor() {
     setFolded([])
   }, [instrument, song, songId, state.status])
 
+  const adopted = useRef('')
+  useEffect(() => {
+    if (!songId || !versionOf || !song || !isStaff(user)) return
+    const key = `${songId}:${versionOf}:${instrument}`
+    if (adopted.current === key) return
+    adopted.current = key
+    void getSongVersions(songId)
+      .then((data) => {
+        const found = data.drafts.find((item) => item.userId === versionOf && item.instrument === instrument)
+        if (!found) {
+          setError('Esa persona no tiene versión en este instrumento.')
+          return
+        }
+        setDraft(songFromSource(found.sourceText, songId))
+        setStatus(`Cargaste la versión de ${found.userName}. Revisa y guarda para cambiar la canción compartida.`)
+      })
+      .catch((reason) => setError(reason instanceof Error ? reason.message : 'No pude abrir esa versión.'))
+  }, [instrument, song, songId, user, versionOf])
+
   const convert = async () => {
     setError('')
     setBusy(true)
@@ -104,8 +143,24 @@ export function SongEditor() {
     }
   }
 
+  const setSourceLabel = (index: number, label: string) =>
+    setDraft((current) => {
+      const sources = (current.sources.length ? current.sources : [{ url: current.source, label: '' }]).map(
+        (entry, entryIndex) => (entryIndex === index ? { ...entry, label } : entry),
+      )
+      return { ...current, sources, source: sources[0]?.url ?? '' }
+    })
+
+  const referenceRows = (draft.sources.length ? draft.sources : [{ url: draft.source, label: '' }])
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => !isYoutubeEntry(item))
+
+  const [saving, setSaving] = useState(false)
   const save = () => {
+    // A new song waits on the YouTube search; a second click would create a second song.
+    if (saving) return
     setError('')
+    setSaving(true)
     void (async () => {
       try {
         const id = await saveSong(songToMarkdown(draft), songId || undefined, instrument)
@@ -114,6 +169,8 @@ export function SongEditor() {
         navigate(`/c/${encodeURIComponent(id)}`)
       } catch (reason) {
         setError(reason instanceof Error ? reason.message : 'No se pudo guardar.')
+      } finally {
+        setSaving(false)
       }
     })()
   }
@@ -161,7 +218,7 @@ export function SongEditor() {
     )
   }
 
-  if (song && !song.editable) {
+  if (song && !song.editable && !song.personal) {
     return (
       <div className="mx-auto max-w-md px-4 py-16 text-center">
         <p className="mb-4">
@@ -217,6 +274,30 @@ export function SongEditor() {
             ? 'La letra se copia a los otros instrumentos. Los acordes y las notas de ejecución se quedan en este.'
             : 'Al guardar, los cinco instrumentos empiezan con esta cifra.'}
         </p>
+        {!songId ? <SongMediaInfoBanner /> : null}
+        {song?.personal && (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">
+            <p>
+              Guardas tu versión personal: solo tú ves estos cambios y la canción compartida no cambia. Un Admin puede
+              revisar tu versión.
+              {song.draft?.stale ? ' La canción compartida cambió después de tu versión.' : ''}
+            </p>
+            {song.draft && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  if (!window.confirm('¿Descartar tu versión y volver a la canción compartida?')) return
+                  void discardDraft(song.id, instrument)
+                    .then(() => navigate(`/c/${encodeURIComponent(song.id)}`))
+                    .catch((reason) => setError(reason instanceof Error ? reason.message : 'No pude descartar.'))
+                }}
+              >
+                Descartar mi versión
+              </Button>
+            )}
+          </div>
+        )}
         {status && <p className="text-sm text-primary">{status}</p>}
         {error && <p className="text-sm text-destructive">{error}</p>}
 
@@ -224,15 +305,17 @@ export function SongEditor() {
           <ChartPreview song={draft} />
         ) : (
           <>
+            <EditorHelp open={help.open} onOpenChange={help.setOpen} />
             <section className="grid gap-3 sm:grid-cols-2">
               <Field label="Título">
                 <Input aria-label="Título" value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} />
               </Field>
               <Field label="Artista">
-                <Input
+                <Combobox
                   aria-label="Artista"
                   value={draft.artist}
-                  onChange={(event) => setDraft({ ...draft, artist: event.target.value, composer: '' })}
+                  suggestions={artists}
+                  onChange={(artist) => setDraft((current) => ({ ...current, artist, composer: '' }))}
                 />
               </Field>
               <div className="flex flex-nowrap items-end gap-3 sm:col-span-2">
@@ -249,6 +332,17 @@ export function SongEditor() {
                   }
                 />
               </div>
+              <SongMediaEditor
+                songId={songId}
+                draft={draft}
+                onChange={setDraft}
+                onSearchStatus={setLookupText}
+              />
+              {lookupText ? (
+                <p className="sm:col-span-2 text-xs text-muted-foreground" aria-live="polite">
+                  {lookupText}
+                </p>
+              ) : null}
               <div className="sm:col-span-2 flex flex-col gap-2">
                 <div className="flex items-center justify-between gap-2">
                   <p className="text-sm font-medium">Referencias y tutoriales</p>
@@ -256,7 +350,7 @@ export function SongEditor() {
                     type="button"
                     size="sm"
                     variant="outline"
-                    title="Agrega otro enlace."
+                    title="Agrega otro enlace (cifra, letra…). YouTube va arriba."
                     onClick={() =>
                       setDraft((current) => ({
                         ...current,
@@ -267,11 +361,15 @@ export function SongEditor() {
                     <Plus /> Enlace
                   </Button>
                 </div>
-                {(draft.sources.length ? draft.sources : [{ url: draft.source, label: '' }]).map(
-                  (item, index) => (
+                <p className="text-xs text-muted-foreground">Cifras, letras y tutoriales. Los videos de YouTube se editan arriba.</p>
+                {referenceRows.map(({ item, index }) => (
                     <div key={`source-${index}`} className="grid gap-2 sm:grid-cols-[1fr_12rem_auto]">
                       <Input
                         value={item.url}
+                        onBlur={() => {
+                          const label = guessSourceLabel(item.url)
+                          if (label && !item.label.trim()) setSourceLabel(index, label)
+                        }}
                         onChange={(event) => {
                           const url = event.target.value
                           setDraft((current) => {
@@ -288,27 +386,17 @@ export function SongEditor() {
                             }
                           })
                         }}
-                        placeholder="https://youtube.com/... o cifra"
+                        placeholder="https://cifraclub.com/... o tutorial"
                         inputMode="url"
                         title="Dirección del tutorial o de la cifra."
                         aria-label={`URL de referencia ${index + 1}`}
                       />
-                      <Input
+                      <Combobox
                         value={item.label}
-                        onChange={(event) => {
-                          const label = event.target.value
-                          setDraft((current) => {
-                            const sources = (current.sources.length
-                              ? current.sources
-                              : [{ url: current.source, label: '' }]
-                            ).map((entry, entryIndex) =>
-                              entryIndex === index ? { ...entry, label } : entry,
-                            )
-                            return { ...current, sources, source: sources[0]?.url ?? '' }
-                          })
-                        }}
-                        placeholder="Tutorial, cifra…"
-                        title="Nombre corto del enlace, como Tutorial o Cifra."
+                        onChange={(label) => setSourceLabel(index, label)}
+                        suggestions={[guessSourceLabel(item.url), ...SOURCE_LABELS.filter((label) => label !== 'YouTube')]}
+                        placeholder={guessSourceLabel(item.url) || 'Cifra, letra…'}
+                        title="Nombre corto del enlace, como Cifra o Letra."
                         aria-label={`Etiqueta de referencia ${index + 1}`}
                       />
                       <Button
@@ -334,8 +422,7 @@ export function SongEditor() {
                         <Trash2 />
                       </Button>
                     </div>
-                  ),
-                )}
+                  ))}
               </div>
             </section>
 
@@ -359,7 +446,15 @@ export function SongEditor() {
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="inline-flex items-center gap-1">
                 <h2 className="text-sm font-semibold tracking-wide text-muted-foreground uppercase">Partes</h2>
-                <ControlHint text={PARTES_HINT} wide />
+                <button
+                  type="button"
+                  className="inline-flex size-4 shrink-0 items-center justify-center rounded-full border text-[10px] leading-none font-semibold text-muted-foreground hover:bg-accent hover:text-foreground"
+                  title="Cómo usar las partes"
+                  aria-label="Cómo usar las partes"
+                  onClick={() => help.show(HELP_PARTES)}
+                >
+                  i
+                </button>
               </div>
               <Button
                 size="sm"
@@ -430,7 +525,12 @@ export function SongEditor() {
       <footer className="fixed inset-x-0 bottom-8 z-20 border-t bg-background/95 px-4 py-3 backdrop-blur">
         <div className="mx-auto flex max-w-[70.4rem] flex-wrap gap-2">
           {(!songId || song?.editable) && (
-            <Button title="Guarda la cifra en el cancionero." onClick={save}>Guardar</Button>
+            <Button title="Guarda la cifra en el cancionero." onClick={save} disabled={saving}>{saving ? 'Guardando…' : 'Guardar'}</Button>
+          )}
+          {songId && song?.personal && (
+            <Button title="Guarda tu versión. Solo tú la ves; la canción compartida no cambia." onClick={save}>
+              Guardar mi versión
+            </Button>
           )}
           <Button variant="outline" title="Baja un archivo .song.md de este borrador." onClick={download}>
             Descargar .song.md
@@ -479,18 +579,17 @@ function SectionCard({
           onChange={(event) => onChange({ ...section, label: event.target.value })}
           className="max-w-xs font-semibold"
         />
-        <label className="flex items-center gap-1 text-sm">
-          ×
-          <Input
-            type="number"
-            min={1}
+        <span className="flex items-center gap-1 text-sm" title="Cuántas veces se toca esta parte.">
+          <span aria-hidden>×</span>
+          <Stepper
+            size="sm"
             value={section.repeat}
-            aria-label="Repeticiones"
-            title="Cuántas veces se toca esta parte."
-            onChange={(event) => onChange({ ...section, repeat: Math.max(1, Number(event.target.value) || 1) })}
-            className="w-16"
+            min={1}
+            max={99}
+            label="Repeticiones"
+            onChange={(repeat) => onChange({ ...section, repeat: repeat ?? 1 })}
           />
-        </label>
+        </span>
         <Button size="icon" variant="ghost" aria-label="Subir parte" title="Mueve la parte hacia arriba." onClick={() => onMove(-1)}>
           <ChevronUp />
         </Button>
@@ -524,24 +623,16 @@ function SectionCard({
               />
             </Field>
             <Field label="Igual que">
-              <select
+              <Select
                 value={section.sameAs ?? ''}
-                aria-label="Parte duplicada"
-                onChange={(event) =>
-                  onChange({
-                    ...section,
-                    sameAs: event.target.value || undefined,
-                  })
-                }
-                className="h-10 rounded-md border bg-background px-3 text-sm"
-              >
-                <option value="">Letra propia</option>
-                {others.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.label}
-                  </option>
-                ))}
-              </select>
+                aria-label="Igual que"
+                title="Muestra la letra de otra parte en lugar de escribirla de nuevo."
+                onValueChange={(sameAs) => onChange({ ...section, sameAs: sameAs || undefined })}
+                options={[
+                  { value: '', label: 'Letra propia' },
+                  ...others.map((item) => ({ value: item.id, label: item.label || item.id })),
+                ]}
+              />
             </Field>
           </div>
 
@@ -604,7 +695,7 @@ function LineCard({
     <div className="rounded-lg border bg-background p-2">
       <div className="mb-2 flex flex-wrap gap-1">
         {line.chords.map((chord, index) => (
-          <span key={`${chord.column}-${index}`} className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-1 py-0.5">
+          <span key={`chord-${index}`} className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-1 py-0.5">
             <input
               value={chord.raw}
               aria-label="Acorde"
@@ -619,21 +710,25 @@ function LineCard({
               }
               className="w-16 bg-transparent font-mono text-sm font-semibold text-chart-chord outline-none"
             />
-            <input
-              type="number"
-              min={0}
+            <Stepper
+              size="xs"
               value={chord.column}
-              aria-label="Columna del acorde"
-              title="En qué letra de la línea cae el acorde."
-              onChange={(event) =>
+              min={0}
+              label="Columna del acorde"
+              title="En qué letra de la línea cae el acorde. 0 es el inicio."
+              decreaseIcon={<ChevronLeft />}
+              increaseIcon={<ChevronRight />}
+              decreaseLabel="Mover acorde a la izquierda"
+              increaseLabel="Mover acorde a la derecha"
+              onChange={(column) =>
                 onChange({
                   ...line,
                   chords: line.chords.map((item, itemIndex) =>
-                    itemIndex === index ? { ...item, column: Math.max(0, Number(event.target.value) || 0) } : item,
+                    itemIndex === index ? { ...item, column: column ?? 0 } : item,
                   ),
                 })
               }
-              className="w-12 bg-transparent text-xs outline-none"
+              className="border-transparent bg-transparent"
             />
             <button
               type="button"
@@ -723,21 +818,15 @@ function NoteList({
     <div className={compact ? '' : 'flex flex-col gap-1'}>
       {notes.map((note) => (
         <div key={note.id} className="flex flex-wrap items-center gap-1">
-          <select
+          <Select
+            size="sm"
             value={note.type}
             aria-label="Tipo de nota"
             title="Entrada, cómo tocarlo, repetición, arreglo o nota libre."
-            onChange={(event) =>
-              onChange(notes.map((item) => (item.id === note.id ? { ...item, type: event.target.value as NoteType } : item)))
-            }
-            className="h-8 rounded-md border bg-background px-2 text-xs"
-          >
-            {NOTE_TYPES.map((type) => (
-              <option key={type} value={type}>
-                {NOTE_LABEL[type]}
-              </option>
-            ))}
-          </select>
+            options={NOTE_OPTIONS}
+            onValueChange={(type) => onChange(notes.map((item) => (item.id === note.id ? { ...item, type } : item)))}
+            className="w-28"
+          />
           <Input
             value={note.text}
             aria-label="Texto de la nota"
@@ -853,8 +942,9 @@ function VersionsEditor({ song, onChange }: { song: Song; onChange: (song: Song)
                       ),
                     })
                   }
-                  className={`rounded-full border px-2.5 py-1 text-xs ${on ? 'border-primary bg-primary/15' : 'text-muted-foreground'}`}
+                  className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs [&_svg]:size-3 ${on ? 'border-primary bg-primary/15' : 'text-muted-foreground'}`}
                 >
+                  {NOTE_OPTIONS.find((option) => option.value === type)?.icon}
                   {NOTE_LABEL[type]}
                 </button>
               )

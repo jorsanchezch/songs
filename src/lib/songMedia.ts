@@ -1,0 +1,130 @@
+import {
+  YOUTUBE_LABEL,
+  defaultSourceLabel,
+  isYoutubeEntry,
+  isYoutubeUrl,
+  parseSourceText,
+  selectedYoutubeIndex,
+  type SourceEntry,
+} from '@/lib/sourceEntry'
+import type { SongSource } from '@/lib/types'
+
+export { YOUTUBE_LABEL, isYoutubeUrl, isYoutubeEntry, parseSourceText, selectedYoutubeIndex }
+export {
+  addYoutubeSource,
+  findSourceIndex,
+  formatSourceText,
+  normalizeSourceMedia,
+  removeSourceEntry,
+  sameVideo,
+  selectYoutubeSource,
+  serializeSources,
+  youtubeVideoId,
+} from '@/lib/sourceEntry'
+
+/** Selected YouTube source, else the first YouTube entry. */
+export function findYoutubeSource(sources: SongSource[]): SongSource | undefined {
+  const index = selectedYoutubeIndex(sources)
+  return index >= 0 ? sources[index] : undefined
+}
+
+export function youtubeUrl(sources: SongSource[]): string {
+  return findYoutubeSource(sources)?.url ?? ''
+}
+
+export function youtubeSources(sources: SongSource[]): SongSource[] {
+  return sources.filter((item) => isYoutubeEntry(item))
+}
+
+export function parseOptionalInt(raw: string | undefined | null): number | null {
+  const trimmed = (raw ?? '').trim()
+  if (!trimmed) return null
+  const value = Number(trimmed)
+  if (!Number.isFinite(value) || value < 0) return null
+  return Math.round(value)
+}
+
+export function durationSecondsFromMs(ms: number | null | undefined): string {
+  if (ms == null || !Number.isFinite(ms) || ms < 0) return ''
+  return String(Math.round(ms / 1000))
+}
+
+export function durationMsFromSeconds(raw: string): number | null {
+  const seconds = parseOptionalInt(raw)
+  if (seconds == null) return null
+  return seconds * 1000
+}
+
+/** Display / edit duration as m:ss (or mm:ss). Empty when unset. */
+export function formatDurationMmSs(ms: number | null | undefined): string {
+  if (ms == null || !Number.isFinite(ms) || ms < 0) return ''
+  const total = Math.round(ms / 1000)
+  const minutes = Math.floor(total / 60)
+  const seconds = total % 60
+  return `${minutes}:${String(seconds).padStart(2, '0')}`
+}
+
+/** Parse m:ss / mm:ss / h:mm:ss into milliseconds. Empty → null. */
+export function parseDurationMmSs(raw: string): number | null {
+  const trimmed = raw.trim()
+  if (!trimmed) return null
+  const parts = trimmed.split(':')
+  if (parts.length === 2 || parts.length === 3) {
+    const nums = parts.map((part) => Number(part))
+    if (nums.some((value) => !Number.isFinite(value) || value < 0)) return null
+    const secondsPart = nums[nums.length - 1]!
+    const minutesPart = nums[nums.length - 2]!
+    const hoursPart = parts.length === 3 ? nums[0]! : 0
+    if (secondsPart >= 60 || (parts.length === 3 && minutesPart >= 60)) return null
+    const total = Math.round(hoursPart) * 3600 + Math.round(minutesPart) * 60 + Math.round(secondsPart)
+    return total >= 0 ? total * 1000 : null
+  }
+  // Bare number: treat as total seconds (compat while typing / paste).
+  const seconds = parseOptionalInt(trimmed)
+  if (seconds == null) return null
+  return seconds * 1000
+}
+
+/** Resolve stored audio_url (relative /api/audio/… or absolute) for <audio>. */
+export function resolveAudioUrl(url: string, apiRoot = ''): string {
+  const trimmed = url.trim()
+  if (!trimmed) return ''
+  if (/^(https?:|blob:|data:)/i.test(trimmed)) return trimmed
+  const root = apiRoot.replace(/\/$/, '')
+  return `${root}${trimmed.startsWith('/') ? trimmed : `/${trimmed}`}`
+}
+
+export const SOURCE_LABELS = ['YouTube', 'Cifra', 'Tutorial', 'Letra', 'Acordes']
+
+const HOST_LABELS: [RegExp, string][] = [
+  [/cifraclub|lacuerda|cifras|ultimate-guitar|chordify|acordes/i, 'Cifra'],
+  [/letras|musixmatch|genius|lyrics/i, 'Letra'],
+]
+
+/** Short label for a link, from its host. Empty when nothing fits. */
+export function guessSourceLabel(url: string): string {
+  const trimmed = url.trim()
+  let host = ''
+  try {
+    host = new URL(trimmed).hostname
+  } catch {
+    return ''
+  }
+  const hit = HOST_LABELS.find(([pattern]) => pattern.test(host))
+  if (hit) return hit[1]
+  const label = defaultSourceLabel(trimmed)
+  return label === 'Fuente' ? '' : label
+}
+
+/** Stored audio path or a full http(s) link. */
+export function isAudioUrl(url: string): boolean {
+  const trimmed = url.trim()
+  if (/^\/?api\/audio\//.test(trimmed)) return true
+  try {
+    return /^https?:$/.test(new URL(trimmed).protocol)
+  } catch {
+    return false
+  }
+}
+
+export type { SourceEntry }

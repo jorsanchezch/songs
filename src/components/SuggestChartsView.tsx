@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { BulkAddLayout, StatusBadge } from '@/components/BulkAddLayout'
+import { SongMediaInfoBanner } from '@/components/SongMediaInfoBanner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useSongs } from '@/hooks/useSongs'
@@ -178,6 +179,7 @@ export function SuggestChartsView() {
       title="Sugerir cifras"
       lede="Un nombre por línea. Si quieres, añade el artista después de una coma o un guion."
     >
+      <SongMediaInfoBanner />
       <p className="text-sm text-muted-foreground">
         Busco una página pública de acordes y te muestro el enlace. No guardo nada hasta que aceptes. Si ya está en el
         catálogo, aceptarla no crea otra.{' '}

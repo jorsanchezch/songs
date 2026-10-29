@@ -11,3 +11,19 @@ database_id = "a3f3f9f3-33d7-4f07-a94f-cd44a64f483b"
 
 [vars]
 SONGBOOK_ORIGIN = "*"
+
+# --- MP3 storage (R2). Do NOT put multi-MB blobs in D1. ---
+# Create the bucket once, then uncomment [[r2_buckets]] and redeploy:
+#   npx wrangler r2 bucket create songbook-audio
+# audio_url in D1 stays a pointer like /api/audio/songs/<id>/<ts>.mp3
+# The Worker serves GET /api/audio/… from AUDIO_BUCKET.
+#
+# [[r2_buckets]]
+# binding = "AUDIO_BUCKET"
+# bucket_name = "songbook-audio"
+# preview_bucket_name = "songbook-audio"
+
+# Secrets (not in this file):
+#   npx wrangler secret put YOUTUBE_API_KEY
+# Optional later if you expose R2 via a custom domain instead of /api/audio:
+#   npx wrangler secret put AUDIO_PUBLIC_BASE

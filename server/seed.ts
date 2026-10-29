@@ -1,7 +1,6 @@
 import { INSTRUMENTS } from './instruments.ts'
 import { chartMeta } from './meta.ts'
-import { hashPassword } from './password.ts'
-import { OWNER_ID, OWNER_NAME, OWNER_PASSWORD, OWNER_USERNAME, SCHEMA } from './schema.ts'
+import { OWNER_ID, OWNER_NAME, OWNER_USERNAME, SCHEMA } from './schema.ts'
 import type { CatalogFile } from './catalog.ts'
 import type { Sql, SqlValue } from './sql.ts'
 
@@ -25,6 +24,11 @@ export async function ensureSchema(sql: Sql): Promise<void> {
   await addColumn(sql, `ALTER TABLE instrument_parts ADD COLUMN revision INTEGER NOT NULL DEFAULT 1`)
   await addColumn(sql, `ALTER TABLE users ADD COLUMN password_hash TEXT`)
   await addColumn(sql, `ALTER TABLE users ADD COLUMN username TEXT`)
+  await addColumn(sql, `ALTER TABLE songs ADD COLUMN bpm INTEGER`)
+  await addColumn(sql, `ALTER TABLE songs ADD COLUMN duration_ms INTEGER`)
+  await addColumn(sql, `ALTER TABLE songs ADD COLUMN audio_url TEXT NOT NULL DEFAULT ''`)
+  await addColumn(sql, `ALTER TABLE songs ADD COLUMN playback TEXT NOT NULL DEFAULT '{}'`)
+  await addColumn(sql, `ALTER TABLE songs ADD COLUMN creator_id TEXT`)
   await allowElectricGuitar(sql)
   await backfillElectricGuitar(sql)
   await ensureOwnerAccount(sql)
@@ -34,28 +38,23 @@ export async function ensureSchema(sql: Sql): Promise<void> {
   } catch {
     // Older rows may still collide briefly; create/update checks keep new usernames unique.
   }
+  await backfillCreators(sql)
+  await sql.exec(`CREATE INDEX IF NOT EXISTS idx_songs_creator ON songs(creator_id)`)
 }
 
+/**
+ * The owner always exists with its username. Its password is never in the code:
+ * set it in the database with `npm run db:set-password -- jsanchezch`.
+ */
 async function ensureOwnerAccount(sql: Sql): Promise<void> {
   await sql.run(
     `INSERT OR IGNORE INTO users (id, name, username, role) VALUES (?, ?, ?, 'owner')`,
     [OWNER_ID, OWNER_NAME, OWNER_USERNAME],
   )
-  await sql.run(`UPDATE users SET name = ?, username = ? WHERE id = ?`, [
-    OWNER_NAME,
+  await sql.run(`UPDATE users SET username = ? WHERE id = ? AND (username IS NULL OR TRIM(username) = '')`, [
     OWNER_USERNAME,
     OWNER_ID,
   ])
-  const row = await sql.get<{ password_hash: string | null }>(
-    `SELECT password_hash FROM users WHERE id = ?`,
-    [OWNER_ID],
-  )
-  if (!row?.password_hash) {
-    await sql.run(`UPDATE users SET password_hash = ? WHERE id = ?`, [
-      await hashPassword(OWNER_PASSWORD),
-      OWNER_ID,
-    ])
-  }
 }
 
 async function backfillUsernames(sql: Sql): Promise<void> {
@@ -76,6 +75,19 @@ async function backfillUsernames(sql: Sql): Promise<void> {
     }
     await sql.run(`UPDATE users SET username = ? WHERE id = ?`, [username, person.id])
   }
+}
+
+/** Catalog rows came from seed, import, or scripts, so they belong to the owner. Copies and own songs keep the person who made them. */
+async function backfillCreators(sql: Sql): Promise<void> {
+  await sql.run(
+    `UPDATE songs SET creator_id = CASE
+       WHEN origin = 'catalog' THEN ?
+       WHEN EXISTS (SELECT 1 FROM users u WHERE u.id = songs.owner_id) THEN owner_id
+       ELSE ?
+     END
+     WHERE creator_id IS NULL OR creator_id = ''`,
+    [OWNER_ID, OWNER_ID],
+  )
 }
 
 async function allowElectricGuitar(sql: Sql): Promise<void> {
@@ -145,8 +157,8 @@ export async function seedCatalog(sql: Sql, files: CatalogFile[]): Promise<numbe
     const meta = chartMeta(file.sourceText, file.id)
     const inserted = await insertIgnore(sql, `INSERT OR IGNORE INTO songs (
       id, title, artist, composer, key_name, source, lyrics_text, origin, catalog_id,
-      owner_id, shared, hidden, catalog_source, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'catalog', NULL, ?, 0, 0, ?, ?, ?)`, [
+      owner_id, creator_id, shared, hidden, catalog_source, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'catalog', NULL, ?, ?, 0, 0, ?, ?, ?)`, [
       file.id,
       meta.title,
       meta.artist,
@@ -154,6 +166,7 @@ export async function seedCatalog(sql: Sql, files: CatalogFile[]): Promise<numbe
       meta.key,
       meta.source,
       meta.lyrics,
+      OWNER_ID,
       OWNER_ID,
       file.sourceText,
       now,
@@ -197,6 +210,7 @@ export function quote(value: string): string {
   return `'${value.replace(/'/g, "''")}'`
 }
 
+/** Leaves creator_id out so the file also runs on a D1 that predates the column; the Worker backfills it on boot. */
 export function renderSeedSql(files: CatalogFile[]): string {
   const now = new Date().toISOString()
   const lines = [SCHEMA.trim(), '']

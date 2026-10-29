@@ -1,9 +1,11 @@
 ---
 title: Raise a Hallelujah
 artist: Bethel Music
-composer: Jonathan David Helser, Melissa Helser, Molly Skaggs y Jake Stevens
+composer: "Jonathan David Helser, Melissa Helser, Molly Skaggs y Jake Stevens"
 key: A
 source: "https://youtu.be/awkO61T6i0k"
+bpm: 82
+duration_ms: 660000
 sources:
   - https://youtu.be/awkO61T6i0k | Tutorial en vivo (Victory)
   - https://cdn.bethelmusic.com/20200417045922/Raise-a-Hallelujah-Chord-Chart-Peace.pdf | Cifra oficial Bethel

@@ -4,6 +4,11 @@ artist: Passion
 composer: Jonathan Smith y Kristian Stanfill y Seán Curran y Jason Ingram
 key: D
 source: "https://www.cifraclub.com/passion/glorioso-dia/"
+bpm: 110
+duration_ms: 260000
+sources:
+  - https://www.cifraclub.com/passion/glorioso-dia/ | Fuente
+  - https://www.youtube.com/watch?v=bhPdS_ZUKg8 | YouTube
 ---
 
 ## Intro {#intro}

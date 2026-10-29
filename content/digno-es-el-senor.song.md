@@ -4,6 +4,8 @@ artist: Marcela Gándara
 composer: Marcela Gándara / Vino Nuevo
 key: A
 source: "https://www.youtube.com/watch?v=Ddj6um-qftI"
+bpm: 141
+duration_ms: 544000
 sources:
   - https://www.youtube.com/watch?v=Ddj6um-qftI | Tutorial / referencia (God's Version)
   - https://chords.lacuerda.net/marcela_gandara/digno_es_el_senior.shtml | Cifra

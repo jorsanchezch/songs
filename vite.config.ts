@@ -142,13 +142,14 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, rootDir, '')
   const dbMode = env.SONGBOOK_DB || process.env.SONGBOOK_DB || 'sqlite'
   const d1Url = env.SONGBOOK_D1_URL || process.env.SONGBOOK_D1_URL || ''
+  const youtubeKey = env.YOUTUBE_API_KEY || process.env.YOUTUBE_API_KEY || ''
   return {
   base: env.VITE_BASE_PATH || process.env.VITE_BASE_PATH || defaultBase,
   define: {
     'import.meta.env.VITE_APP_VERSION': JSON.stringify(appVersion.label),
     'import.meta.env.VITE_APP_COMMIT': JSON.stringify(appVersion.commit),
   },
-  plugins: [react(), tailwindcss(), songbookApi({ mode: dbMode, d1Url, rootDir }), importChart(), spaFallback()],
+  plugins: [react(), tailwindcss(), songbookApi({ mode: dbMode, d1Url, rootDir, youtubeKey }), importChart(), spaFallback()],
   resolve: {
     alias: {
       '@': path.resolve(rootDir, './src'),

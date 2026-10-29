@@ -1,6 +1,7 @@
 import type { Account, Role } from '@/lib/access'
 import { SESSION_KEY, setCurrentUser } from '@/lib/currentSession'
 import type { InstrumentId } from '@/lib/instruments'
+import type { SongPlayback } from '@/lib/types'
 
 type SetlistPayload = {
   id: string
@@ -24,12 +25,24 @@ export type ApiSong = {
   key: string
   source: string
   sourceText: string
+  bpm: number | null
+  durationMs: number | null
+  audioUrl: string
+  playback?: SongPlayback
   origin: 'catalog' | 'local' | 'copy'
   ownerId: string
   ownerName: string
+  creatorId: string
+  creatorName: string
   shared: boolean
   catalogId: string | null
   editable: boolean
+  /** Cannot change the shared song, so saving keeps a personal version. */
+  personal: boolean
+  /** This person's version for this instrument, when they saved one. */
+  draft: SongDraftInfo | null
+  /** Staff only: how many people saved their own version. */
+  draftUsers: number
   removable: boolean
   diverged: boolean
   instrument: InstrumentId
@@ -39,9 +52,35 @@ export type ApiSong = {
   partRevision: number
 }
 
+export type SongDraftInfo = {
+  updatedAt: string
+  edited: boolean
+  /** The shared song changed after this version started. */
+  stale: boolean
+}
+
+export type UserSongVersion = {
+  userId: string
+  userName: string
+  instrument: InstrumentId
+  sourceText: string
+  baseText: string
+  canonicalText: string
+  stale: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export type SongVersions = {
+  song: { id: string; title: string; revision: number; creatorId: string; creatorName: string }
+  drafts: UserSongVersion[]
+}
+
 export type PartText = {
   sourceText: string
   revision: number
+  /** True when this text is the person's own version, not the shared part. */
+  draft?: boolean
 }
 
 export type SongList = {
@@ -117,18 +156,160 @@ export type AdminInventory = {
   personalCopies: number
   sharedCopies: number
   createdSongs: number
+  userVersions: number
   setlists: number
   serviceDays: number
+}
+
+export type AdminDraftSummary = {
+  songId: string
+  title: string
+  users: { id: string; name: string; updatedAt: string }[]
 }
 
 export type AdminOverview = {
   me: Account
   users: AdminPerson[]
+  drafts: AdminDraftSummary[]
   inventory: AdminInventory
 }
 
 export function getAdmin(): Promise<AdminOverview> {
   return request('/api/admin')
+}
+
+export type MediaBackfillReport = {
+  apiKeyPresent: boolean
+  r2Configured: boolean
+  dryRun: boolean
+  searchQuota: { day: string; used: number; limit: number; remaining: number }
+  missingBefore: number
+  updated: number
+  skipped: number
+  queued: number
+  errors: number
+  queueSize: number
+  results: Array<{
+    id: string
+    title: string
+    status: 'updated' | 'skipped' | 'queued' | 'error'
+    reason?: string
+    youtubeUrl?: string
+    durationMs?: number | null
+    bpm?: number | null
+    audio?: string
+    via?: string
+  }>
+  note?: string
+}
+
+export function getMediaBackfill(): Promise<MediaBackfillReport> {
+  return request('/api/admin/media-backfill')
+}
+
+export function runMediaBackfill(body: {
+  limit?: number
+  dryRun?: boolean
+  extractAudio?: boolean
+} = {}): Promise<MediaBackfillReport> {
+  return request('/api/admin/media-backfill', { method: 'POST', body })
+}
+
+export type FoundMedia = { youtubeUrl: string; videoTitle: string; durationMs: number | null; bpm: number | null }
+
+/** Best YouTube match for a title, in the song's language, with its length. */
+export function lookupSongMedia(title: string, artist: string): Promise<{ media: FoundMedia | null }> {
+  const query = new URLSearchParams({ title, artist })
+  return request(`/api/media/lookup?${query}`)
+}
+
+export type AudioExtractReport = {
+  extractorAvailable: boolean
+  r2Configured: boolean
+  storeReady: boolean
+  dryRun: boolean
+  missingAudio: number
+  updated: number
+  skipped: number
+  errors: number
+  results: Array<{
+    id: string
+    title: string
+    status: 'updated' | 'skipped' | 'error'
+    reason?: string
+    audioUrl?: string
+    youtubeUrl?: string
+  }>
+  note?: string
+  blocked?: boolean
+}
+
+export function getAudioExtract(): Promise<AudioExtractReport> {
+  return request('/api/admin/audio-extract')
+}
+
+export function runAudioExtract(body: { limit?: number; dryRun?: boolean } = {}): Promise<AudioExtractReport> {
+  return request('/api/admin/audio-extract', { method: 'POST', body })
+}
+
+export async function uploadAudioFile(file: File, songId?: string): Promise<{ audioUrl: string; key: string }> {
+  const headers = new Headers()
+  const token = localStorage.getItem(SESSION_KEY)
+  if (token) headers.set('authorization', `Bearer ${token}`)
+  const form = new FormData()
+  form.append('file', file)
+  if (songId) form.append('songId', songId)
+  const response = await fetch(`${apiRoot()}/api/audio`, { method: 'POST', headers, body: form })
+  const text = await response.text()
+  let data: { error?: string; audioUrl?: string; key?: string } = {}
+  if (text) {
+    try {
+      data = JSON.parse(text) as typeof data
+    } catch {
+      data = {}
+    }
+  }
+  if (!response.ok) throw new Error(data.error || `Error ${response.status}`)
+  if (!data.audioUrl || !data.key) throw new Error('La subida no devolvió audio_url.')
+  return { audioUrl: data.audioUrl, key: data.key }
+}
+
+export type SongMediaPatch = {
+  durationMs?: number | null
+  bpm?: number | null
+  audioUrl?: string | null
+  selectYoutubeUrl?: string | null
+  instrument?: InstrumentId
+}
+
+export function patchSongMedia(
+  id: string,
+  body: SongMediaPatch,
+): Promise<{ song: ApiSong; parts: Record<string, PartText> }> {
+  return request(`/api/songs/${encodeURIComponent(id)}/media`, { method: 'PUT', body })
+}
+
+export type YoutubeInfo = {
+  videoId: string
+  url: string
+  title: string
+  durationMs: number | null
+  bpm: number | null
+  via: string
+  apiKeyPresent: boolean
+  canExtract: boolean
+}
+
+export function fetchYoutubeInfo(url: string): Promise<YoutubeInfo> {
+  const query = new URLSearchParams({ url })
+  return request(`/api/youtube/info?${query}`)
+}
+
+export function extractYoutubeAudio(
+  youtubeUrl: string,
+  songId?: string,
+): Promise<{ audioUrl: string; key: string; blocked?: boolean; error?: string }> {
+  return request('/api/audio/extract', { method: 'POST', body: { youtubeUrl, songId } })
 }
 
 export function createPerson(body: {
@@ -191,6 +372,34 @@ export function saveSong(
   })
 }
 
+export function saveDraft(
+  id: string,
+  sourceText: string,
+  instrument: InstrumentId,
+): Promise<{ song: ApiSong; parts: Record<string, PartText> }> {
+  return request(`/api/songs/${encodeURIComponent(id)}/draft`, {
+    method: 'PUT',
+    body: { sourceText, instrument },
+  })
+}
+
+export function discardDraft(
+  id: string,
+  instrument: InstrumentId,
+): Promise<{ song: ApiSong; parts: Record<string, PartText> }> {
+  return request(`/api/songs/${encodeURIComponent(id)}/draft?instrument=${encodeURIComponent(instrument)}`, {
+    method: 'DELETE',
+  })
+}
+
+export function getSongVersions(id: string): Promise<SongVersions> {
+  return request(`/api/songs/${encodeURIComponent(id)}/drafts`)
+}
+
+export function removeSongVersion(id: string, userId: string): Promise<SongVersions> {
+  return request(`/api/songs/${encodeURIComponent(id)}/drafts/${encodeURIComponent(userId)}`, { method: 'DELETE' })
+}
+
 export function importLocal(body: {
   overrides: Record<string, string>
   hidden: string[]
@@ -231,6 +440,10 @@ export function shareSong(id: string, body: ShareBody): Promise<{ song: ApiSong 
 
 export function restoreSong(id: string): Promise<{ song: ApiSong }> {
   return request(`/api/songs/${encodeURIComponent(id)}/restore`, { method: 'POST', body: {} })
+}
+
+export function putPlayback(id: string, playback: SongPlayback): Promise<{ playback: SongPlayback }> {
+  return request(`/api/songs/${encodeURIComponent(id)}/playback`, { method: 'PUT', body: { playback } })
 }
 
 export function revealSongs(): Promise<{ ok: boolean }> {

@@ -5,9 +5,16 @@ import { formatChord, transposeChordSymbol, transposeKeyName } from '../src/lib/
 import { applyEditingKey, applyOriginalKey, foldComposerIntoArtist, normalizeKeyText } from '../src/lib/draftSong.ts'
 import { keyChoices } from '../src/lib/theory.ts'
 import { blocksFor, headerChips, headerChipText, partKind } from '../src/lib/display.ts'
+import {
+  sliceChipLabel,
+  sliceLetter,
+  sliceStartLines,
+  usableJumpHeight,
+} from '../src/lib/viewportJumps.ts'
 import { diagramFor, shapesFor } from '../src/lib/guitar.ts'
 import { chartToCho, chartToSongMd, isBlockedPage, isPlainChordLine, songToMarkdown, wrapPlainChordLine } from '../src/lib/importChart.ts'
 import { shareLyrics } from '../server/lyrics.ts'
+import { copyChartMedia, shareChartMeta } from '../server/chartMedia.ts'
 import {
   closeRotatedDayList,
   dayListIsDue,
@@ -18,6 +25,25 @@ import {
 } from '../src/lib/setlists.ts'
 import { can, currentUser, roleLabel } from '../src/lib/access.ts'
 import { parseChart } from '../src/lib/parseChart.ts'
+import { lineDiff, songFieldChanges } from '../src/lib/songVersionDiff.ts'
+import {
+  buildTimeline,
+  cueIndexAt,
+  cuePoints,
+  effectiveAudio,
+  formatClock,
+  formatLead,
+  impliedBpm,
+  locate,
+  marksToParts,
+  parsePlaybackSettings,
+  partKeys,
+  referenceTrack,
+  songMediaSources,
+  startOffset,
+  youtubeVideoId,
+} from '../src/lib/playback.ts'
+import { songPlayback } from '../server/playback.ts'
 import { sectionDegrees, sectionProgressions } from '../src/lib/sectionProgression.ts'
 import { diatonicChords, keyName, parseStudyKey, pianoVoicings, signature } from '../src/lib/theory.ts'
 import { distinctMarks, songIconIndex, songMarkTone, SONG_ICON_SHAPES, SONG_MARK_HUES } from '../src/lib/songMark.ts'
@@ -104,6 +130,207 @@ assert(songToMarkdown(markedKey).includes('original_key: G'), 'writes original_k
 const roundKey = parseChart(songToMarkdown(markedKey), 'prueba.song.md')
 assert(roundKey.key === 'C' && roundKey.originalKey === 'G', 'reads original_key')
 assert(!songToMarkdown(applyOriginalKey(markedKey, 'C')).includes('original_key'), 'drops original_key when it matches')
+const mediaSong = {
+  ...keySample,
+  bpm: 72,
+  durationMs: 245000,
+  audioUrl: 'https://example.com/cancion.mp3',
+  sources: [{ url: 'https://www.youtube.com/watch?v=abc123', label: 'YouTube' }],
+  source: 'https://www.youtube.com/watch?v=abc123',
+}
+const mediaMd = songToMarkdown(mediaSong)
+assert(mediaMd.includes('bpm: 72'), 'writes bpm')
+assert(mediaMd.includes('duration_ms: 245000'), 'writes duration_ms')
+assert(mediaMd.includes('audio_url:') && mediaMd.includes('example.com/cancion.mp3'), 'writes audio_url')
+assert(mediaMd.includes('YouTube'), 'writes YouTube source label')
+const roundMedia = parseChart(mediaMd, 'media.song.md')
+assert(roundMedia.bpm === 72 && roundMedia.durationMs === 245000, 'reads bpm and duration_ms')
+assert(roundMedia.audioUrl === 'https://example.com/cancion.mp3', 'reads audio_url')
+assert(
+  roundMedia.sources.some((item) => item.label === 'YouTube' && item.url.includes('youtube.com')),
+  'reads YouTube source',
+)
+const { formatDurationMmSs, parseDurationMmSs, resolveAudioUrl } = await import('../src/lib/songMedia.ts')
+assert(formatDurationMmSs(245_000) === '4:05', 'formats duration as m:ss')
+assert(parseDurationMmSs('4:05') === 245_000, 'parses m:ss')
+assert(parseDurationMmSs('1:02:03') === 3_723_000, 'parses h:mm:ss')
+assert(parseDurationMmSs('') == null, 'empty duration is null')
+assert(resolveAudioUrl('/api/audio/songs/a/1.mp3', 'https://api.example') === 'https://api.example/api/audio/songs/a/1.mp3', 'resolves relative audio')
+assert(resolveAudioUrl('https://cdn.example/a.mp3') === 'https://cdn.example/a.mp3', 'keeps absolute audio')
+
+const { applyChartMedia, chartHasYoutube } = await import('../server/chartMedia.ts')
+const { parseIsoDurationMs, bpmFromText, searchLanguage, youtubeWatchUrl } = await import('../server/youtubeMedia.ts')
+assert(parseIsoDurationMs('PT3M25S') === 205_000, 'ISO duration minutes+seconds')
+assert(parseIsoDurationMs('PT1H2S') === 3_602_000, 'ISO duration hour')
+assert(bpmFromText('Live worship 72 BPM in G') === 72, 'bpm from blurb')
+assert(searchLanguage('Al Que Está Sentado', 'Marcos Brunet').relevanceLanguage === 'es', 'spanish bias')
+assert(searchLanguage('Living Hope', 'Phil Wickham').relevanceLanguage === 'en', 'english bias')
+assert(youtubeWatchUrl('dQw4w9WgXcQ').includes('dQw4w9WgXcQ'), 'watch url')
+const choBase = `{title: Prueba}
+{artist: Demo}
+{key: C}
+{source: https://www.cifraclub.com/demo/prueba/}
+
+{start_of_verse}
+[C]hola
+{end_of_verse}
+`
+assert(!chartHasYoutube(choBase), 'cho without youtube')
+const choPatched = applyChartMedia(choBase, {
+  youtubeUrl: 'https://www.youtube.com/watch?v=abcdefghijk',
+  bpm: 88,
+  durationMs: 210_000,
+})
+assert(chartHasYoutube(choPatched), 'cho with youtube')
+assert(choPatched.includes('{bpm: 88}'), 'cho bpm tag')
+assert(choPatched.includes('{duration_ms: 210000}'), 'cho duration tag')
+assert(choPatched.includes('YouTube'), 'cho youtube label')
+const choParsed = parseChart(choPatched, 'prueba.cho')
+assert(choParsed.bpm === 88 && choParsed.durationMs === 210_000, 'parseChart reads patched cho media')
+assert(
+  choParsed.sources.some((item) => item.label === 'YouTube' && item.url.includes('abcdefghijk')),
+  'parseChart keeps youtube source on cho',
+)
+const mdPatched = applyChartMedia(
+  `---
+title: Demo
+artist: Alguien
+source: https://example.com/cifra
+---
+
+## Verse {#v}
+[C]hola
+`,
+  { youtubeUrl: 'https://youtu.be/xyzxyzxyzxy', durationMs: 90_000, audioUrl: 'https://cdn.example/a.mp3' },
+)
+const mdParsed = parseChart(mdPatched, 'demo.song.md')
+assert(mdParsed.durationMs === 90_000 && mdParsed.audioUrl.includes('cdn.example'), 'patched md media')
+assert(mdParsed.sources.some((item) => item.label === 'YouTube'), 'patched md youtube source')
+assert(mdParsed.source.includes('example.com/cifra'), 'keeps chord source as primary')
+
+const {
+  parseSourceText,
+  formatSourceText,
+  selectYoutubeSource,
+  addYoutubeSource,
+  removeSourceEntry,
+  serializeSources,
+  selectedYoutubeIndex,
+} = await import('../src/lib/sourceEntry.ts')
+const { songMediaSources } = await import('../src/lib/playback.ts')
+const attr = parseSourceText(
+  'https://youtu.be/bbbbbbbbbbb | En vivo | selected audio_url=%2Fapi%2Faudio%2Fx.mp3 duration_ms=200000 bpm=70',
+)
+assert(attr?.selected && attr.bpm === 70 && attr.durationMs === 200_000, 'parses source attrs')
+assert(
+  formatSourceText(
+    { url: 'https://youtu.be/bbbbbbbbbbb', label: 'En vivo', selected: true, audioUrl: '/api/audio/x.mp3', durationMs: 200_000, bpm: 70 },
+    { withSelected: true, withMedia: true },
+  ).includes('selected') && formatSourceText(
+    { url: 'https://youtu.be/bbbbbbbbbbb', label: 'En vivo', selected: true, audioUrl: '/api/audio/x.mp3', durationMs: 200_000, bpm: 70 },
+    { withSelected: true, withMedia: true },
+  ).includes('duration_ms=200000'),
+  'formats source attrs',
+)
+const multiMd = `---
+title: Multi
+artist: Demo
+bpm: 72
+duration_ms: 245000
+audio_url: /api/audio/songs/x/1.mp3
+sources:
+  - https://www.youtube.com/watch?v=aaaaaaaaaaa | YouTube | selected
+  - https://youtu.be/bbbbbbbbbbb | En vivo | audio_url=%2Fapi%2Faudio%2Fsongs%2Fx%2F2.mp3 duration_ms=200000 bpm=70
+  - https://www.cifraclub.com/demo/
+---
+
+## Verse {#v}
+[C]hola
+`
+const multiSong = parseChart(multiMd, 'multi.song.md')
+assert(multiSong.sources.filter((item) => /youtu/.test(item.url)).length === 2, 'keeps two youtube sources')
+assert(multiSong.bpm === 72 && multiSong.durationMs === 245_000, 'selected media stays on top fields')
+assert(multiSong.audioUrl.includes('/api/audio/songs/x/1.mp3'), 'selected mp3 on top')
+assert(multiSong.sources.some((item) => item.selected && item.url.includes('aaaaaaaaaaa')), 'marks selected youtube')
+assert(
+  multiSong.sources.some((item) => item.url.includes('bbbbbbbbbbb') && item.durationMs === 200_000 && item.bpm === 70),
+  'non-selected keeps line media',
+)
+const roundTrip = songToMarkdown(multiSong)
+assert(roundTrip.includes('selected'), 'round-trip writes selected when multiple youtube')
+assert(!/aaaaaaaaaaa[^\n]*duration_ms=/.test(roundTrip), 'selected line has no media attrs')
+assert(/bbbbbbbbbbb[^\n]*duration_ms=200000/.test(roundTrip), 'other youtube keeps duration_ms')
+
+const swapped = selectYoutubeSource(
+  multiSong.sources,
+  { bpm: multiSong.bpm ?? null, durationMs: multiSong.durationMs ?? null, audioUrl: multiSong.audioUrl ?? '' },
+  multiSong.sources.findIndex((item) => item.url.includes('bbbbbbbbbbb')),
+)
+assert(swapped.top.audioUrl.includes('/api/audio/songs/x/2.mp3'), 'select promotes other mp3')
+assert(swapped.top.bpm === 70 && swapped.top.durationMs === 200_000, 'select promotes line media')
+assert(
+  swapped.entries.some((item) => item.url.includes('aaaaaaaaaaa') && item.durationMs === 245_000),
+  'old selection keeps previous top media on its line',
+)
+const withBare = addYoutubeSource(swapped.entries, swapped.top, 'https://www.youtube.com/watch?v=eeeeeeeeeee')
+const bareSelect = selectYoutubeSource(
+  withBare.entries,
+  withBare.top,
+  withBare.entries.findIndex((item) => item.url.includes('eeeeeeeeeee')),
+)
+assert(bareSelect.top.audioUrl === '' && bareSelect.needsDuration, 'bare select clears mp3 and needs duration')
+assert(bareSelect.top.durationMs === 200_000, 'duration falls back to previous top while looking up')
+
+const removed = removeSourceEntry(multiSong.sources, {
+  bpm: multiSong.bpm ?? null,
+  durationMs: multiSong.durationMs ?? null,
+  audioUrl: multiSong.audioUrl ?? '',
+}, selectedYoutubeIndex(multiSong.sources))
+assert(removed.entries.some((item) => item.url.includes('bbbbbbbbbbb')), 'remove keeps other youtube')
+assert(removed.top.audioUrl.includes('/2.mp3'), 'remove reselects next youtube media')
+
+const added = addYoutubeSource(multiSong.sources, {
+  bpm: multiSong.bpm ?? null,
+  durationMs: multiSong.durationMs ?? null,
+  audioUrl: multiSong.audioUrl ?? '',
+}, 'https://www.youtube.com/watch?v=ccccccccccc')
+assert(added.entries.filter((item) => /youtu/.test(item.url)).length === 3, 'addYoutube appends')
+assert(added.entries.find((item) => item.selected)?.url.includes('aaaaaaaaaaa'), 'add does not steal selection')
+const again = addYoutubeSource(added.entries, added.top, 'https://youtu.be/aaaaaaaaaaa')
+assert(again.added === false, 'addYoutube dedupes by video id')
+
+const mediaOpts = songMediaSources(multiSong, 'https://youtu.be/bbbbbbbbbbb')
+assert(mediaOpts.options.length === 2, 'playback lists youtube options')
+assert(mediaOpts.youtubeId === 'bbbbbbbbbbb', 'pick drives youtube id')
+assert(mediaOpts.audioUrl?.includes('/2.mp3'), 'pick drives mp3')
+
+const serverAdd = applyChartMedia(multiMd, { addYoutubeUrl: 'https://www.youtube.com/watch?v=ddddddddddd' })
+const serverAddSong = parseChart(serverAdd, 'multi.song.md')
+assert(serverAddSong.sources.filter((item) => /youtu/.test(item.url)).length === 3, 'server addYoutubeUrl keeps others')
+assert(serverAddSong.sources.find((item) => item.selected)?.url.includes('aaaaaaaaaaa'), 'server add keeps selected')
+const serverSelect = applyChartMedia(multiMd, { selectYoutubeUrl: 'https://youtu.be/bbbbbbbbbbb' })
+const serverSelectSong = parseChart(serverSelect, 'multi.song.md')
+assert(serverSelectSong.audioUrl.includes('/2.mp3'), 'server selectYoutubeUrl swaps audio')
+assert(serverSelectSong.bpm === 70, 'server selectYoutubeUrl swaps bpm')
+
+const choMulti = applyChartMedia(
+  `{title: Multi}
+{artist: Demo}
+{bpm: 72}
+{duration_ms: 245000}
+{source: https://www.youtube.com/watch?v=aaaaaaaaaaa | YouTube}
+{source: https://youtu.be/bbbbbbbbbbb | En vivo}
+
+{start_of_verse}
+[C]hola
+{end_of_verse}
+`,
+  { selectYoutubeUrl: 'https://youtu.be/bbbbbbbbbbb', bpm: 70, durationMs: 200_000 },
+)
+assert(choMulti.includes('selected'), 'cho multi writes selected')
+assert(choMulti.includes('{bpm: 70}'), 'cho select updates bpm')
+void serializeSources
+
 const prefixCredit = foldComposerIntoArtist({ ...keySample, artist: 'Marcela Gándara', composer: 'Marcela Gándara / Vino Nuevo' })
 assert(prefixCredit.artist === 'Marcela Gándara / Vino Nuevo' && prefixCredit.composer === '', 'composer that extends the artist replaces it')
 const joinedCredit = foldComposerIntoArtist({ ...keySample, artist: 'Marcos Brunet', composer: 'Abbie Gamboa' })
@@ -226,6 +453,16 @@ const longer = parseChart(
 assert(!blocksFor(longer, null, 'byChords').some((block) => block.duplicateOf), 'a different line count stays open')
 assert(markdown.sections.some((section) => section.label === 'Verso'), 'plantilla says verso')
 assert(!markdown.sections.some((section) => /estrofa/i.test(section.label)), 'plantilla has no estrofa label')
+
+assert(usableJumpHeight(800, 120, 96, 24) === 800 - 120 - 96 - 24, 'usable jump height subtracts chrome')
+assert(usableJumpHeight(100, 80, 80) === 48, 'usable jump height has a floor')
+assert(sliceStartLines([40, 40, 40], 200).join(',') === '0', 'short parts stay one jump')
+assert(sliceStartLines([100, 100, 100, 100], 150).join(',') === '0,2', 'tall parts split into equal viewport targets')
+assert(sliceStartLines([80, 80, 80, 40], 150).join(',') === '0,2', 'last jump may be short')
+assert(sliceChipLabel('Verso 1', 0, 2) === 'Verso 1a' && sliceChipLabel('Verso 1', 1, 2) === 'Verso 1b', 'verso slices use 1a/1b')
+assert(sliceChipLabel('Coro', 0, 2) === 'Coro a', 'plain labels get a spaced letter')
+assert(sliceChipLabel('Verso 1', 0, 1) === 'Verso 1', 'single slice keeps the label')
+assert(sliceLetter(26) === 'aa', 'slice letters continue past z')
 
 const openC = diagramFor('C')
 assert(openC?.frets.join(',') === '-1,3,2,0,1,0', 'open C shape')
@@ -473,5 +710,119 @@ assert(pattern, '1-5-6m-2m comes from the stored sections')
 assert(pattern.reference.key === 'C' && (pattern.reference.section === 'Verso' || pattern.reference.section === 'Coro'), 'the example is one section in that key')
 assert(pattern.alternatives.length === 1 && pattern.alternatives[0]?.key === 'G' && pattern.alternatives[0]?.title === 'Tres', 'another key is another way to play it')
 assert(pattern.alternatives.every((item) => item.key !== 'C'), 'another song in the same key is not an example')
+
+{
+  const line = (chords: string[], lyric: string | null) => ({
+    chords: chords.map((raw, column) => ({ raw, column: column * 4, notes: [] })),
+    lyric,
+    notes: [],
+  })
+  const section = (id: string, label: string, repeat: number, lines: ReturnType<typeof line>[]) => ({
+    id,
+    label,
+    repeat,
+    notes: [],
+    lines,
+  })
+  const playSong = {
+    id: 'play',
+    title: 'Play',
+    artist: '',
+    composer: '',
+    key: 'G',
+    source: '',
+    sources: [{ url: 'https://youtu.be/dQw4w9WgXcQ', label: 'YouTube' }],
+    lyricsText: '',
+    versions: [],
+    sections: [
+      section('intro', 'Intro', 1, [line(['G', 'D', 'Em', 'C'], null)]),
+      section('verso', 'Verso', 1, [line(['G', 'D'], 'Uno dos'), line([], 'Tres cuatro')]),
+      section('coro', 'Coro', 2, [line(['C'], 'Cinco')]),
+    ],
+  }
+  const playBlocks = blocksFor(playSong, null)
+  // Lines × repeats: intro 1, verso 2, coro 1 × 2 = 5 units over 50 s.
+  // Duration mode uses duration_ms only — no YouTube/MP3 required.
+  const byDuration = buildTimeline({ blocks: playBlocks, settings: { pace: 'duration', useBpm: false }, durationMs: 50_000 })
+  assert(byDuration.basis === 'duration' && byDuration.totalMs === 50_000, 'duration timeline spans the song')
+  assert(effectiveAudio('off', songMediaSources({ ...playSong, audioUrl: '', durationMs: 50_000 })) === 'off', 'duration works with audio off')
+  assert(byDuration.blocks.map((block) => block.start).join(',') === '0,10000,30000', `duration starts ${byDuration.blocks.map((block) => block.start)}`)
+  assert(locate(byDuration, 5_000)?.chordIndex === 2, 'chords share an intro line evenly')
+  assert(locate(byDuration, 25_000)?.lineIndex === 1, 'second verse line')
+  const secondPass = locate(byDuration, 45_000)
+  assert(secondPass?.blockId === 'coro' && secondPass.pass === 2, 'repeat counts its passes')
+  assert(locate(byDuration, 50_000) === null, 'playback ends with the song')
+  assert(startOffset(byDuration, 'verso', 1) === 20_000, 'a slice starts at its line')
+  // BPM: intro 4 bars, verso 2 + 2, coro 2 × 2 = 12 bars at 120 = 24 s.
+  const byBpm = buildTimeline({ blocks: playBlocks, settings: { pace: 'tempo', useBpm: true }, bpm: 120, durationMs: 50_000 })
+  assert(byBpm.basis === 'bpm' && byBpm.totalMs === 24_000, `bpm timeline ${byBpm.totalMs}`)
+  const refined = buildTimeline({ blocks: playBlocks, settings: { pace: 'duration', useBpm: true }, bpm: 120, durationMs: 48_000 })
+  assert(refined.blocks[1]?.start === 16_000, 'bpm weighs bars inside the duration')
+  const fromMedia = buildTimeline({ blocks: playBlocks, settings: { pace: 'duration', useBpm: false }, durationMs: 50_000, mediaMs: 60_000 })
+  assert(fromMedia.basis === 'media' && fromMedia.totalMs === 60_000, 'loaded audio length wins')
+  const estimate = buildTimeline({ blocks: playBlocks, settings: { pace: 'duration', useBpm: true } })
+  assert(estimate.basis === 'estimate' && estimate.totalMs > 0, 'no duration or bpm still plays')
+  assert(youtubeVideoId('https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=3') === 'dQw4w9WgXcQ', 'watch link id')
+  assert(youtubeVideoId('https://youtu.be/dQw4w9WgXcQ') === 'dQw4w9WgXcQ', 'short link id')
+  assert(youtubeVideoId('https://music.youtube.com/watch?v=dQw4w9WgXcQ') === 'dQw4w9WgXcQ', 'music link id')
+  assert(youtubeVideoId('https://www.youtube.com/shorts/dQw4w9WgXcQ') === 'dQw4w9WgXcQ', 'shorts link id')
+  assert(youtubeVideoId('https://example.com/watch?v=dQw4w9WgXcQ') === null, 'not youtube')
+  const playMedia = songMediaSources({ ...playSong, audioUrl: '', bpm: null, durationMs: null })
+  assert(playMedia.youtubeId === 'dQw4w9WgXcQ', 'song media finds the YouTube source')
+  assert(effectiveAudio('mp3', playMedia) === 'off' && effectiveAudio('youtube', playMedia) === 'youtube', 'missing audio falls back to silence')
+  const starts = (timeline: { blocks: { start: number }[] }) => timeline.blocks.map((block) => block.start).join(',')
+  const dur = { pace: 'duration' as const, useBpm: false }
+  assert(partKeys([{ id: 'verso' }, { id: 'coro' }, { id: 'verso' }]).join(',') === 'verso,coro,verso~2', 'a part played again keys its occurrence')
+  const intro = buildTimeline({ blocks: playBlocks, settings: dur, durationMs: 54_000, introMs: 4_000 })
+  assert(intro.totalMs === 50_000 && starts(intro) === '0,10000,30000', `the intro comes off the length ${starts(intro)}`)
+  const marked = buildTimeline({ blocks: playBlocks, settings: dur, durationMs: 99_000, parts: { intro: 8000, verso: 20000, coro: 12000 } })
+  assert(marked.basis === 'marks' && starts(marked) === '0,8000,28000' && marked.totalMs === 40_000, `full marks win ${starts(marked)}`)
+  assert(marked.blocks[2]?.passMs === 6000 && marked.measured === 3, 'a measured repeat splits its passes')
+  const partial = buildTimeline({ blocks: playBlocks, settings: dur, durationMs: 48_000, parts: { intro: 8000 } })
+  assert(partial.basis === 'marks' && starts(partial) === '0,8000,28000', `the rest shares what is left ${starts(partial)}`)
+  const noLength = buildTimeline({ blocks: playBlocks, settings: dur, parts: { intro: 8000 } })
+  assert(noLength.blocks[1]?.start === 8000 && noLength.blocks[2]?.start === 24_000, 'without a length the measured rate sets the pace')
+  const tempoMarks = buildTimeline({ blocks: playBlocks, settings: { pace: 'tempo', useBpm: true }, bpm: 120, parts: { intro: 8000 } })
+  assert(tempoMarks.basis === 'bpm' && tempoMarks.totalMs === 24_000, 'tempo pace ignores marks')
+  const stray = buildTimeline({ blocks: playBlocks, settings: dur, durationMs: 50_000, parts: { puente: 9000 } })
+  assert(stray.basis === 'duration' && starts(stray) === '0,10000,30000', 'marks for missing parts change nothing')
+  const fromMarks = marksToParts(['intro', 'verso', 'coro'], [4000, 12_000, 32_000], 44_000)
+  assert(fromMarks.introMs === 4000 && Object.values(fromMarks.parts).join(',') === '8000,20000,12000', 'taps become part lengths')
+  assert(Object.keys(marksToParts(['intro', 'verso', 'coro'], [4000, null, 32_000], null).parts).length === 0, 'a missed tap skips its neighbours')
+  const cues = cuePoints(byDuration)
+  assert(cues.length === 4 && cues[3]?.at === 40_000 && cues[3]?.pass === 2, 'each pass of a repeat is a cue')
+  assert(cueIndexAt(cues, -1) === -1 && cueIndexAt(cues, 41_000) === 3, 'cue lookup')
+  assert(impliedBpm(refined) === 60 && impliedBpm(byDuration) === null, 'implied tempo only when bars are weighed')
+  assert(parsePlaybackSettings('{"pace":"parts"}').pace === 'tempo' && parsePlaybackSettings('junk').audio === 'off', 'old and broken settings load')
+  assert(formatClock(-4000) === '\u22120:04' && formatLead(4500) === '0:04,5' && formatLead(-1200) === '\u22120:01,2', 'clock formats')
+  const playTrack = { src: 'dQw4w9WgXcQ', introMs: 1000, parts: {} }
+  assert(referenceTrack({ youtube: playTrack }, 'off', playMedia) === playTrack, 'silent play borrows the YouTube marks')
+  assert(referenceTrack({ youtube: { ...playTrack, src: 'other123456' } }, 'youtube', playMedia) === null, 'marks from another video are stale')
+  const cleaned = songPlayback({ youtube: { src: 'x', introMs: -5.4, parts: { verso: 9000, 'bad key': 1, coro: 'x' } }, speed: 1 })
+  assert(JSON.stringify(cleaned) === '{"youtube":{"src":"x","introMs":-5,"parts":{"verso":9000}}}', `server cleans playback ${JSON.stringify(cleaned)}`)
+  assert(JSON.stringify(songPlayback('junk')) === '{}' && songPlayback({ speed: 3 }).speed === 2, 'junk and speed bounds')
+}
+
+{
+  const base = '{title: Base}\n{key: G}\n{bpm: 72}\n{start_of_verse: Verso}\n[G]Hola [C]mundo\n{end_of_verse}\n'
+  const mine = '{title: Mía}\n{key: G}\n{bpm: 80}\n{duration_ms: 200000}\n{start_of_verse: Verso}\n[G]Hola [D]mundo\n{end_of_verse}\n'
+  const changes = songFieldChanges(base, mine, 'prueba')
+  const fields = changes.map((change) => change.field)
+  assert(fields.includes('Título') && fields.includes('BPM') && fields.includes('Duración'), `diff fields ${fields}`)
+  assert(fields.includes('Parte: Verso') && !fields.includes('Tono'), `diff parts ${fields}`)
+  assert(changes.find((change) => change.field === 'Duración')?.after === '3:20', 'duration shows as m:ss')
+  assert(songFieldChanges(base, base, 'prueba').length === 0, 'same text has no changes')
+  const cho = '{title: Base}\n{artist: X}\n{key: G}\n{capo: 2}\n\n{start_of_verse: Verso}\n[G]Hola\n{end_of_verse}\n'
+  const md = '---\ntitle: Mía\nartist: Y\nkey: G\nbpm: 80\nsources:\n  - https://youtu.be/abc | YouTube\n---\n\n## Verso\n[G]Hola\n'
+  const intoCho = copyChartMedia(shareChartMeta(cho, md), md)
+  assert(intoCho.includes('{title: Mía}') && intoCho.includes('{artist: Y}') && intoCho.includes('{capo: 2}'), `meta into chordpro ${intoCho}`)
+  assert(intoCho.includes('youtu.be/abc') && intoCho.includes('80') && !intoCho.includes('{artist: X}'), `media into chordpro ${intoCho}`)
+  assert(parseChart(intoCho, 'x.cho').title === 'Mía' && intoCho.includes('[G]Hola'), 'chordpro keeps its parts')
+  const intoMd = shareChartMeta(md, cho)
+  assert(parseChart(intoMd, 'x.song.md').title === 'Base' && intoMd.includes('bpm: 80'), `identity only into markdown ${intoMd}`)
+  assert(shareChartMeta(cho, cho) === cho, 'same header leaves the text alone')
+  const rows = lineDiff('a\nb\nc', 'a\nx\nc')
+  assert(rows.map((row) => row.kind).join() === 'same,del,add,same', `line diff ${rows.map((row) => row.kind)}`)
+}
 
 console.log(`Parsed ${files.length} charts`)

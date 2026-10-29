@@ -2,9 +2,21 @@ import { handleApi } from '../server/app.ts'
 import { openD1, type D1Database } from '../server/d1.ts'
 import { ensureSchema } from '../server/seed.ts'
 
+type R2Bucket = {
+  put(
+    key: string,
+    value: ArrayBuffer | Uint8Array,
+    options?: { httpMetadata?: { contentType?: string } },
+  ): Promise<unknown>
+  get(key: string): Promise<{ arrayBuffer(): Promise<ArrayBuffer>; httpMetadata?: { contentType?: string } } | null>
+}
+
 type Env = {
   DB: D1Database
   SONGBOOK_ORIGIN?: string
+  YOUTUBE_API_KEY?: string
+  /** R2 bucket for MP3 blobs. audio_url stays a text pointer (/api/audio/…). */
+  AUDIO_BUCKET?: R2Bucket
 }
 
 let ready: Promise<void> | null = null
@@ -17,9 +29,13 @@ export default {
     if (!ready) ready = ensureSchema(openD1(env.DB))
     await ready
     if (url.pathname === '/' || url.pathname === '') {
-      return cors(text('Songbook API. Las rutas están en /api/.'), origin)
+      return cors(text('Songbook API. Las rutas van en /api/.'), origin)
     }
-    const response = await handleApi(openD1(env.DB), request)
+    const response = await handleApi(openD1(env.DB), request, {
+      YOUTUBE_API_KEY: env.YOUTUBE_API_KEY,
+      AUDIO_BUCKET: env.AUDIO_BUCKET,
+      // Worker cannot run yt-dlp — Admin Extraer MP3 stays blocked here.
+    })
     return cors(response, origin)
   },
 }

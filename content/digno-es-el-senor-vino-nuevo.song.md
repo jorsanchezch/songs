@@ -3,8 +3,11 @@ title: Digno es el Señor
 artist: Marcela Gándara
 key: A
 source: "https://chords.lacuerda.net/marcela_gandara/digno_es_el_senior.shtml"
+bpm: 141
+duration_ms: 584000
 sources:
   - https://chords.lacuerda.net/marcela_gandara/digno_es_el_senior.shtml | Cifra (Vino Nuevo)
+  - https://www.youtube.com/watch?v=7BVNNPHftbo | YouTube
 ---
 
 ## Intro {#intro}
