@@ -218,14 +218,20 @@ async function checkDeleteSurvivesSeed(files: { id: string; sourceText: string }
   const listed = await call(db, boss.token, 'PUT', '/api/setlists', {
     days: [0],
     setlists: [{ id: 'lista-borrar', name: 'Borrar', items: [{ songId: sample.id, semitones: 0 }] }],
+    history: [{ weekday: 0, serviceDate: '2026-10-19', items: [{ songId: sample.id, semitones: 1 }] }],
   })
-  assert(listed.status === 200, 'the song can sit on a list')
+  assert(listed.status === 200, 'the song can sit on a list and historial')
   const removed = await call(db, boss.token, 'DELETE', `/api/songs/${encodeURIComponent(sample.id)}`)
   assert(removed.status === 200 && removed.data.hidden === false, `delete removes the row ${JSON.stringify(removed.data)}`)
   assert(!(await db.get(`SELECT id FROM songs WHERE id = ?`, [sample.id])), 'the catalog row is gone')
   assert(await db.get(`SELECT id FROM deleted_songs WHERE id = ?`, [sample.id]), 'the id is remembered')
   const item = await db.get<{ n: number }>(`SELECT COUNT(*) AS n FROM setlist_items WHERE song_id = ?`, [sample.id])
   assert(Number(item?.n) === 0, 'a deleted song leaves the lists')
+  const historyItem = await db.get<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM day_list_history_items WHERE song_id = ?`,
+    [sample.id],
+  )
+  assert(Number(historyItem?.n) === 0, 'a deleted song leaves historial')
   const parts = await db.get<{ n: number }>(`SELECT COUNT(*) AS n FROM instrument_parts WHERE song_id = ?`, [sample.id])
   assert(Number(parts?.n) === 0, 'parts go with the song')
   await seedCatalog(db, files)

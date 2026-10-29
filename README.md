@@ -13,7 +13,7 @@ Abre http://127.0.0.1:4322/
 
 ## Publicar
 
-El workflow de GitHub Actions publica `dist` en GitHub Pages al empujar a `main`. El sitio sigue siendo estático. La base no vive en el navegador ni en Pages.
+Al empujar a `main`, GitHub Actions publica el frontend en GitHub Pages y el Worker en Cloudflare (`deploy-pages.yml` y `deploy-worker.yml`). El sitio de Pages es estático; la API vive en el Worker. Para el Worker hacen falta los secretos `CLOUDFLARE_API_TOKEN` y `CLOUDFLARE_ACCOUNT_ID` en el repositorio.
 
 ## Base de datos
 
