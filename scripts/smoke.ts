@@ -5,6 +5,12 @@ import { formatChord, transposeChordSymbol, transposeKeyName } from '../src/lib/
 import { applyEditingKey, applyOriginalKey, foldComposerIntoArtist, normalizeKeyText } from '../src/lib/draftSong.ts'
 import { keyChoices } from '../src/lib/theory.ts'
 import { blocksFor, headerChips, headerChipText, partKind } from '../src/lib/display.ts'
+import {
+  sliceChipLabel,
+  sliceLetter,
+  sliceStartLines,
+  usableJumpHeight,
+} from '../src/lib/viewportJumps.ts'
 import { diagramFor, shapesFor } from '../src/lib/guitar.ts'
 import { chartToCho, chartToSongMd, isBlockedPage, isPlainChordLine, songToMarkdown, wrapPlainChordLine } from '../src/lib/importChart.ts'
 import { shareLyrics } from '../server/lyrics.ts'
@@ -246,6 +252,16 @@ const longer = parseChart(
 assert(!blocksFor(longer, null, 'byChords').some((block) => block.duplicateOf), 'a different line count stays open')
 assert(markdown.sections.some((section) => section.label === 'Verso'), 'plantilla says verso')
 assert(!markdown.sections.some((section) => /estrofa/i.test(section.label)), 'plantilla has no estrofa label')
+
+assert(usableJumpHeight(800, 120, 96, 24) === 800 - 120 - 96 - 24, 'usable jump height subtracts chrome')
+assert(usableJumpHeight(100, 80, 80) === 48, 'usable jump height has a floor')
+assert(sliceStartLines([40, 40, 40], 200).join(',') === '0', 'short parts stay one jump')
+assert(sliceStartLines([100, 100, 100, 100], 150).join(',') === '0,2', 'tall parts split into equal viewport targets')
+assert(sliceStartLines([80, 80, 80, 40], 150).join(',') === '0,2', 'last jump may be short')
+assert(sliceChipLabel('Verso 1', 0, 2) === 'Verso 1a' && sliceChipLabel('Verso 1', 1, 2) === 'Verso 1b', 'verso slices use 1a/1b')
+assert(sliceChipLabel('Coro', 0, 2) === 'Coro a', 'plain labels get a spaced letter')
+assert(sliceChipLabel('Verso 1', 0, 1) === 'Verso 1', 'single slice keeps the label')
+assert(sliceLetter(26) === 'aa', 'slice letters continue past z')
 
 const openC = diagramFor('C')
 assert(openC?.frets.join(',') === '-1,3,2,0,1,0', 'open C shape')

@@ -48,6 +48,13 @@ import { useSongs } from '@/hooks/useSongs'
 import { can, isStaff } from '@/lib/access'
 import { neighborSong, setSetlistSemitones, songPath } from '@/lib/setlists'
 import { cn } from '@/lib/utils'
+import {
+  sliceChipLabel,
+  sliceKey,
+  sliceStartLines,
+  usableJumpHeight,
+  type ViewportNavStep,
+} from '@/lib/viewportJumps'
 
 export function SongView() {
   const { songId = '' } = useParams()
@@ -65,8 +72,14 @@ export function SongView() {
   const [headerOpen, setHeaderOpen] = useState(false)
   const [announce, setAnnounce] = useState('')
   const [headerHeight, setHeaderHeight] = useState(0)
+  const [footerHeight, setFooterHeight] = useState(0)
+  const [viewportHeight, setViewportHeight] = useState(() =>
+    typeof window === 'undefined' ? 800 : window.innerHeight,
+  )
   const [chartWidth, setChartWidth] = useState(0)
   const [chPerPx, setChPerPx] = useState(0.6)
+  const [lineHeights, setLineHeights] = useState<Record<string, number[]>>({})
+  const [stepKey, setStepKey] = useState<string | null>(null)
   const headerRef = useRef<HTMLElement>(null)
   const chartRef = useRef<HTMLDivElement>(null)
   const probeRef = useRef<HTMLSpanElement>(null)
@@ -95,6 +108,8 @@ export function SongView() {
     setHeaderOpen(false)
     setVersionId(null)
     setCurrent(null)
+    setStepKey(null)
+    setLineHeights({})
     setSettings((prev) => {
       if (prev.showChords) return prev
       const next = { ...prev, showChords: true }
@@ -109,11 +124,27 @@ export function SongView() {
     [chart, settings.fold, version],
   )
   const nav = useMemo(() => headerChips(blocks, foldGroupsParts(settings.fold)), [blocks, settings.fold])
+  const jumpHeight = usableJumpHeight(viewportHeight, headerHeight, footerHeight)
+  const steps = useMemo(
+    () =>
+      buildNavSteps(nav, blocks, {
+        enabled: settings.viewportJumps,
+        lineHeights,
+        usableHeight: jumpHeight,
+      }),
+    [blocks, jumpHeight, lineHeights, nav, settings.viewportJumps],
+  )
 
   const activeId =
     current && blocks.some((block) => block.id === current)
       ? current
       : (blocks[0]?.id ?? null)
+  const activeStep =
+    steps.find((step) => step.key === stepKey) ??
+    steps.find((step) => step.blockId === activeId || step.chipIds.includes(activeId ?? '')) ??
+    steps[0] ??
+    null
+  const activeStepKey = activeStep?.key ?? null
 
   useEffect(() => {
     if (!version) return
@@ -155,12 +186,36 @@ export function SongView() {
     update({ semitones: { ...settings.semitones, [song.id]: wrapped } })
   }
 
+  const goStep = (step: ViewportNavStep) => {
+    const block = blocks.find((item) => item.id === step.blockId)
+    if (!block) return
+    const shown = steps.findIndex((item) => item.key === step.key)
+    setCurrent(step.blockId)
+    setStepKey(step.key)
+    setAnnounce(
+      `${step.label}${block.repeat > 1 ? ` por ${block.repeat}` : ''}, parte ${shown + 1} de ${steps.length}`,
+    )
+    const smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    spyPausedUntil.current = Date.now() + (smooth ? 900 : 100)
+    const target =
+      step.lineIndex == null
+        ? document.getElementById(`sec-${step.blockId}`)
+        : document.getElementById(`line-${step.blockId}-${step.lineIndex}`)
+    target?.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', block: 'start' })
+  }
+
   const go = (id: string) => {
+    const step = steps.find((item) => item.blockId === id || item.key === id) ?? steps.find((item) => item.chipIds.includes(id))
+    if (step) {
+      goStep(step)
+      return
+    }
     const index = blocks.findIndex((block) => block.id === id)
     const block = blocks[index]
     if (!block) return
     const shown = nav.findIndex((chip) => chip.id === id || chip.ids.includes(id))
     setCurrent(id)
+    setStepKey(id)
     setAnnounce(`${block.label}${block.repeat > 1 ? ` por ${block.repeat}` : ''}, parte ${shown + 1} de ${nav.length}`)
     const smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches
     spyPausedUntil.current = Date.now() + (smooth ? 900 : 100)
@@ -175,6 +230,61 @@ export function SongView() {
     observer.observe(header)
     return () => observer.disconnect()
   })
+
+  useLayoutEffect(() => {
+    const footer = footerRef.current
+    if (!footer) return
+    const observer = new ResizeObserver(() => setFooterHeight(footer.offsetHeight))
+    observer.observe(footer)
+    return () => observer.disconnect()
+  })
+
+  useEffect(() => {
+    const onResize = () => setViewportHeight(window.innerHeight)
+    onResize()
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+
+  // Line heights feed equal viewport slices when the live-jump option is on.
+  useLayoutEffect(() => {
+    if (!settings.viewportJumps) {
+      setLineHeights({})
+      return
+    }
+    const measure = () => {
+      const next: Record<string, number[]> = {}
+      for (const block of blocks) {
+        const earlier = block.duplicateOfId
+          ? blocks.find((item) => item.id === block.duplicateOfId)?.section
+          : undefined
+        const lines = (earlier ?? block.section).lines
+        next[block.id] = lines.map((_, lineIndex) => {
+          const el = document.getElementById(`line-${block.id}-${lineIndex}`)
+          return el?.offsetHeight ?? 0
+        })
+      }
+      setLineHeights((prev) => (sameHeightMap(prev, next) ? prev : next))
+    }
+    measure()
+    const chart = chartRef.current
+    const observer = chart ? new ResizeObserver(measure) : null
+    if (chart) observer?.observe(chart)
+    window.addEventListener('resize', measure)
+    return () => {
+      observer?.disconnect()
+      window.removeEventListener('resize', measure)
+    }
+  }, [
+    blocks,
+    settings.viewportJumps,
+    settings.fontSize,
+    settings.fold,
+    settings.showChords,
+    chartWidth,
+    headerHeight,
+    footerHeight,
+  ])
 
   // Scrolling by hand moves the current part too, so the footer never lies.
   useEffect(() => {
@@ -197,6 +307,16 @@ export function SongView() {
         }
         const id = blocks[index]?.id
         if (id) setCurrent((prev) => (prev === id ? prev : id))
+
+        if (!settings.viewportJumps || !steps.length) return
+        let stepIndex = 0
+        steps.forEach((step, position) => {
+          const top = stepTargetTop(step, id ?? step.blockId)
+          if (top != null && top <= line) stepIndex = position
+        })
+        if (atBottom) stepIndex = Math.max(stepIndex, steps.findIndex((step) => step.key === stepKey))
+        const nextKey = steps[Math.max(0, stepIndex)]?.key
+        if (nextKey) setStepKey((prev) => (prev === nextKey ? prev : nextKey))
       })
     }
     window.addEventListener('scroll', onScroll, { passive: true })
@@ -204,7 +324,7 @@ export function SongView() {
       cancelAnimationFrame(frame)
       window.removeEventListener('scroll', onScroll)
     }
-  }, [blocks, current, headerHeight])
+  }, [blocks, current, headerHeight, settings.viewportJumps, stepKey, steps])
 
   // When the end of the current part is on screen, the change is coming: the footer says so.
   useEffect(() => {
@@ -212,8 +332,21 @@ export function SongView() {
     const check = () => {
       cancelAnimationFrame(frame)
       frame = requestAnimationFrame(() => {
-        const section = activeId ? document.getElementById(`sec-${activeId}`) : null
         const footerTop = footerRef.current?.getBoundingClientRect().top ?? window.innerHeight
+        if (settings.viewportJumps && activeStep) {
+          const stepIndex = steps.findIndex((step) => step.key === activeStep.key)
+          const next = stepIndex >= 0 ? steps[stepIndex + 1] : undefined
+          if (!next) {
+            setNearEnd(false)
+            return
+          }
+          const blockId =
+            activeId && next.chipIds.includes(activeId) ? activeId : next.blockId
+          const top = stepTargetTop(next, blockId)
+          setNearEnd(top != null && top <= footerTop)
+          return
+        }
+        const section = activeId ? document.getElementById(`sec-${activeId}`) : null
         const lastChip = nav[nav.length - 1]
         const last = !lastChip?.ids.includes(activeId ?? '')
         setNearEnd(Boolean(section && last && section.getBoundingClientRect().bottom <= footerTop))
@@ -227,7 +360,7 @@ export function SongView() {
       window.removeEventListener('scroll', check)
       window.removeEventListener('resize', check)
     }
-  }, [activeId, nav])
+  }, [activeId, activeStep, nav, settings.viewportJumps, steps])
 
   // Keep the current part chip in view in the scrolling row.
   useEffect(() => {
@@ -238,7 +371,7 @@ export function SongView() {
     if (left < row.scrollLeft || left + chip.offsetWidth > row.scrollLeft + row.clientWidth) {
       row.scrollTo({ left: Math.max(0, left - 16), behavior: 'auto' })
     }
-  }, [activeId])
+  }, [activeId, activeStepKey])
 
   // The chart fits the width, so nothing scrolls sideways mid-song.
   useLayoutEffect(() => {
@@ -280,9 +413,12 @@ export function SongView() {
   }, [])
 
   const stepSection = (direction: -1 | 1) => {
-    const index = nav.findIndex((chip) => chip.ids.includes(activeId ?? ''))
-    const next = nav[Math.max(0, index) + direction]
-    if (next) go(next.id)
+    const index = Math.max(
+      0,
+      steps.findIndex((step) => step.key === activeStepKey || step.chipIds.includes(activeId ?? '')),
+    )
+    const next = steps[index + direction]
+    if (next) goStep(next)
   }
 
   useEffect(() => {
@@ -302,10 +438,10 @@ export function SongView() {
       }
       const partNumber = Number(event.key)
       if (event.key.length === 1 && partNumber >= 1 && partNumber <= 9) {
-        const block = nav[partNumber - 1]
-        if (!block) return
+        const step = steps[partNumber - 1]
+        if (!step) return
         event.preventDefault()
-        go(block.id)
+        goStep(step)
         return
       }
       // Bluetooth page turner pedals send PageUp and PageDown.
@@ -317,7 +453,7 @@ export function SongView() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [blocks, activeId, nav])
+  }, [activeId, activeStepKey, blocks, steps])
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -380,18 +516,20 @@ export function SongView() {
   }
 
   const soundingKey = transposeKeyName((chart ?? song).key, semitones)
-  const partIndex = Math.max(0, nav.findIndex((chip) => chip.ids.includes(activeId ?? '')))
-  const currentChip = nav[partIndex]
-  const partLabel = currentChip ? headerChipText(currentChip) : ''
-  const partTotal = nav.length
+  const partIndex = Math.max(
+    0,
+    steps.findIndex((step) => step.key === activeStepKey || step.chipIds.includes(activeId ?? '')),
+  )
+  const partLabel = activeStep?.label ?? ''
+  const partTotal = steps.length
   const partCountLabel =
     partLabel && partTotal > 0 ? `${partLabel} ${partIndex + 1}/${partTotal}` : partLabel
   const songKey = (chart ?? song).key
   const spelling = settings.spelling
   const slashAsDegree = isGuitar(instrument) && settings.slashAsDegree
   const showChord = (raw: string) => formatChord(raw, songKey, semitones, spelling, slashAsDegree)
-  const nextChip = nav[partIndex + 1]
-  const nextBlock = nextChip ? blocks.find((block) => block.id === nextChip.id) : undefined
+  const nextStep = steps[partIndex + 1]
+  const nextBlock = nextStep ? blocks.find((block) => block.id === nextStep.blockId) : undefined
   const nextChords = nextBlock
     ? chordSequence(nextBlock.section.lines)
         .slice(0, 4)
@@ -694,6 +832,16 @@ export function SongView() {
               </Button>
             </WithHint>
             <FoldToggle value={settings.fold} onChange={(fold) => update({ fold })} />
+            <WithHint text={VIEWPORT_JUMPS_HINT}>
+              <Button
+                variant={settings.viewportJumps ? 'default' : 'outline'}
+                aria-pressed={settings.viewportJumps}
+                title={VIEWPORT_JUMPS_HINT}
+                onClick={() => update({ viewportJumps: !settings.viewportJumps })}
+              >
+                Saltos por pantalla
+              </Button>
+            </WithHint>
           </div>
           <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Marcas de la cifra">
             {NOTE_TYPES.map((type) => {
@@ -733,6 +881,7 @@ export function SongView() {
                   onClick={() => {
                     setVersionId(item.id)
                     setCurrent(null)
+                    setStepKey(null)
                   }}
                 >
                   {item.label}
@@ -745,17 +894,18 @@ export function SongView() {
           )}
 
           <nav ref={chipsRef} aria-label="Partes de la canción" className="flex gap-1.5 overflow-x-auto pb-1">
-            {nav.map((chip, index) => {
-              const kind = partKind(chip.label)
-              const active = chip.ids.includes(activeId ?? '')
+            {steps.map((step, index) => {
+              const kind = partKind(step.label)
+              const active = step.key === activeStepKey
+              const chip = nav.find((item) => item.id === step.blockId || item.ids.includes(step.blockId))
               return (
                 <button
-                  key={chip.id}
+                  key={step.key}
                   type="button"
                   aria-current={active ? 'step' : undefined}
                   aria-keyshortcuts={index < 9 ? String(index + 1) : undefined}
-                  title={partHint(chip.label, chip.copies, chip.repeat, index)}
-                  onClick={() => go(chip.id)}
+                  title={partHint(step.label, chip?.copies ?? 1, chip?.repeat ?? 1, index)}
+                  onClick={() => goStep(step)}
                   className={cn(
                     'inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-sm focus-visible:ring-[3px] focus-visible:ring-ring/60 focus-visible:outline-none',
                     active ? 'border-primary bg-primary text-primary-foreground' : 'bg-card',
@@ -765,7 +915,7 @@ export function SongView() {
                     <span className={cn('size-1.5 rounded-full', active ? 'bg-primary-foreground' : kindPip(kind))} />
                   )}
                   {index < 9 && <Kbd>{index + 1}</Kbd>}
-                  {headerChipText(chip)}
+                  {step.label}
                 </button>
               )
             })}
@@ -898,21 +1048,26 @@ export function SongView() {
                 />
                 <div className="overflow-x-auto">
                   {lines.map((line, lineIndex) => (
-                    <ChartRow
+                    <div
                       key={`${block.id}-${lineIndex}`}
-                      block={shown}
-                      lineIndex={lineIndex}
-                      showChords={settings.showChords || line.lyric == null}
-                      showLyrics={showLyrics}
-                      spelling={spelling}
-                      slashAsDegree={slashAsDegree}
-                      semitones={semitones}
-                      songKey={(chart ?? song).key}
-                      visible={settings.visibleNotes}
-                      openNote={openNote}
-                      onToggle={setOpenNote}
-                      wrapAt={wrapAt}
-                    />
+                      id={`line-${block.id}-${lineIndex}`}
+                      style={{ scrollMarginTop: `${headerHeight + 8}px` }}
+                    >
+                      <ChartRow
+                        block={shown}
+                        lineIndex={lineIndex}
+                        showChords={settings.showChords || line.lyric == null}
+                        showLyrics={showLyrics}
+                        spelling={spelling}
+                        slashAsDegree={slashAsDegree}
+                        semitones={semitones}
+                        songKey={(chart ?? song).key}
+                        visible={settings.visibleNotes}
+                        openNote={openNote}
+                        onToggle={setOpenNote}
+                        wrapAt={wrapAt}
+                      />
+                    </div>
                   ))}
                   {block.section.sameAs && block.section.lines.length === 0 && (
                     <p className="font-sans text-[0.65em] text-muted-foreground">
@@ -984,26 +1139,21 @@ export function SongView() {
             aria-valuenow={partTotal ? Math.max(partIndex + 1, 1) : 1}
             aria-valuetext={partLabel ? `${partLabel}, parte ${Math.max(partIndex + 1, 1)} de ${partTotal}` : undefined}
           >
-            {/* One segment per section the current fold still shows. */}
-            {nav.map((chip, index) => {
-              const weight = blocks
-                .filter((block) => chip.ids.includes(block.id))
-                .reduce((sum, block) => sum + Math.max(1, block.section.lines.length) * Math.max(1, block.repeat), 0)
-              return (
-                <span
-                  key={chip.id}
-                  className={cn(
-                    'rounded-full transition-[height,background-color] motion-reduce:transition-none',
-                    index === partIndex
-                      ? 'h-2.5 bg-primary'
-                      : index < partIndex
-                        ? 'h-1.5 bg-primary/45'
-                        : 'h-1.5 bg-muted-foreground/30',
-                  )}
-                  style={{ flexGrow: Math.max(1, weight), flexBasis: 0 }}
-                />
-              )
-            })}
+            {/* One segment per nav step (part, or viewport slice when that option is on). */}
+            {steps.map((step, index) => (
+              <span
+                key={step.key}
+                className={cn(
+                  'rounded-full transition-[height,background-color] motion-reduce:transition-none',
+                  index === partIndex
+                    ? 'h-2.5 bg-primary'
+                    : index < partIndex
+                      ? 'h-1.5 bg-primary/45'
+                      : 'h-1.5 bg-muted-foreground/30',
+                )}
+                style={{ flexGrow: Math.max(1, step.weight), flexBasis: 0 }}
+              />
+            ))}
           </div>
           <div className="flex items-stretch gap-2">
           <Button
@@ -1033,10 +1183,10 @@ export function SongView() {
                 nearEnd ? 'bg-primary/20 py-0.5 text-sm text-foreground ring-1 ring-primary' : 'text-muted-foreground',
               )}
             >
-              {nextBlock ? (
+              {nextStep ? (
                 <>
-                  Sigue <span className="font-semibold text-foreground">{nextBlock.label}</span>
-                  {nextBlock.repeat > 1 ? ` ×${nextBlock.repeat}` : ''}
+                  Sigue <span className="font-semibold text-foreground">{nextStep.label}</span>
+                  {nextBlock && nextBlock.repeat > 1 ? ` ×${nextBlock.repeat}` : ''}
                   {nextChords.length > 0 && (
                     <span className="ml-1.5 font-mono text-chart-chord">{nextChords.join(' ')}</span>
                   )}
@@ -1048,9 +1198,9 @@ export function SongView() {
           </p>
           <Button
             size="lg"
-            aria-label={nextBlock ? `Parte siguiente: ${nextBlock.label}` : 'Parte siguiente'}
+            aria-label={nextStep ? `Parte siguiente: ${nextStep.label}` : 'Parte siguiente'}
             aria-keyshortcuts="ArrowRight PageDown"
-            disabled={!nextChip}
+            disabled={!nextStep}
             onClick={() => stepSection(1)}
           >
             <Kbd>→</Kbd>
@@ -1067,6 +1217,76 @@ export function SongView() {
 const SHARE_HINT =
   'Una copia personal se puede compartir con todos o con una persona para que la vean. No publica el catálogo.'
 const USER_HINT = 'Una persona que entra con su nombre. Tiene un rol: dueño, admin o lectura.'
+const VIEWPORT_JUMPS_HINT =
+  'En vivo, parte las partes largas en saltos del alto de la pantalla (menos cabecera y pie). Anterior, Siguiente y las flechas avanzan esos trozos; los chips pueden verse como Verso 1a, 1b… No cambia cómo se muestra la cifra ni los modos de plegado.'
+
+function buildNavSteps(
+  chips: ReturnType<typeof headerChips>,
+  blocks: DisplayBlock[],
+  options: {
+    enabled: boolean
+    lineHeights: Record<string, number[]>
+    usableHeight: number
+  },
+): ViewportNavStep[] {
+  const steps: ViewportNavStep[] = []
+  for (const chip of chips) {
+    const block = blocks.find((item) => item.id === chip.id) ?? blocks.find((item) => chip.ids.includes(item.id))
+    if (!block) continue
+    const baseLabel = headerChipText(chip)
+    const weight = blocks
+      .filter((item) => chip.ids.includes(item.id))
+      .reduce((sum, item) => sum + Math.max(1, item.section.lines.length) * Math.max(1, item.repeat), 0)
+    if (!options.enabled) {
+      steps.push({
+        key: chip.id,
+        blockId: chip.id,
+        lineIndex: null,
+        label: baseLabel,
+        chipIds: chip.ids,
+        weight: Math.max(1, weight),
+      })
+      continue
+    }
+    const heights = options.lineHeights[block.id] ?? []
+    const starts = heights.length ? sliceStartLines(heights, options.usableHeight) : [0]
+    const count = starts.length
+    starts.forEach((lineIndex, sliceIndex) => {
+      steps.push({
+        key: count > 1 ? sliceKey(block.id, lineIndex) : chip.id,
+        blockId: chip.id,
+        lineIndex: sliceIndex === 0 ? null : lineIndex,
+        label: sliceChipLabel(baseLabel, sliceIndex, count),
+        chipIds: chip.ids,
+        weight: Math.max(1, weight / count),
+      })
+    })
+  }
+  return steps
+}
+
+function sameHeightMap(prev: Record<string, number[]>, next: Record<string, number[]>): boolean {
+  const prevKeys = Object.keys(prev)
+  const nextKeys = Object.keys(next)
+  if (prevKeys.length !== nextKeys.length) return false
+  for (const key of nextKeys) {
+    const a = prev[key]
+    const b = next[key]
+    if (!a || !b || a.length !== b.length) return false
+    for (let i = 0; i < a.length; i++) {
+      if (a[i] !== b[i]) return false
+    }
+  }
+  return true
+}
+
+function stepTargetTop(step: ViewportNavStep, blockId: string): number | null {
+  const el =
+    step.lineIndex == null
+      ? document.getElementById(`sec-${blockId}`)
+      : document.getElementById(`line-${blockId}-${step.lineIndex}`)
+  return el?.getBoundingClientRect().top ?? null
+}
 
 function InfoTip({ label, text }: { label: string; text: string }) {
   const [open, setOpen] = useState(false)
