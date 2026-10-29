@@ -9,12 +9,15 @@ import { isImmutableAdmin, isStaff, roleLabel, type Role } from '@/lib/access'
 import {
   createPerson,
   getAdmin,
+  getAudioExtract,
   getMediaBackfill,
   removePerson,
+  runAudioExtract,
   runMediaBackfill,
   updatePerson,
   type AdminOverview,
   type AdminPerson,
+  type AudioExtractReport,
   type MediaBackfillReport,
 } from '@/lib/api'
 
@@ -290,14 +293,17 @@ function AdminPanel() {
 function MediaBackfillPanel() {
   const [status, setStatus] = useState<MediaBackfillReport | null>(null)
   const [report, setReport] = useState<MediaBackfillReport | null>(null)
+  const [extract, setExtract] = useState<AudioExtractReport | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
     let cancel = false
-    void getMediaBackfill()
-      .then((next) => {
-        if (!cancel) setStatus(next)
+    void Promise.all([getMediaBackfill(), getAudioExtract()])
+      .then(([next, audio]) => {
+        if (cancel) return
+        setStatus(next)
+        setExtract(audio)
       })
       .catch((reason) => {
         if (!cancel) setError(reason instanceof Error ? reason.message : 'No pude leer el estado del relleno.')
@@ -321,16 +327,32 @@ function MediaBackfillPanel() {
     }
   }
 
+  const runExtract = async (dryRun: boolean) => {
+    setBusy(true)
+    setError('')
+    try {
+      const next = await runAudioExtract({ limit: 10, dryRun })
+      setExtract(next)
+      if (next.blocked) {
+        setError(next.note || 'Extracción bloqueada en este entorno.')
+      }
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'No pude extraer audio.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const shown = report ?? status
 
   return (
     <section className="flex flex-col gap-3">
-      <h2 className="font-semibold">Medios (YouTube / duración / BPM)</h2>
+      <h2 className="font-semibold">Medios (YouTube / duración / BPM / MP3)</h2>
       <p className="text-sm text-muted-foreground">
-        Rellena YouTube, duración y BPM en canciones que aún no tienen video. Escribe los campos en el texto del chart
-        (y en <code className="text-xs">catalog_source</code> / columnas) para que la reproducción los lea. Cupo ~100
-        búsquedas/día con la clave de YouTube; el resto queda en cola. MP3 solo si R2 está configurado (si no, usa la
-        subida del editor).
+        Rellena YouTube, duración y BPM (también en canciones que ya tienen video pero sin BPM). Escribe los campos en el
+        texto del chart para que la reproducción los lea. Cupo ~100 búsquedas/día con la clave de YouTube. Los MP3 van a
+        R2 (o <code className="text-xs">data/audio</code> en local), nunca a D1; <code className="text-xs">audio_url</code>{' '}
+        apunta al objeto. YouTube→MP3 necesita yt-dlp fuera del Worker.
       </p>
       {error && <p className="text-sm text-destructive">{error}</p>}
       {shown && (
@@ -344,8 +366,10 @@ function MediaBackfillPanel() {
           </p>
           <p className="mt-1 text-muted-foreground">
             Clave YouTube: {shown.apiKeyPresent ? 'sí' : 'no'} · R2: {shown.r2Configured ? 'sí' : 'no'}
+            {extract ? ` · Sin MP3 (con YouTube): ${extract.missingAudio}` : ''}
           </p>
           {shown.note && <p className="mt-2 text-muted-foreground">{shown.note}</p>}
+          {extract?.note && <p className="mt-2 text-muted-foreground">{extract.note}</p>}
           {report && (
             <p className="mt-2">
               Última corrida{report.dryRun ? ' (simulación)' : ''}: {report.updated} actualizadas, {report.skipped}{' '}
@@ -357,6 +381,7 @@ function MediaBackfillPanel() {
               {report.results.slice(0, 40).map((item) => (
                 <li key={`${item.id}:${item.status}:${item.youtubeUrl ?? ''}`}>
                   {item.title}: {item.status}
+                  {item.bpm != null ? ` · ${item.bpm} BPM` : ''}
                   {item.youtubeUrl ? ` → ${item.youtubeUrl}` : ''}
                   {item.reason ? ` (${item.reason})` : ''}
                 </li>
@@ -373,6 +398,16 @@ function MediaBackfillPanel() {
         <Button type="button" disabled={busy} onClick={() => void run(false)}>
           {busy ? <Loader2 className="animate-spin" /> : null}
           Completar lote
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={busy}
+          title="YouTube → MP3. En el Worker queda bloqueado; en local/CI con yt-dlp sí corre."
+          onClick={() => void runExtract(false)}
+        >
+          {busy ? <Loader2 className="animate-spin" /> : null}
+          Extraer MP3
         </Button>
       </div>
     </section>

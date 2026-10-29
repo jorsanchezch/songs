@@ -1,11 +1,11 @@
+import { audioStoreReady, r2Configured as bucketConfigured, type AudioStoreEnv } from './audioStorage.ts'
 import { applyChartMedia, chartHasYoutube } from './chartMedia.ts'
 import { chartMeta } from './meta.ts'
 import type { Sql } from './sql.ts'
-import { findYoutubeMedia, type YoutubeLookupEnv } from './youtubeMedia.ts'
+import { youtubeUrlFromChart } from './youtubeExtract.ts'
+import { enrichYoutubeVideo, findYoutubeMedia, youtubeVideoIdFromUrl, type YoutubeLookupEnv } from './youtubeMedia.ts'
 
-export type MediaBackfillEnv = YoutubeLookupEnv & {
-  AUDIO_BUCKET?: unknown
-}
+export type MediaBackfillEnv = YoutubeLookupEnv & AudioStoreEnv
 
 export type MediaBackfillOptions = {
   limit?: number
@@ -21,7 +21,7 @@ export type MediaBackfillSongResult = {
   youtubeUrl?: string
   durationMs?: number | null
   bpm?: number | null
-  audio?: 'unchanged' | 'skipped_no_r2' | 'skipped_no_extractor' | 'kept'
+  audio?: 'unchanged' | 'skipped_no_r2' | 'skipped_no_store' | 'skipped_no_extractor' | 'kept'
   via?: string
 }
 
@@ -57,7 +57,7 @@ type SongRow = {
 }
 
 export function r2Configured(env: MediaBackfillEnv): boolean {
-  return env.AUDIO_BUCKET != null
+  return bucketConfigured(env)
 }
 
 export async function mediaBackfillStatus(sql: Sql, env: MediaBackfillEnv): Promise<MediaBackfillReport> {
@@ -150,6 +150,30 @@ export async function runMediaBackfill(
     }
   }
 
+  // Second pass: songs that already have YouTube but still lack BPM (and duration when possible).
+  const bpmBudget = Math.max(0, limit - results.length)
+  if (bpmBudget > 0) {
+    const needBpm = (await songsMissingBpm(sql)).filter((song) => !results.some((item) => item.id === song.id))
+    for (const song of needBpm.slice(0, bpmBudget)) {
+      try {
+        const result = await enrichBpmOne(sql, env, song, { dryRun, apiKeyPresent })
+        results.push(result)
+        if (result.status === 'updated') updated += 1
+        else if (result.status === 'error') errors += 1
+        else skipped += 1
+        if (result.via === 'youtube_api') searchesUsed += 1
+      } catch (error) {
+        errors += 1
+        results.push({
+          id: song.id,
+          title: song.title,
+          status: 'error',
+          reason: error instanceof Error ? error.message : 'Error desconocido',
+        })
+      }
+    }
+  }
+
   const finalQueue = [...deferred, ...toQueue.filter((id) => !deferred.includes(id))]
 
   if (!dryRun) {
@@ -209,7 +233,9 @@ async function fillOne(
   let audio: MediaBackfillSongResult['audio'] = 'unchanged'
   let audioUrl = song.audio_url?.trim() ?? ''
   if (!audioUrl && opts.extractAudio) {
-    if (!opts.hasR2) audio = 'skipped_no_r2'
+    // Workers cannot run yt-dlp. Use `npm run media:extract-audio` or Admin → Extraer MP3 en Node.
+    if (!audioStoreReady(env)) audio = 'skipped_no_store'
+    else if (!opts.hasR2 && !env.AUDIO_DIR) audio = 'skipped_no_r2'
     else audio = 'skipped_no_extractor'
   } else if (audioUrl) {
     audio = 'kept'
@@ -305,6 +331,116 @@ async function songsMissingYoutube(sql: Sql): Promise<SongRow[]> {
   return rows.filter((row) => !chartHasYoutube(row.source_text) && !chartHasYoutube(row.catalog_source ?? ''))
 }
 
+async function songsMissingBpm(sql: Sql): Promise<SongRow[]> {
+  const rows = await sql.all<SongRow>(
+    `SELECT s.id, s.title, s.artist, s.origin, s.catalog_source, s.bpm, s.duration_ms, s.audio_url,
+            COALESCE(p.source_text, s.catalog_source, '') AS source_text
+     FROM songs s
+     LEFT JOIN instrument_parts p ON p.song_id = s.id AND p.instrument = 'guitar'
+     WHERE s.hidden = 0
+       AND (s.bpm IS NULL OR s.bpm <= 0)
+     ORDER BY s.title COLLATE NOCASE`,
+  )
+  return rows.filter((row) => chartHasYoutube(row.source_text) || chartHasYoutube(row.catalog_source ?? ''))
+}
+
+async function enrichBpmOne(
+  sql: Sql,
+  env: MediaBackfillEnv,
+  song: SongRow,
+  opts: { dryRun: boolean; apiKeyPresent: boolean },
+): Promise<MediaBackfillSongResult> {
+  const url =
+    youtubeUrlFromChart(song.source_text) || youtubeUrlFromChart(song.catalog_source) || ''
+  const videoId = youtubeVideoIdFromUrl(url)
+  if (!videoId) {
+    return { id: song.id, title: song.title, status: 'skipped', reason: 'Sin video id de YouTube.' }
+  }
+  const hit = await enrichYoutubeVideo(videoId, env)
+  if (!hit) {
+    return { id: song.id, title: song.title, status: 'skipped', reason: 'No pude leer el video.' }
+  }
+  const bpm = hit.bpm
+  const durationMs =
+    song.duration_ms != null && Number(song.duration_ms) > 0 ? Number(song.duration_ms) : hit.durationMs
+  if (bpm == null && (durationMs == null || song.duration_ms != null)) {
+    return {
+      id: song.id,
+      title: song.title,
+      status: 'skipped',
+      reason: opts.apiKeyPresent
+        ? 'El video no declara BPM en la descripción.'
+        : 'Sin YOUTUBE_API_KEY no se puede leer la descripción del video para BPM.',
+      via: hit.via,
+    }
+  }
+  if (opts.dryRun) {
+    return {
+      id: song.id,
+      title: song.title,
+      status: 'updated',
+      reason: 'dry-run',
+      youtubeUrl: hit.url,
+      durationMs,
+      bpm,
+      via: hit.via,
+    }
+  }
+  const patch = {
+    bpm: bpm ?? (song.bpm != null ? Number(song.bpm) : null),
+    durationMs: durationMs ?? null,
+    audioUrl: song.audio_url?.trim() || null,
+  }
+  const parts = await sql.all<{ instrument: string; source_text: string }>(
+    `SELECT instrument, source_text FROM instrument_parts WHERE song_id = ?`,
+    [song.id],
+  )
+  if (!parts.length) {
+    return { id: song.id, title: song.title, status: 'error', reason: 'Sin instrument_parts.' }
+  }
+  const now = new Date().toISOString()
+  let guitarText = song.source_text
+  await sql.transaction(async (tx) => {
+    for (const part of parts) {
+      const nextText = applyChartMedia(part.source_text, patch)
+      if (part.instrument === 'guitar') guitarText = nextText
+      await tx.run(
+        `UPDATE instrument_parts SET source_text = ?, revision = revision + 1 WHERE song_id = ? AND instrument = ?`,
+        [nextText, song.id, part.instrument],
+      )
+    }
+    const meta = chartMeta(guitarText, song.id)
+    const catalogSource =
+      song.origin === 'catalog' ? applyChartMedia(song.catalog_source || song.source_text, patch) : song.catalog_source
+    await tx.run(
+      `UPDATE songs SET title = ?, artist = ?, composer = ?, key_name = ?, source = ?, lyrics_text = ?, bpm = ?, duration_ms = ?, audio_url = ?, catalog_source = ?, updated_at = ?, revision = revision + 1 WHERE id = ?`,
+      [
+        meta.title || song.title,
+        meta.artist || song.artist,
+        meta.composer,
+        meta.key,
+        meta.source,
+        meta.lyrics,
+        meta.bpm,
+        meta.durationMs,
+        meta.audioUrl,
+        catalogSource,
+        now,
+        song.id,
+      ],
+    )
+  })
+  return {
+    id: song.id,
+    title: song.title,
+    status: 'updated',
+    youtubeUrl: hit.url,
+    durationMs: durationMs ?? null,
+    bpm: bpm ?? null,
+    via: hit.via,
+  }
+}
+
 function orderCandidates(missing: SongRow[], queue: string[]): SongRow[] {
   const byId = new Map(missing.map((song) => [song.id, song]))
   const ordered: SongRow[] = []
@@ -395,9 +531,13 @@ function noteFor(
     notes.push(`Procesadas ${budget} de ${missingCount}; el resto queda en cola por cupo/lote.`)
   }
   if (!hasR2) {
-    notes.push('R2 no configurado: no se extrae MP3; usa la ruta de subida/URL en el editor.')
+    notes.push(
+      'R2 no configurado: los MP3 no van a D1. Sube en el editor (almacén local en sqlite) o configura [[r2_buckets]] AUDIO_BUCKET. Para YouTube→MP3: npm run media:extract-audio.',
+    )
   } else {
-    notes.push('R2 está enlazado, pero este Worker no extrae audio de YouTube; deja audio_url vacío para subirlo a mano.')
+    notes.push(
+      'R2 está enlazado, pero el Worker no ejecuta yt-dlp. Extrae con npm run media:extract-audio (o Admin → Extraer MP3 en local) y sube el archivo; audio_url apunta al objeto en R2 vía /api/audio/….',
+    )
   }
   return notes.length ? notes.join(' ') : undefined
 }

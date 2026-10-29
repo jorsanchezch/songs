@@ -48,6 +48,7 @@ const response = await handleApi(
   {
     YOUTUBE_API_KEY: process.env.YOUTUBE_API_KEY,
     AUDIO_BUCKET: process.env.SONGBOOK_AUDIO_BUCKET ? { configured: true } : undefined,
+    AUDIO_DIR: process.env.SONGBOOK_AUDIO_DIR,
   },
 )
 const report = await response.json()

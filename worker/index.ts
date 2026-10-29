@@ -2,12 +2,21 @@ import { handleApi } from '../server/app.ts'
 import { openD1, type D1Database } from '../server/d1.ts'
 import { ensureSchema } from '../server/seed.ts'
 
+type R2Bucket = {
+  put(
+    key: string,
+    value: ArrayBuffer | Uint8Array,
+    options?: { httpMetadata?: { contentType?: string } },
+  ): Promise<unknown>
+  get(key: string): Promise<{ arrayBuffer(): Promise<ArrayBuffer>; httpMetadata?: { contentType?: string } } | null>
+}
+
 type Env = {
   DB: D1Database
   SONGBOOK_ORIGIN?: string
   YOUTUBE_API_KEY?: string
-  /** Optional R2 bucket for future MP3 hosting. When absent, backfill skips extract. */
-  AUDIO_BUCKET?: unknown
+  /** R2 bucket for MP3 blobs. audio_url stays a text pointer (/api/audio/…). */
+  AUDIO_BUCKET?: R2Bucket
 }
 
 let ready: Promise<void> | null = null
@@ -25,6 +34,7 @@ export default {
     const response = await handleApi(openD1(env.DB), request, {
       YOUTUBE_API_KEY: env.YOUTUBE_API_KEY,
       AUDIO_BUCKET: env.AUDIO_BUCKET,
+      // Worker cannot run yt-dlp — Admin Extraer MP3 stays blocked here.
     })
     return cors(response, origin)
   },

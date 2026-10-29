@@ -218,14 +218,20 @@ async function checkDeleteSurvivesSeed(files: { id: string; sourceText: string }
   const listed = await call(db, boss.token, 'PUT', '/api/setlists', {
     days: [0],
     setlists: [{ id: 'lista-borrar', name: 'Borrar', items: [{ songId: sample.id, semitones: 0 }] }],
+    history: [{ weekday: 0, serviceDate: '2026-10-19', items: [{ songId: sample.id, semitones: 1 }] }],
   })
-  assert(listed.status === 200, 'the song can sit on a list')
+  assert(listed.status === 200, 'the song can sit on a list and historial')
   const removed = await call(db, boss.token, 'DELETE', `/api/songs/${encodeURIComponent(sample.id)}`)
   assert(removed.status === 200 && removed.data.hidden === false, `delete removes the row ${JSON.stringify(removed.data)}`)
   assert(!(await db.get(`SELECT id FROM songs WHERE id = ?`, [sample.id])), 'the catalog row is gone')
   assert(await db.get(`SELECT id FROM deleted_songs WHERE id = ?`, [sample.id]), 'the id is remembered')
   const item = await db.get<{ n: number }>(`SELECT COUNT(*) AS n FROM setlist_items WHERE song_id = ?`, [sample.id])
   assert(Number(item?.n) === 0, 'a deleted song leaves the lists')
+  const historyItem = await db.get<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM day_list_history_items WHERE song_id = ?`,
+    [sample.id],
+  )
+  assert(Number(historyItem?.n) === 0, 'a deleted song leaves historial')
   const parts = await db.get<{ n: number }>(`SELECT COUNT(*) AS n FROM instrument_parts WHERE song_id = ?`, [sample.id])
   assert(Number(parts?.n) === 0, 'parts go with the song')
   await seedCatalog(db, files)
@@ -525,6 +531,25 @@ async function checkPasswords(files: { id: string; sourceText: string }[]) {
 {
   const { applyChartMedia } = await import('../server/chartMedia.ts')
   const owner = await signIn(sql, 'Jorge Sanchez')
+  // Every catalog chart ships with YouTube now; take it off one so backfill has work.
+  const bare = await sql.get<{ id: string; catalog_source: string }>(
+    `SELECT id, catalog_source FROM songs WHERE origin = 'catalog' AND hidden = 0 ORDER BY id LIMIT 1`,
+  )
+  assert(bare, 'a catalog song to strip')
+  await sql.run(`UPDATE songs SET catalog_source = ? WHERE id = ?`, [
+    applyChartMedia(bare.catalog_source, { youtubeUrl: null }),
+    bare.id,
+  ])
+  for (const part of await sql.all<{ instrument: string; source_text: string }>(
+    `SELECT instrument, source_text FROM instrument_parts WHERE song_id = ?`,
+    [bare.id],
+  )) {
+    await sql.run(`UPDATE instrument_parts SET source_text = ? WHERE song_id = ? AND instrument = ?`, [
+      applyChartMedia(part.source_text, { youtubeUrl: null }),
+      bare.id,
+      part.instrument,
+    ])
+  }
   const status = await call(sql, owner.token, 'GET', '/api/admin/media-backfill')
   assert(status.status === 200, `media backfill status ${status.status}`)
   assert(typeof status.data.missingBefore === 'number' && (status.data.missingBefore as number) > 0, 'songs missing youtube')
@@ -570,6 +595,17 @@ async function checkPasswords(files: { id: string; sourceText: string }[]) {
     (after.data.missingBefore as number) < (status.data.missingBefore as number),
     'missing youtube count drops after chart write',
   )
+
+  const playback = { youtube: { src: 'backfilltest1', introMs: 4000, parts: { verso: 20_000 } } }
+  const before = await sql.get<{ revision: number }>(`SELECT revision FROM songs WHERE id = ?`, [sample.id])
+  const saved = await call(sql, owner.token, 'PUT', `/api/songs/${encodeURIComponent(sample.id)}/playback`, { playback })
+  assert(saved.status === 200, `owner saves playback ${saved.status}`)
+  const kept = await sql.get<{ revision: number }>(`SELECT revision FROM songs WHERE id = ?`, [sample.id])
+  assert(kept?.revision === before?.revision, 'saving playback leaves the revision alone')
+  const reread = await call(sql, owner.token, 'GET', `/api/songs/${encodeURIComponent(sample.id)}?instrument=guitar`)
+  assert(JSON.stringify((reread.data.song as { playback: unknown }).playback) === JSON.stringify(playback), 'dto carries playback')
+  const blocked = await call(sql, viewer.token, 'PUT', `/api/songs/${encodeURIComponent(sample.id)}/playback`, { playback: {} })
+  assert(blocked.status === 403, `viewer cannot save catalog playback ${blocked.status}`)
 }
 
 async function enter(sql: Sql, name: string, password?: string) {

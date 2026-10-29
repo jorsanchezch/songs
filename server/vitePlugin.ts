@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import path from 'node:path'
 import type { Plugin } from 'vite'
+import { localAudioBucket } from './audioStorage.ts'
 import { handleApi } from './app.ts'
 import { readCatalogFiles } from './catalog.ts'
 import { seedCatalog } from './seed.ts'
@@ -54,6 +55,8 @@ function isApi(url: string): boolean {
     pathname === '/api/admin' ||
     pathname.startsWith('/api/admin/') ||
     pathname === '/api/search-charts' ||
+    pathname === '/api/audio' ||
+    pathname.startsWith('/api/audio/') ||
     pathname === '/api/songs' ||
     pathname.startsWith('/api/songs/') ||
     pathname === '/api/catalog' ||
@@ -66,7 +69,7 @@ function isApi(url: string): boolean {
 async function answer(
   req: IncomingMessage,
   res: ServerResponse,
-  options: { mode: string; d1Url: string; youtubeKey?: string },
+  options: { mode: string; d1Url: string; rootDir: string; youtubeKey?: string },
   database: () => Promise<Sql>,
 ) {
   if (options.mode === 'd1') {
@@ -80,9 +83,12 @@ async function answer(
   if (typeof req.headers['content-type'] === 'string') headers.set('content-type', req.headers['content-type'])
   const body = method === 'GET' || method === 'HEAD' ? undefined : await readRaw(req)
   const request = new Request(`http://127.0.0.1${req.url ?? '/'}`, { method, headers, body })
+  // Local sqlite keeps MP3s on disk (data/audio), never in the DB. ALLOW_YT_EXTRACT enables Admin Extraer MP3.
   const response = await handleApi(sql, request, {
     YOUTUBE_API_KEY: options.youtubeKey || process.env.YOUTUBE_API_KEY,
-    AUDIO_BUCKET: process.env.SONGBOOK_AUDIO_BUCKET ? { configured: true } : undefined,
+    AUDIO_BUCKET: localAudioBucket(options.rootDir),
+    AUDIO_DIR: path.join(options.rootDir, 'data', 'audio'),
+    ALLOW_YT_EXTRACT: true,
   })
   await writeResponse(res, response)
 }

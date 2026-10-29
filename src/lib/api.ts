@@ -182,6 +182,64 @@ export function lookupSongMedia(title: string, artist: string): Promise<{ media:
   return request(`/api/media/lookup?${query}`)
 }
 
+export type AudioExtractReport = {
+  extractorAvailable: boolean
+  r2Configured: boolean
+  storeReady: boolean
+  dryRun: boolean
+  missingAudio: number
+  updated: number
+  skipped: number
+  errors: number
+  results: Array<{
+    id: string
+    title: string
+    status: 'updated' | 'skipped' | 'error'
+    reason?: string
+    audioUrl?: string
+    youtubeUrl?: string
+  }>
+  note?: string
+  blocked?: boolean
+}
+
+export function getAudioExtract(): Promise<AudioExtractReport> {
+  return request('/api/admin/audio-extract')
+}
+
+export function runAudioExtract(body: { limit?: number; dryRun?: boolean } = {}): Promise<AudioExtractReport> {
+  return request('/api/admin/audio-extract', { method: 'POST', body })
+}
+
+export async function uploadAudioFile(file: File, songId?: string): Promise<{ audioUrl: string; key: string }> {
+  const headers = new Headers()
+  const token = localStorage.getItem(SESSION_KEY)
+  if (token) headers.set('authorization', `Bearer ${token}`)
+  const form = new FormData()
+  form.append('file', file)
+  if (songId) form.append('songId', songId)
+  const response = await fetch(`${apiRoot()}/api/audio`, { method: 'POST', headers, body: form })
+  const text = await response.text()
+  let data: { error?: string; audioUrl?: string; key?: string } = {}
+  if (text) {
+    try {
+      data = JSON.parse(text) as typeof data
+    } catch {
+      data = {}
+    }
+  }
+  if (!response.ok) throw new Error(data.error || `Error ${response.status}`)
+  if (!data.audioUrl || !data.key) throw new Error('La subida no devolvió audio_url.')
+  return { audioUrl: data.audioUrl, key: data.key }
+}
+
+export function patchSongMedia(
+  id: string,
+  body: { durationMs?: number | null; bpm?: number | null; audioUrl?: string | null; instrument?: InstrumentId },
+): Promise<{ song: ApiSong; parts: Record<string, PartText> }> {
+  return request(`/api/songs/${encodeURIComponent(id)}/media`, { method: 'PUT', body })
+}
+
 export function createPerson(body: { name: string; role: Role; password?: string }): Promise<AdminOverview> {
   return request('/api/admin/users', { method: 'POST', body })
 }

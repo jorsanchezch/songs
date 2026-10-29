@@ -39,9 +39,10 @@ import {
   usedSectionIds,
 } from '@/lib/draftSong'
 import { parseKey, transposeKeyName } from '@/lib/chords'
+import { uploadAudioFile } from '@/lib/api'
 import {
-  durationMsFromSeconds,
-  durationSecondsFromMs,
+  formatDurationMmSs,
+  parseDurationMmSs,
   parseOptionalInt,
   withYoutubeUrl,
   youtubeUrl,
@@ -71,7 +72,7 @@ const PARTES_SECTIONS: ControlHintSection[] = [
   },
   {
     title: 'Meta',
-    body: 'Arriba del editor: YouTube, BPM, duración y audio MP3. Sirven para reproducir y para saltos a tiempo.',
+    body: 'Arriba del editor: YouTube, BPM, duración (m:ss) y subida MP3. La duración alimenta el modo Duración sin audio.',
   },
 ]
 
@@ -313,31 +314,26 @@ export function SongEditor() {
                   title="Pulsaciones por minuto."
                 />
               </Field>
-              <Field label="Duración (s)">
+              <Field label="Duración (m:ss)">
                 <Input
-                  aria-label="Duración en segundos"
-                  value={durationSecondsFromMs(draft.durationMs)}
+                  aria-label="Duración en minutos y segundos"
+                  value={formatDurationMmSs(draft.durationMs)}
                   onChange={(event) =>
                     setDraft((current) => ({
                       ...current,
-                      durationMs: durationMsFromSeconds(event.target.value),
+                      durationMs: parseDurationMmSs(event.target.value),
                     }))
                   }
-                  placeholder="240"
+                  placeholder="4:00"
                   inputMode="numeric"
-                  title="Duración total de la canción en segundos."
+                  title="Duración total de la canción (minutos:segundos). Sirve para el modo Duración sin necesidad de audio."
                 />
               </Field>
-              <Field label="Audio (MP3)" className="sm:col-span-2">
-                <Input
-                  aria-label="URL de audio MP3"
-                  value={draft.audioUrl ?? ''}
-                  onChange={(event) => setDraft((current) => ({ ...current, audioUrl: event.target.value }))}
-                  placeholder="https://…/cancion.mp3"
-                  inputMode="url"
-                  title="Enlace a un MP3 u otro audio para reproducir."
-                />
-              </Field>
+              <AudioUploadField
+                songId={songId}
+                audioUrl={draft.audioUrl ?? ''}
+                onAudioUrl={(audioUrl) => setDraft((current) => ({ ...current, audioUrl }))}
+              />
               <div className="sm:col-span-2 flex flex-col gap-2">
                 <div className="flex items-center justify-between gap-2">
                   <p className="text-sm font-medium">Referencias y tutoriales</p>
@@ -1011,6 +1007,83 @@ function Field({
       {label}
       {children}
     </label>
+  )
+}
+
+function AudioUploadField({
+  songId,
+  audioUrl,
+  onAudioUrl,
+}: {
+  songId: string
+  audioUrl: string
+  onAudioUrl: (url: string) => void
+}) {
+  const [uploading, setUploading] = useState(false)
+  const [uploadError, setUploadError] = useState('')
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  const onFile = async (file: File | undefined) => {
+    if (!file) return
+    setUploading(true)
+    setUploadError('')
+    try {
+      const stored = await uploadAudioFile(file, songId || undefined)
+      onAudioUrl(stored.audioUrl)
+    } catch (reason) {
+      setUploadError(reason instanceof Error ? reason.message : 'No pude subir el MP3.')
+    } finally {
+      setUploading(false)
+      if (inputRef.current) inputRef.current.value = ''
+    }
+  }
+
+  return (
+    <div className="sm:col-span-2 flex flex-col gap-2">
+      <span className="text-sm font-medium">Audio (MP3)</span>
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          ref={inputRef}
+          type="file"
+          accept="audio/mpeg,audio/mp3,audio/*,.mp3,.m4a,.wav,.ogg"
+          className="sr-only"
+          aria-label="Subir archivo MP3"
+          onChange={(event) => void onFile(event.target.files?.[0])}
+        />
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={uploading}
+          title="Sube un MP3. Se guarda en R2 (o data/audio en local), no en D1."
+          onClick={() => inputRef.current?.click()}
+        >
+          {uploading ? <Loader2 className="animate-spin" /> : null}
+          {uploading ? 'Subiendo…' : 'Subir MP3'}
+        </Button>
+        {audioUrl ? (
+          <Button type="button" size="sm" variant="ghost" onClick={() => onAudioUrl('')} title="Quitar el audio.">
+            Quitar
+          </Button>
+        ) : null}
+        {audioUrl ? (
+          <span className="min-w-0 truncate text-xs text-muted-foreground" title={audioUrl}>
+            {audioUrl}
+          </span>
+        ) : (
+          <span className="text-xs text-muted-foreground">Opcional. La reproducción por duración no lo necesita.</span>
+        )}
+      </div>
+      <Input
+        aria-label="URL de audio MP3"
+        value={audioUrl}
+        onChange={(event) => onAudioUrl(event.target.value)}
+        placeholder="/api/audio/… o https://…/cancion.mp3"
+        inputMode="url"
+        title="También puedes pegar una URL. Los archivos subidos quedan en R2 vía /api/audio/…"
+      />
+      {uploadError ? <p className="text-sm text-destructive">{uploadError}</p> : null}
+    </div>
   )
 }
 

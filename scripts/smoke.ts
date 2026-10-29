@@ -148,6 +148,13 @@ assert(
   roundMedia.sources.some((item) => item.label === 'YouTube' && item.url.includes('youtube.com')),
   'reads YouTube source',
 )
+const { formatDurationMmSs, parseDurationMmSs, resolveAudioUrl } = await import('../src/lib/songMedia.ts')
+assert(formatDurationMmSs(245_000) === '4:05', 'formats duration as m:ss')
+assert(parseDurationMmSs('4:05') === 245_000, 'parses m:ss')
+assert(parseDurationMmSs('1:02:03') === 3_723_000, 'parses h:mm:ss')
+assert(parseDurationMmSs('') == null, 'empty duration is null')
+assert(resolveAudioUrl('/api/audio/songs/a/1.mp3', 'https://api.example') === 'https://api.example/api/audio/songs/a/1.mp3', 'resolves relative audio')
+assert(resolveAudioUrl('https://cdn.example/a.mp3') === 'https://cdn.example/a.mp3', 'keeps absolute audio')
 
 const { applyChartMedia, chartHasYoutube } = await import('../server/chartMedia.ts')
 const { parseIsoDurationMs, bpmFromText, searchLanguage, youtubeWatchUrl } = await import('../server/youtubeMedia.ts')
@@ -610,8 +617,10 @@ assert(pattern.alternatives.every((item) => item.key !== 'C'), 'another song in 
   }
   const playBlocks = blocksFor(playSong, null)
   // Lines × repeats: intro 1, verso 2, coro 1 × 2 = 5 units over 50 s.
+  // Duration mode uses duration_ms only — no YouTube/MP3 required.
   const byDuration = buildTimeline({ blocks: playBlocks, settings: { pace: 'duration', useBpm: false }, durationMs: 50_000 })
   assert(byDuration.basis === 'duration' && byDuration.totalMs === 50_000, 'duration timeline spans the song')
+  assert(effectiveAudio('off', songMediaSources({ ...playSong, audioUrl: '', durationMs: 50_000 })) === 'off', 'duration works with audio off')
   assert(byDuration.blocks.map((block) => block.start).join(',') === '0,10000,30000', `duration starts ${byDuration.blocks.map((block) => block.start)}`)
   assert(locate(byDuration, 5_000)?.chordIndex === 2, 'chords share an intro line evenly')
   assert(locate(byDuration, 25_000)?.lineIndex === 1, 'second verse line')

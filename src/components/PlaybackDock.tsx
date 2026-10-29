@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type MutableRefObject, type ReactNode } from 'react'
 import { Flag, Loader2, Minus, Play, Plus, SlidersHorizontal, Square, X } from 'lucide-react'
 import { Kbd } from '@/components/KeyHint'
+import { Input } from '@/components/ui/input'
 import { useFrameTime, type Playback } from '@/hooks/usePlayback'
 import {
   cueIndexAt,
@@ -17,6 +18,7 @@ import {
   type SongMediaSources,
   type Timeline,
 } from '@/lib/playback'
+import { formatDurationMmSs, parseDurationMmSs } from '@/lib/songMedia'
 import { cn } from '@/lib/utils'
 
 /** Calibration in progress: media times tapped at each part start, then the end. */
@@ -71,6 +73,8 @@ export function PlaybackDock({
   sync,
   marks,
   escapeRef,
+  canEditDuration,
+  onDurationChange,
 }: {
   playback: Playback
   settings: PlaybackSettings
@@ -88,6 +92,9 @@ export function PlaybackDock({
   marks: Marks
   /** SongView's Escape asks the dock first; true means the dock used it. */
   escapeRef: MutableRefObject<(() => boolean) | null>
+  canEditDuration?: boolean
+  /** Sets the song length (ms); saved to the song when the reader can edit it. */
+  onDurationChange?: (durationMs: number | null) => void
 }) {
   // Hover opens the panel for a mouse after a pause; the chip pins it for touch and keyboard.
   const [hovered, setHovered] = useState(false)
@@ -174,6 +181,8 @@ export function PlaybackDock({
           fellBack={fellBack}
           sync={sync}
           marks={marks}
+          canEditDuration={canEditDuration}
+          onDurationChange={onDurationChange}
         />
       )}
 
@@ -292,6 +301,8 @@ function SettingsPanel({
   fellBack,
   sync,
   marks,
+  canEditDuration,
+  onDurationChange,
 }: {
   panelRef: MutableRefObject<HTMLDivElement | null>
   playback: Playback
@@ -305,7 +316,15 @@ function SettingsPanel({
   fellBack: boolean
   sync: Sync
   marks: Marks
+  canEditDuration?: boolean
+  onDurationChange?: (durationMs: number | null) => void
 }) {
+  const [durationDraft, setDurationDraft] = useState(() => formatDurationMmSs(media.durationMs))
+  useEffect(() => setDurationDraft(formatDurationMmSs(media.durationMs)), [media.durationMs])
+  const commitDuration = () => {
+    const next = parseDurationMmSs(durationDraft)
+    if (next !== (media.durationMs ?? null)) onDurationChange?.(next)
+  }
   const missing =
     settings.audio === 'youtube' && audio === 'off'
       ? 'Esta canción no tiene YouTube: suena sin audio.'
@@ -383,6 +402,26 @@ function SettingsPanel({
         />
       </Field>
       {fellBack && <Note>Sin duración: avanza a pulso.</Note>}
+      {onDurationChange && (
+        <Field label="Duración">
+          <Input
+            aria-label="Duración en minutos y segundos"
+            value={durationDraft}
+            onChange={(event) => setDurationDraft(event.target.value)}
+            onBlur={commitDuration}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                commitDuration()
+              }
+            }}
+            placeholder="4:00"
+            inputMode="numeric"
+            className="h-8 w-20 text-center tabular-nums"
+            title={canEditDuration ? 'Duración de la canción (m:ss). Se guarda en la canción.' : 'Duración (m:ss), solo esta vez.'}
+          />
+        </Field>
+      )}
       <Note>{bpm ? `Ritmo calculado ≈ ${bpm} BPM` : perLine ? `≈ ${perLine} s por línea` : null}</Note>
 
       <Field label="BPM">

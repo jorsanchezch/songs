@@ -23,6 +23,26 @@ export function youtubeWatchUrl(videoId: string): string {
   return `https://www.youtube.com/watch?v=${videoId}`
 }
 
+export function youtubeVideoIdFromUrl(url: string): string | null {
+  const trimmed = url.trim()
+  if (!trimmed) return null
+  if (/^[\w-]{11}$/.test(trimmed)) return trimmed
+  try {
+    const parsed = new URL(trimmed)
+    const host = parsed.hostname.replace(/^(www|m|music)\./, '').toLowerCase()
+    const valid = (id: string | null | undefined) => (id && /^[\w-]{11}$/.test(id) ? id : null)
+    if (host === 'youtu.be') return valid(parsed.pathname.split('/')[1])
+    if (host !== 'youtube.com' && host !== 'youtube-nocookie.com') return null
+    const fromQuery = valid(parsed.searchParams.get('v'))
+    if (fromQuery) return fromQuery
+    const [, kind, id] = parsed.pathname.split('/')
+    return kind && ['embed', 'shorts', 'live', 'v'].includes(kind) ? valid(id) : null
+  } catch {
+    const match = trimmed.match(/(?:youtu\.be\/|v=|shorts\/|embed\/)([\w-]{11})/)
+    return match?.[1] ?? null
+  }
+}
+
 export function parseIsoDurationMs(iso: string): number | null {
   const match = iso.trim().match(/^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/i)
   if (!match) return null
@@ -59,6 +79,49 @@ export function searchLanguage(title: string, artist: string): { relevanceLangua
 
 let lastPublicSearchAt = 0
 let publicSearchCount = 0
+
+/** Enrich an existing video id with duration + BPM from description (Data API). */
+export async function enrichYoutubeVideo(
+  videoId: string,
+  env: YoutubeLookupEnv,
+): Promise<YoutubeHit | null> {
+  const id = videoId.trim()
+  if (!/^[\w-]{11}$/.test(id)) return null
+  const key = env.YOUTUBE_API_KEY?.trim()
+  if (!key) {
+    return {
+      videoId: id,
+      url: youtubeWatchUrl(id),
+      title: '',
+      durationMs: null,
+      bpm: null,
+      via: 'chart',
+    }
+  }
+  const videosUrl = new URL('https://www.googleapis.com/youtube/v3/videos')
+  videosUrl.searchParams.set('part', 'contentDetails,snippet')
+  videosUrl.searchParams.set('id', id)
+  videosUrl.searchParams.set('key', key)
+  const videosResponse = await fetch(videosUrl, { signal: AbortSignal.timeout(12000) })
+  if (!videosResponse.ok) return null
+  const videosJson = (await videosResponse.json()) as {
+    items?: Array<{
+      id?: string
+      contentDetails?: { duration?: string }
+      snippet?: { title?: string; description?: string }
+    }>
+  }
+  const item = videosJson.items?.[0]
+  if (!item) return null
+  return {
+    videoId: id,
+    url: youtubeWatchUrl(id),
+    title: item.snippet?.title?.trim() ?? '',
+    durationMs: parseIsoDurationMs(item.contentDetails?.duration ?? ''),
+    bpm: bpmFromText(item.snippet?.description, item.snippet?.title),
+    via: 'youtube_api',
+  }
+}
 
 export async function findYoutubeMedia(
   title: string,

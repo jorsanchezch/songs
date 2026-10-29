@@ -6,6 +6,7 @@ import {
   getSong,
   listSongs,
   putPlayback,
+  patchSongMedia as patchSongMediaApi,
   restoreSong as restoreSongApi,
   revealSongs,
   saveSong as saveSongApi,
@@ -356,6 +357,25 @@ export function useSongs() {
     }
   }
 
+  const patchMedia = async (
+    id: string,
+    body: { durationMs?: number | null; bpm?: number | null; audioUrl?: string | null },
+    instrument: InstrumentId,
+  ) => {
+    const data = await patchSongMediaApi(id, { ...body, instrument })
+    upsert(data.song)
+    const saved = entries.find((item) => item.id === id)
+    if (saved && data.parts) {
+      for (const [name, part] of Object.entries(data.parts)) {
+        if (!isInstrument(name)) continue
+        saved.parts[name] = part.sourceText
+        saved.partRevisions[name] = part.revision
+      }
+    }
+    emit()
+    return data.song
+  }
+
   return {
     state,
     reload,
@@ -366,6 +386,7 @@ export function useSongs() {
     revealHidden,
     copySong,
     shareSong,
+    patchMedia,
     songById,
     knowsSong,
     hasPart,
