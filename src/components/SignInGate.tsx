@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { PasswordInput } from '@/components/ui/password-input'
 
 export function SignInGate({ onEnter }: { onEnter: (name: string, password?: string) => Promise<void> }) {
   const [name, setName] = useState('')
@@ -40,8 +41,7 @@ export function SignInGate({ onEnter }: { onEnter: (name: string, password?: str
           aria-label="Nombre"
           autoComplete="username"
         />
-        <Input
-          type="password"
+        <PasswordInput
           value={password}
           onChange={(event) => setPassword(event.target.value)}
           placeholder="Contraseña, si tiene"

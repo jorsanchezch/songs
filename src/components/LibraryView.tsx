@@ -15,7 +15,9 @@ import {
 import { Kbd, ShortcutLegend } from '@/components/KeyHint'
 import { SongMark } from '@/components/SongMark'
 import { Button } from '@/components/ui/button'
+import { Combobox } from '@/components/ui/combobox'
 import { Input } from '@/components/ui/input'
+import { Select, type SelectOption } from '@/components/ui/select'
 import { UserBadge } from '@/components/UserBadge'
 import { useSongs } from '@/hooks/useSongs'
 import { useUser } from '@/hooks/useUser'
@@ -25,6 +27,19 @@ import type { Song } from '@/lib/types'
 const PAGE_SIZE = 50
 
 type SortOrder = 'title' | 'title-desc' | 'artist' | 'key'
+
+const SORT_OPTIONS: SelectOption<SortOrder>[] = [
+  { value: 'title', label: 'Alfabético' },
+  { value: 'title-desc', label: 'Alfabético Z–A' },
+  { value: 'artist', label: 'Por artista' },
+  { value: 'key', label: 'Por tono' },
+]
+
+/** Exact when picked from the list, partial while typing. */
+function artistMatches(name: string, filter: string, known: string[]) {
+  if (known.includes(filter)) return name === filter
+  return name.toLocaleLowerCase('es').includes(filter.trim().toLocaleLowerCase('es'))
+}
 
 export function LibraryView() {
   const navigate = useNavigate()
@@ -48,7 +63,7 @@ export function LibraryView() {
 
   const visible = useMemo(() => {
     const filtered = songs.filter((song) => {
-      if (artist && song.artist !== artist) return false
+      if (artist && !artistMatches(song.artist, artist, artists)) return false
       if (keyName && song.key !== keyName) return false
       const needle = query.trim().toLocaleLowerCase('es')
       if (!needle) return true
@@ -56,7 +71,7 @@ export function LibraryView() {
       return haystack.includes(needle)
     })
     return [...filtered].sort((a, b) => compareSongs(a, b, sortOrder))
-  }, [songs, artist, keyName, query, sortOrder])
+  }, [songs, artist, artists, keyName, query, sortOrder])
 
   const pageCount = Math.max(1, Math.ceil(visible.length / PAGE_SIZE))
   const currentPage = Math.min(page, pageCount - 1)
@@ -179,43 +194,30 @@ export function LibraryView() {
               </div>
             )}
             <div className="mb-4 flex flex-wrap gap-2">
-              <select
+              <Combobox
                 value={artist}
-                onChange={(event) => setArtist(event.target.value)}
-                className="h-10 min-w-0 flex-1 rounded-md border bg-background px-2 text-sm"
+                onChange={setArtist}
+                suggestions={artists}
+                placeholder="Todos los artistas"
+                clearLabel="Quitar filtro de artista"
                 aria-label="Filtrar por artista"
-              >
-                <option value="">Todos los artistas</option>
-                {artists.map((name) => (
-                  <option key={name} value={name}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-              <select
+                className="min-w-40 flex-1"
+                inputClassName="text-sm"
+              />
+              <Select
                 value={keyName}
-                onChange={(event) => setKeyName(event.target.value)}
-                className="h-10 rounded-md border bg-background px-2 text-sm"
+                onValueChange={setKeyName}
+                options={[{ value: '', label: 'Todos los tonos' }, ...keys.map((name) => ({ value: name, label: name }))]}
                 aria-label="Filtrar por tono"
-              >
-                <option value="">Tono</option>
-                {keys.map((name) => (
-                  <option key={name} value={name}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-              <select
+                className="w-40"
+              />
+              <Select
                 value={sortOrder}
-                onChange={(event) => setSortOrder(event.target.value as SortOrder)}
-                className="h-10 rounded-md border bg-background px-2 text-sm"
+                onValueChange={setSortOrder}
+                options={SORT_OPTIONS}
                 aria-label="Ordenar canciones"
-              >
-                <option value="title">Alfabético</option>
-                <option value="title-desc">Alfabético Z–A</option>
-                <option value="artist">Por artista</option>
-                <option value="key">Por tono</option>
-              </select>
+                className="w-40"
+              />
             </div>
 
             {visible.length > 0 && (

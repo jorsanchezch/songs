@@ -1,8 +1,10 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   ArrowLeft,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   ChevronUp,
   Eye,
   EyeOff,
@@ -12,12 +14,18 @@ import {
   Trash2,
 } from 'lucide-react'
 import { ChartPreview } from '@/components/ChartPreview'
-import { ControlHint, type ControlHintSection } from '@/components/ControlHint'
+import { EditorHelp, HELP_PARTES, useEditorHelp } from '@/components/EditorHelp'
 import { InstrumentSwitch } from '@/components/InstrumentSwitch'
 import { Kbd, ShortcutLegend } from '@/components/KeyHint'
+import { NOTE_OPTIONS } from '@/components/NoteIcon'
 import { SongMediaInfoBanner } from '@/components/SongMediaInfoBanner'
+import { AudioUploadField, BpmField, FieldBlock, YoutubeField } from '@/components/SongMediaFields'
 import { Button } from '@/components/ui/button'
+import { Combobox } from '@/components/ui/combobox'
+import { DurationInput } from '@/components/ui/duration-input'
 import { Input } from '@/components/ui/input'
+import { Select } from '@/components/ui/select'
+import { Stepper } from '@/components/ui/stepper'
 import { UserBadge } from '@/components/UserBadge'
 import { useSongs } from '@/hooks/useSongs'
 import { isInstrument, type InstrumentId } from '@/lib/instruments'
@@ -39,42 +47,9 @@ import {
   usedSectionIds,
 } from '@/lib/draftSong'
 import { parseKey, transposeKeyName } from '@/lib/chords'
-import { uploadAudioFile } from '@/lib/api'
-import {
-  formatDurationMmSs,
-  parseDurationMmSs,
-  parseOptionalInt,
-  withYoutubeUrl,
-  youtubeUrl,
-} from '@/lib/songMedia'
-import { NOTE_LABEL, NOTE_TYPES, type NoteType, type Song, type SongNote, type SongSection } from '@/lib/types'
-
-const PARTES_SECTIONS: ControlHintSection[] = [
-  {
-    title: 'Parte',
-    body: 'Nombre y ×: cuántas veces se toca. Subir, bajar, plegar, incluir en la versión, duplicar o quitar.',
-  },
-  {
-    title: 'Id e Igual que',
-    body: 'Id identifica la parte para repetirla en una versión. Igual que muestra la letra de otra parte en lugar de escribirla de nuevo.',
-  },
-  {
-    title: 'Líneas y acordes',
-    body: '+ Línea agrega una línea. + Acorde lo pone donde está el cursor de la letra.',
-  },
-  {
-    title: 'Marcas',
-    body: 'Entrada, cómo, repite, arreglo o nota: van en la parte, en la línea o sobre un acorde.',
-  },
-  {
-    title: 'Columna',
-    body: 'El número junto al acorde es la columna: el carácter de la letra donde cae. 0 es el inicio de la línea.',
-  },
-  {
-    title: 'Meta',
-    body: 'Arriba del editor: YouTube, BPM, duración (m:ss) y subida MP3. La duración alimenta el modo Duración sin audio.',
-  },
-]
+import { lookupSongMedia } from '@/lib/api'
+import { SOURCE_LABELS, guessSourceLabel, withYoutubeUrl, youtubeUrl } from '@/lib/songMedia'
+import { NOTE_LABEL, NOTE_TYPES, type Song, type SongNote, type SongSection } from '@/lib/types'
 
 export function SongEditor() {
   const { songId = '' } = useParams()
@@ -91,7 +66,16 @@ export function SongEditor() {
   const [status, setStatus] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [lookup, setLookup] = useState({ busy: false, text: '' })
+  const help = useEditorHelp()
   const hydrated = useRef('')
+  const artists = useMemo(
+    () =>
+      state.status === 'ready'
+        ? [...new Set(state.songs.map((item) => item.artist).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es'))
+        : [],
+    [state],
+  )
   const ready = state.status === 'ready'
   const missing = Boolean(songId) && ready && !knowsSong(songId)
   const waiting = Boolean(songId) && ready && !missing && !song
@@ -136,6 +120,34 @@ export function SongEditor() {
       setBusy(false)
     }
   }
+
+  const searchMedia = () => {
+    setLookup({ busy: true, text: '' })
+    void lookupSongMedia(draft.title.trim(), draft.artist.trim()).then(
+      ({ media }) => {
+        if (!media) {
+          setLookup({ busy: false, text: 'Sin resultado.' })
+          return
+        }
+        setDraft((current) => ({
+          ...withYoutube(current, media.youtubeUrl),
+          durationMs: current.durationMs ?? media.durationMs,
+          bpm: current.bpm ?? media.bpm,
+        }))
+        setLookup({ busy: false, text: media.videoTitle ? `Encontrado: ${media.videoTitle}` : 'Encontrado.' })
+      },
+      (reason) =>
+        setLookup({ busy: false, text: reason instanceof Error ? reason.message : 'No se pudo buscar.' }),
+    )
+  }
+
+  const setSourceLabel = (index: number, label: string) =>
+    setDraft((current) => {
+      const sources = (current.sources.length ? current.sources : [{ url: current.source, label: '' }]).map(
+        (entry, entryIndex) => (entryIndex === index ? { ...entry, label } : entry),
+      )
+      return { ...current, sources, source: sources[0]?.url ?? '' }
+    })
 
   const save = () => {
     setError('')
@@ -258,15 +270,17 @@ export function SongEditor() {
           <ChartPreview song={draft} />
         ) : (
           <>
+            <EditorHelp open={help.open} onOpenChange={help.setOpen} />
             <section className="grid gap-3 sm:grid-cols-2">
               <Field label="Título">
                 <Input aria-label="Título" value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} />
               </Field>
               <Field label="Artista">
-                <Input
+                <Combobox
                   aria-label="Artista"
                   value={draft.artist}
-                  onChange={(event) => setDraft({ ...draft, artist: event.target.value, composer: '' })}
+                  suggestions={artists}
+                  onChange={(artist) => setDraft((current) => ({ ...current, artist, composer: '' }))}
                 />
               </Field>
               <div className="flex flex-nowrap items-end gap-3 sm:col-span-2">
@@ -283,52 +297,29 @@ export function SongEditor() {
                   }
                 />
               </div>
-              <Field label="YouTube">
-                <Input
-                  aria-label="YouTube"
-                  value={youtubeUrl(draft.sources)}
-                  onChange={(event) => {
-                    const url = event.target.value
-                    setDraft((current) => {
-                      const sources = withYoutubeUrl(
-                        current.sources.length ? current.sources : current.source ? [{ url: current.source, label: '' }] : [],
-                        url,
-                      )
-                      return { ...current, sources, source: sources[0]?.url ?? '' }
-                    })
-                  }}
-                  placeholder="https://www.youtube.com/watch?v=…"
-                  inputMode="url"
-                  title="Vídeo de YouTube. Se guarda en sources con etiqueta YouTube."
-                />
-              </Field>
-              <Field label="BPM">
-                <Input
-                  aria-label="BPM"
-                  value={draft.bpm == null ? '' : String(draft.bpm)}
-                  onChange={(event) =>
-                    setDraft((current) => ({ ...current, bpm: parseOptionalInt(event.target.value) }))
-                  }
-                  placeholder="72"
-                  inputMode="numeric"
-                  title="Pulsaciones por minuto."
-                />
-              </Field>
-              <Field label="Duración (m:ss)">
-                <Input
-                  aria-label="Duración en minutos y segundos"
-                  value={formatDurationMmSs(draft.durationMs)}
-                  onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current,
-                      durationMs: parseDurationMmSs(event.target.value),
-                    }))
-                  }
-                  placeholder="4:00"
-                  inputMode="numeric"
-                  title="Duración total de la canción (minutos:segundos). Sirve para el modo Duración sin necesidad de audio."
-                />
-              </Field>
+              <YoutubeField
+                value={youtubeUrl(draft.sources)}
+                onChange={(url) => {
+                  setLookup((current) => (current.busy ? current : { busy: false, text: '' }))
+                  setDraft((current) => withYoutube(current, url))
+                }}
+                onSearch={searchMedia}
+                searching={lookup.busy}
+                canSearch={Boolean(draft.title.trim())}
+                status={lookup.text}
+              />
+              <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-3">
+                <BpmField value={draft.bpm ?? null}onChange={(bpm) => setDraft((current) => ({ ...current, bpm }))} />
+                <FieldBlock label="Duración (m:ss)" htmlFor="editor-duration">
+                  <DurationInput
+                    id="editor-duration"
+                    aria-label="Duración en minutos y segundos"
+                    value={draft.durationMs}
+                    onChange={(durationMs) => setDraft((current) => ({ ...current, durationMs }))}
+                    title="Duración total (m:ss o segundos). Sirve para el modo Duración sin necesidad de audio."
+                  />
+                </FieldBlock>
+              </div>
               <AudioUploadField
                 songId={songId}
                 audioUrl={draft.audioUrl ?? ''}
@@ -357,6 +348,10 @@ export function SongEditor() {
                     <div key={`source-${index}`} className="grid gap-2 sm:grid-cols-[1fr_12rem_auto]">
                       <Input
                         value={item.url}
+                        onBlur={() => {
+                          const label = guessSourceLabel(item.url)
+                          if (label && !item.label.trim()) setSourceLabel(index, label)
+                        }}
                         onChange={(event) => {
                           const url = event.target.value
                           setDraft((current) => {
@@ -378,21 +373,11 @@ export function SongEditor() {
                         title="Dirección del tutorial o de la cifra."
                         aria-label={`URL de referencia ${index + 1}`}
                       />
-                      <Input
+                      <Combobox
                         value={item.label}
-                        onChange={(event) => {
-                          const label = event.target.value
-                          setDraft((current) => {
-                            const sources = (current.sources.length
-                              ? current.sources
-                              : [{ url: current.source, label: '' }]
-                            ).map((entry, entryIndex) =>
-                              entryIndex === index ? { ...entry, label } : entry,
-                            )
-                            return { ...current, sources, source: sources[0]?.url ?? '' }
-                          })
-                        }}
-                        placeholder="YouTube, cifra…"
+                        onChange={(label) => setSourceLabel(index, label)}
+                        suggestions={[guessSourceLabel(item.url), ...SOURCE_LABELS]}
+                        placeholder={guessSourceLabel(item.url) || 'YouTube, cifra…'}
                         title="Nombre corto del enlace, como YouTube o Cifra."
                         aria-label={`Etiqueta de referencia ${index + 1}`}
                       />
@@ -444,7 +429,15 @@ export function SongEditor() {
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="inline-flex items-center gap-1">
                 <h2 className="text-sm font-semibold tracking-wide text-muted-foreground uppercase">Partes</h2>
-                <ControlHint sections={PARTES_SECTIONS} wide />
+                <button
+                  type="button"
+                  className="inline-flex size-4 shrink-0 items-center justify-center rounded-full border text-[10px] leading-none font-semibold text-muted-foreground hover:bg-accent hover:text-foreground"
+                  title="Cómo usar las partes"
+                  aria-label="Cómo usar las partes"
+                  onClick={() => help.show(HELP_PARTES)}
+                >
+                  i
+                </button>
               </div>
               <Button
                 size="sm"
@@ -564,18 +557,17 @@ function SectionCard({
           onChange={(event) => onChange({ ...section, label: event.target.value })}
           className="max-w-xs font-semibold"
         />
-        <label className="flex items-center gap-1 text-sm">
-          ×
-          <Input
-            type="number"
-            min={1}
+        <span className="flex items-center gap-1 text-sm" title="Cuántas veces se toca esta parte.">
+          <span aria-hidden>×</span>
+          <Stepper
+            size="sm"
             value={section.repeat}
-            aria-label="Repeticiones"
-            title="Cuántas veces se toca esta parte."
-            onChange={(event) => onChange({ ...section, repeat: Math.max(1, Number(event.target.value) || 1) })}
-            className="w-16"
+            min={1}
+            max={99}
+            label="Repeticiones"
+            onChange={(repeat) => onChange({ ...section, repeat: repeat ?? 1 })}
           />
-        </label>
+        </span>
         <Button size="icon" variant="ghost" aria-label="Subir parte" title="Mueve la parte hacia arriba." onClick={() => onMove(-1)}>
           <ChevronUp />
         </Button>
@@ -609,24 +601,16 @@ function SectionCard({
               />
             </Field>
             <Field label="Igual que">
-              <select
+              <Select
                 value={section.sameAs ?? ''}
-                aria-label="Parte duplicada"
-                onChange={(event) =>
-                  onChange({
-                    ...section,
-                    sameAs: event.target.value || undefined,
-                  })
-                }
-                className="h-10 rounded-md border bg-background px-3 text-sm"
-              >
-                <option value="">Letra propia</option>
-                {others.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.label}
-                  </option>
-                ))}
-              </select>
+                aria-label="Igual que"
+                title="Muestra la letra de otra parte en lugar de escribirla de nuevo."
+                onValueChange={(sameAs) => onChange({ ...section, sameAs: sameAs || undefined })}
+                options={[
+                  { value: '', label: 'Letra propia' },
+                  ...others.map((item) => ({ value: item.id, label: item.label || item.id })),
+                ]}
+              />
             </Field>
           </div>
 
@@ -689,7 +673,7 @@ function LineCard({
     <div className="rounded-lg border bg-background p-2">
       <div className="mb-2 flex flex-wrap gap-1">
         {line.chords.map((chord, index) => (
-          <span key={`${chord.column}-${index}`} className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-1 py-0.5">
+          <span key={`chord-${index}`} className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-1 py-0.5">
             <input
               value={chord.raw}
               aria-label="Acorde"
@@ -704,21 +688,25 @@ function LineCard({
               }
               className="w-16 bg-transparent font-mono text-sm font-semibold text-chart-chord outline-none"
             />
-            <input
-              type="number"
-              min={0}
+            <Stepper
+              size="xs"
               value={chord.column}
-              aria-label="Columna del acorde"
-              title="En qué letra de la línea cae el acorde."
-              onChange={(event) =>
+              min={0}
+              label="Columna del acorde"
+              title="En qué letra de la línea cae el acorde. 0 es el inicio."
+              decreaseIcon={<ChevronLeft />}
+              increaseIcon={<ChevronRight />}
+              decreaseLabel="Mover acorde a la izquierda"
+              increaseLabel="Mover acorde a la derecha"
+              onChange={(column) =>
                 onChange({
                   ...line,
                   chords: line.chords.map((item, itemIndex) =>
-                    itemIndex === index ? { ...item, column: Math.max(0, Number(event.target.value) || 0) } : item,
+                    itemIndex === index ? { ...item, column: column ?? 0 } : item,
                   ),
                 })
               }
-              className="w-12 bg-transparent text-xs outline-none"
+              className="border-transparent bg-transparent"
             />
             <button
               type="button"
@@ -808,21 +796,15 @@ function NoteList({
     <div className={compact ? '' : 'flex flex-col gap-1'}>
       {notes.map((note) => (
         <div key={note.id} className="flex flex-wrap items-center gap-1">
-          <select
+          <Select
+            size="sm"
             value={note.type}
             aria-label="Tipo de nota"
             title="Entrada, cómo tocarlo, repetición, arreglo o nota libre."
-            onChange={(event) =>
-              onChange(notes.map((item) => (item.id === note.id ? { ...item, type: event.target.value as NoteType } : item)))
-            }
-            className="h-8 rounded-md border bg-background px-2 text-xs"
-          >
-            {NOTE_TYPES.map((type) => (
-              <option key={type} value={type}>
-                {NOTE_LABEL[type]}
-              </option>
-            ))}
-          </select>
+            options={NOTE_OPTIONS}
+            onValueChange={(type) => onChange(notes.map((item) => (item.id === note.id ? { ...item, type } : item)))}
+            className="w-28"
+          />
           <Input
             value={note.text}
             aria-label="Texto de la nota"
@@ -938,8 +920,9 @@ function VersionsEditor({ song, onChange }: { song: Song; onChange: (song: Song)
                       ),
                     })
                   }
-                  className={`rounded-full border px-2.5 py-1 text-xs ${on ? 'border-primary bg-primary/15' : 'text-muted-foreground'}`}
+                  className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs [&_svg]:size-3 ${on ? 'border-primary bg-primary/15' : 'text-muted-foreground'}`}
                 >
+                  {NOTE_OPTIONS.find((option) => option.value === type)?.icon}
                   {NOTE_LABEL[type]}
                 </button>
               )
@@ -1010,83 +993,6 @@ function Field({
   )
 }
 
-function AudioUploadField({
-  songId,
-  audioUrl,
-  onAudioUrl,
-}: {
-  songId: string
-  audioUrl: string
-  onAudioUrl: (url: string) => void
-}) {
-  const [uploading, setUploading] = useState(false)
-  const [uploadError, setUploadError] = useState('')
-  const inputRef = useRef<HTMLInputElement>(null)
-
-  const onFile = async (file: File | undefined) => {
-    if (!file) return
-    setUploading(true)
-    setUploadError('')
-    try {
-      const stored = await uploadAudioFile(file, songId || undefined)
-      onAudioUrl(stored.audioUrl)
-    } catch (reason) {
-      setUploadError(reason instanceof Error ? reason.message : 'No pude subir el MP3.')
-    } finally {
-      setUploading(false)
-      if (inputRef.current) inputRef.current.value = ''
-    }
-  }
-
-  return (
-    <div className="sm:col-span-2 flex flex-col gap-2">
-      <span className="text-sm font-medium">Audio (MP3)</span>
-      <div className="flex flex-wrap items-center gap-2">
-        <input
-          ref={inputRef}
-          type="file"
-          accept="audio/mpeg,audio/mp3,audio/*,.mp3,.m4a,.wav,.ogg"
-          className="sr-only"
-          aria-label="Subir archivo MP3"
-          onChange={(event) => void onFile(event.target.files?.[0])}
-        />
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          disabled={uploading}
-          title="Sube un MP3. Se guarda en R2 (o data/audio en local), no en D1."
-          onClick={() => inputRef.current?.click()}
-        >
-          {uploading ? <Loader2 className="animate-spin" /> : null}
-          {uploading ? 'Subiendo…' : 'Subir MP3'}
-        </Button>
-        {audioUrl ? (
-          <Button type="button" size="sm" variant="ghost" onClick={() => onAudioUrl('')} title="Quitar el audio.">
-            Quitar
-          </Button>
-        ) : null}
-        {audioUrl ? (
-          <span className="min-w-0 truncate text-xs text-muted-foreground" title={audioUrl}>
-            {audioUrl}
-          </span>
-        ) : (
-          <span className="text-xs text-muted-foreground">Opcional. La reproducción por duración no lo necesita.</span>
-        )}
-      </div>
-      <Input
-        aria-label="URL de audio MP3"
-        value={audioUrl}
-        onChange={(event) => onAudioUrl(event.target.value)}
-        placeholder="/api/audio/… o https://…/cancion.mp3"
-        inputMode="url"
-        title="También puedes pegar una URL. Los archivos subidos quedan en R2 vía /api/audio/…"
-      />
-      {uploadError ? <p className="text-sm text-destructive">{uploadError}</p> : null}
-    </div>
-  )
-}
-
 function neighborKey(key: string, delta: -1 | 1): string {
   const base = key.trim()
   if (!base || !parseKey(base).valid) return delta > 0 ? 'C' : 'B'
@@ -1133,6 +1039,14 @@ function KeyStepper({
       </div>
     </div>
   )
+}
+
+function withYoutube(song: Song, url: string): Song {
+  const sources = withYoutubeUrl(
+    song.sources.length ? song.sources : song.source ? [{ url: song.source, label: '' }] : [],
+    url,
+  )
+  return { ...song, sources, source: sources[0]?.url ?? '' }
 }
 
 function songFromSource(text: string, id: string): Song {

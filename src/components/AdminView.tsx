@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom'
 import { ArrowLeft, ExternalLink, Loader2, Shield } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { PasswordInput } from '@/components/ui/password-input'
+import { Segmented } from '@/components/ui/segmented'
 import { UserBadge } from '@/components/UserBadge'
 import { useSession, useUser } from '@/hooks/useUser'
 import { isImmutableAdmin, isStaff, roleLabel, type Role } from '@/lib/access'
@@ -486,20 +488,14 @@ function CreatePerson({
           aria-label="Nombre de la persona"
           autoComplete="off"
         />
-        <select
+        <Segmented
           value={role}
-          onChange={(event) => setRole(event.target.value as Role)}
-          className="h-10 rounded-md border bg-background px-2 text-sm"
+          onValueChange={setRole}
+          options={roles.map((item) => ({ value: item, label: roleLabel(item) }))}
           aria-label="Rol"
-        >
-          {roles.map((item) => (
-            <option key={item} value={item}>
-              {roleLabel(item)}
-            </option>
-          ))}
-        </select>
-        <Input
-          type="password"
+          className="h-10 items-center self-start"
+        />
+        <PasswordInput
           value={password}
           onChange={(event) => setPassword(event.target.value)}
           placeholder="Contraseña, opcional"
@@ -585,19 +581,14 @@ function PersonCard({
             void wrap(() => onRole(person.id, role))
           }}
         >
-          <select
+          <Segmented
             value={role}
-            onChange={(event) => setRole(event.target.value as Role)}
+            onValueChange={setRole}
             disabled={onlyOwner || busy}
-            className="h-10 rounded-md border bg-background px-2 text-sm"
+            options={roleChoices.map((item) => ({ value: item, label: roleLabel(item) }))}
             aria-label={`Rol de ${person.name}`}
-          >
-            {roleChoices.map((item) => (
-              <option key={item} value={item}>
-                {roleLabel(item)}
-              </option>
-            ))}
-          </select>
+            className="h-10 items-center"
+          />
           <Button type="submit" size="sm" variant="outline" disabled={busy || onlyOwner || role === person.role}>
             Guardar rol
           </Button>
@@ -613,8 +604,7 @@ function PersonCard({
             void wrap(() => onPassword(person.id, password))
           }}
         >
-          <Input
-            type="password"
+          <PasswordInput
             value={password}
             onChange={(event) => setPassword(event.target.value)}
             placeholder="Nueva contraseña"
