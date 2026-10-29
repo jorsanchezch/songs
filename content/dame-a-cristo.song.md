@@ -4,6 +4,11 @@ artist: Marcos Brunet
 composer: Abbie Gamboa
 key: C
 source: "https://www.cifraclub.com/marcos-brunet/dame-a-cristo/"
+bpm: 137
+duration_ms: 419000
+sources:
+  - https://www.cifraclub.com/marcos-brunet/dame-a-cristo/ | Fuente
+  - https://www.youtube.com/watch?v=n-uoCeB-WCg | YouTube
 ---
 
 ## Verso {#verso}
