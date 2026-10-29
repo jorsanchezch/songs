@@ -11,6 +11,7 @@ import path from 'node:path'
 import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
 import { hashPassword } from '../server/password.ts'
+import { OWNER_ID, OWNER_USERNAME } from '../server/schema.ts'
 import { ensureSchema } from '../server/seed.ts'
 import { openSqlite } from '../server/sqlite.ts'
 
@@ -54,7 +55,19 @@ if (d1) {
       cwd: root,
       encoding: 'utf8',
     })
-  const update = run(`UPDATE users SET password_hash = ${quote(hash)} WHERE username = ${quote(username)} COLLATE NOCASE`)
+  // A database from before usernames still finds the owner by id.
+  const columns = run(`PRAGMA table_info(users)`)
+  const hasUsername = columns.status === 0 && columns.stdout.includes('"username"')
+  const match = hasUsername
+    ? `username = ${quote(username)} COLLATE NOCASE`
+    : username.toLowerCase() === OWNER_USERNAME
+      ? `id = ${quote(OWNER_ID)}`
+      : null
+  if (!match) {
+    console.error('Esta base todavía no tiene usuarios; solo se puede poner la contraseña del dueño.')
+    process.exit(1)
+  }
+  const update = run(`UPDATE users SET password_hash = ${quote(hash)} WHERE ${match}`)
   if (update.status !== 0) {
     console.error(update.stderr || update.stdout)
     process.exit(1)
