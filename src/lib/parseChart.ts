@@ -418,7 +418,7 @@ function mergeSources(entries: SongSource[], legacy: string): SongSource[] {
   return out
 }
 
-function defaultSourceLabel(url: string): string {
+export function defaultSourceLabel(url: string): string {
   if (/youtu(\.be|be\.com)/i.test(url)) return 'YouTube'
   if (/\.pdf($|\?)/i.test(url)) return 'Cifra PDF'
   return 'Fuente'

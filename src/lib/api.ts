@@ -172,6 +172,14 @@ export function runMediaBackfill(body: {
   return request('/api/admin/media-backfill', { method: 'POST', body })
 }
 
+export type FoundMedia = { youtubeUrl: string; videoTitle: string; durationMs: number | null; bpm: number | null }
+
+/** Best YouTube match for a title, in the song's language, with its length. */
+export function lookupSongMedia(title: string, artist: string): Promise<{ media: FoundMedia | null }> {
+  const query = new URLSearchParams({ title, artist })
+  return request(`/api/media/lookup?${query}`)
+}
+
 export type AudioExtractReport = {
   extractorAvailable: boolean
   r2Configured: boolean

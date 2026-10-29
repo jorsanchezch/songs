@@ -5,12 +5,14 @@ import { cn } from '@/lib/utils'
 
 /** m:ss field. Takes “4:05” or plain seconds (“245”); tidies up on blur. */
 export function DurationInput({
+  id,
   value,
   onChange,
   className,
   title,
   'aria-label': ariaLabel,
 }: {
+  id?: string
   value: number | null | undefined
   onChange: (ms: number | null) => void
   className?: string
@@ -27,6 +29,7 @@ export function DurationInput({
   return (
     <span className="flex flex-col gap-1">
       <Input
+        id={id}
         value={text}
         aria-label={ariaLabel}
         aria-invalid={invalid || undefined}

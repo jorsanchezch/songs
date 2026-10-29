@@ -209,7 +209,7 @@ export function LibraryView() {
                 onValueChange={setKeyName}
                 options={[{ value: '', label: 'Todos los tonos' }, ...keys.map((name) => ({ value: name, label: name }))]}
                 aria-label="Filtrar por tono"
-                className="w-36"
+                className="w-40"
               />
               <Select
                 value={sortOrder}
