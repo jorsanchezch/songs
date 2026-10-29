@@ -766,7 +766,7 @@ async function checkPasswords(files: { id: string; sourceText: string }[]) {
   assert(left[0]?.username === 'jsanchezch', 'jorge keeps username')
   const finalHash = await db.get<{ password_hash: string | null }>(`SELECT password_hash FROM users WHERE id = 'jorge'`)
   assert(finalHash?.password_hash?.startsWith('pbkdf2$'), 'jorge still has a password')
-  assert((await enter(db, 'jsanchezch', TEST_PASSWORD)).status === 200, 'jorge still enters with 1231')
+  assert((await enter(db, 'jsanchezch', TEST_PASSWORD)).status === 200, 'jorge still enters with his password')
 }
 
 {
