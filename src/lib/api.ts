@@ -1,6 +1,7 @@
 import type { Account, Role } from '@/lib/access'
 import { SESSION_KEY, setCurrentUser } from '@/lib/currentSession'
 import type { InstrumentId } from '@/lib/instruments'
+import type { SongPlayback } from '@/lib/types'
 
 type SetlistPayload = {
   id: string
@@ -27,6 +28,7 @@ export type ApiSong = {
   bpm: number | null
   durationMs: number | null
   audioUrl: string
+  playback?: SongPlayback
   origin: 'catalog' | 'local' | 'copy'
   ownerId: string
   ownerName: string
@@ -272,6 +274,10 @@ export function shareSong(id: string, body: ShareBody): Promise<{ song: ApiSong 
 
 export function restoreSong(id: string): Promise<{ song: ApiSong }> {
   return request(`/api/songs/${encodeURIComponent(id)}/restore`, { method: 'POST', body: {} })
+}
+
+export function putPlayback(id: string, playback: SongPlayback): Promise<{ playback: SongPlayback }> {
+  return request(`/api/songs/${encodeURIComponent(id)}/playback`, { method: 'PUT', body: { playback } })
 }
 
 export function revealSongs(): Promise<{ ok: boolean }> {

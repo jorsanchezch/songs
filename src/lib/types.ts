@@ -59,6 +59,8 @@ export type Song = {
   durationMs?: number | null
   /** Optional MP3 (or other audio) URL for playback. */
   audioUrl?: string
+  /** Playback calibration measured on a recording; stored beside the chart, not in it. */
+  playback?: SongPlayback
   sections: SongSection[]
   versions: SongVersion[]
   lyricsText: string
@@ -100,3 +102,14 @@ export const NOTE_HINT: Record<NoteType, string> = {
   arrange: 'Muestra el arreglo: solo, batería o guitarra fuera.',
   free: 'Muestra las notas libres que no entran en las otras marcas.',
 }
+
+export type PlaybackTrack = {
+  /** YouTube video id or MP3 URL these numbers were measured on. */
+  src: string
+  /** Media time before the first part starts. */
+  introMs: number
+  /** Measured length of each part (all passes), by part key. */
+  parts: Record<string, number>
+}
+
+export type SongPlayback = { youtube?: PlaybackTrack; mp3?: PlaybackTrack; speed?: number }

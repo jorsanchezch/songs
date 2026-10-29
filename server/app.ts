@@ -5,6 +5,7 @@ import { applyChartMedia, chartHasYoutube } from './chartMedia.ts'
 import { mediaBackfillStatus, runMediaBackfill, type MediaBackfillEnv } from './mediaBackfill.ts'
 import { chartMeta } from './meta.ts'
 import { hashPassword, verifyPassword } from './password.ts'
+import { songPlayback } from './playback.ts'
 import { findYoutubeMedia, type YoutubeHit } from './youtubeMedia.ts'
 import { OWNER_ID } from './schema.ts'
 import type { Sql } from './sql.ts'
@@ -26,6 +27,7 @@ type SongRecord = {
   bpm: number | null
   duration_ms: number | null
   audio_url: string
+  playback: string | null
   origin: Origin
   catalog_id: string | null
   owner_id: string
@@ -87,7 +89,7 @@ export async function handleApi(sql: Sql, request: Request, env: ApiEnv = {}): P
       if (request.method === 'PUT') return adminUpdateUser(sql, user, id, request)
       if (request.method === 'DELETE') return adminRemoveUser(sql, user, id)
     }
-    const songPath = pathname.match(/^\/api\/songs\/([^/]+)(?:\/(copy|share|restore))?$/)
+    const songPath = pathname.match(/^\/api\/songs\/([^/]+)(?:\/(copy|share|restore|playback))?$/)
     if (songPath) {
       const id = decodeURIComponent(songPath[1] ?? '')
       const action = songPath[2]
@@ -97,6 +99,7 @@ export async function handleApi(sql: Sql, request: Request, env: ApiEnv = {}): P
       if (request.method === 'POST' && action === 'copy') return copySong(sql, user, id)
       if (request.method === 'POST' && action === 'share') return shareSong(sql, user, id, request)
       if (request.method === 'POST' && action === 'restore') return restoreSong(sql, user, id)
+      if (request.method === 'PUT' && action === 'playback') return savePlayback(sql, user, id, request)
     }
     return json({ error: 'No está esa ruta.' }, 404)
   } catch (error) {
@@ -371,6 +374,17 @@ async function removeSong(sql: Sql, user: User, id: string): Promise<Response> {
   return json({ ok: true, hidden: false })
 }
 
+/** Calibration is not chart content: it skips the revision so it never conflicts with an edit. */
+async function savePlayback(sql: Sql, user: User, id: string, request: Request): Promise<Response> {
+  const body = await readJson<{ playback?: unknown }>(request)
+  const row = await oneSong(sql, id, 'guitar')
+  if (!row || !canSee(user, row)) return json({ error: 'No está esta canción.' }, 404)
+  if (!canEdit(user, row)) return json({ error: 'Solo quien edita la canción guarda su reproducción.' }, 403)
+  const playback = songPlayback(body.playback)
+  await sql.run(`UPDATE songs SET playback = ? WHERE id = ?`, [JSON.stringify(playback), id])
+  return json({ playback })
+}
+
 async function copySong(sql: Sql, user: User, id: string): Promise<Response> {
   const row = await oneSong(sql, id, 'guitar')
   if (!row || !canSee(user, row)) return json({ error: 'No está esta canción.' }, 404)
@@ -381,8 +395,8 @@ async function copySong(sql: Sql, user: User, id: string): Promise<Response> {
     await tx.run(
       `INSERT INTO songs (
         id, title, artist, composer, key_name, source, lyrics_text, origin, catalog_id,
-        owner_id, shared, hidden, catalog_source, bpm, duration_ms, audio_url, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'copy', ?, ?, 0, 0, ?, ?, ?, ?, ?, ?)`,
+        owner_id, shared, hidden, catalog_source, bpm, duration_ms, audio_url, playback, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'copy', ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?)`,
       [
         copyId,
         row.title,
@@ -397,6 +411,7 @@ async function copySong(sql: Sql, user: User, id: string): Promise<Response> {
         row.bpm,
         row.duration_ms,
         row.audio_url ?? '',
+        row.playback ?? '{}',
         now,
         now,
       ],
@@ -836,7 +851,7 @@ async function partDump(sql: Sql, id: string): Promise<Record<string, { sourceTe
 
 function songSelect(where: string): string {
   return `SELECT
-    s.id, s.title, s.artist, s.composer, s.key_name, s.source, s.bpm, s.duration_ms, s.audio_url,
+    s.id, s.title, s.artist, s.composer, s.key_name, s.source, s.bpm, s.duration_ms, s.audio_url, s.playback,
     s.origin, s.catalog_id,
     s.owner_id, s.shared, s.hidden, s.catalog_source, s.revision,
     u.name AS owner_name,
@@ -869,6 +884,7 @@ function toDto(user: User, row: SongRecord, instrument: InstrumentId, hasCopy: b
     bpm: row.bpm == null ? null : Number(row.bpm),
     durationMs: row.duration_ms == null ? null : Number(row.duration_ms),
     audioUrl: row.audio_url ?? '',
+    playback: songPlayback(parseJson(row.playback ?? '{}')),
     origin: row.origin,
     ownerId: row.owner_id,
     ownerName: row.owner_name,

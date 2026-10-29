@@ -22,7 +22,7 @@ import { SongMark } from '@/components/SongMark'
 import { InstrumentCharts } from '@/components/InstrumentCharts'
 import { InstrumentSwitch } from '@/components/InstrumentSwitch'
 import { Kbd, ShortcutLegend } from '@/components/KeyHint'
-import { PlaybackDock } from '@/components/PlaybackDock'
+import { PlaybackDock, type Marking } from '@/components/PlaybackDock'
 import { SpellingToggle } from '@/components/SpellingToggle'
 import { Button } from '@/components/ui/button'
 import { UserBadge } from '@/components/UserBadge'
@@ -46,18 +46,29 @@ import { NOTE_HINT, NOTE_LABEL, NOTE_TYPES } from '@/lib/types'
 import { useSetlists } from '@/hooks/useSetlists'
 import { useSession, useUser } from '@/hooks/useUser'
 import { useSongs } from '@/hooks/useSongs'
-import { usePlayback } from '@/hooks/usePlayback'
+import { usePlayback, useFrameTime } from '@/hooks/usePlayback'
 import { can, isStaff } from '@/lib/access'
 import {
   buildTimeline,
+  cueIndexAt,
+  cuePoints,
   effectiveAudio,
+  formatClock,
+  LEAD_MAX_MS,
   loadPlaybackSettings,
+  marksToParts,
+  NEAR_CUE_MS,
+  NUDGE_MS,
+  partKeys,
+  referenceTrack,
   savePlaybackSettings,
   songMediaSources,
   startOffset,
+  type Cue,
   type PlaybackCursor,
   type PlaybackSettings,
 } from '@/lib/playback'
+import type { SongPlayback } from '@/lib/types'
 import { neighborSong, setSetlistSemitones, songPath } from '@/lib/setlists'
 import { cn } from '@/lib/utils'
 import {
@@ -74,7 +85,7 @@ export function SongView() {
   const navigate = useNavigate()
   const user = useUser()
   const { people } = useSession()
-  const { state, reload, removeSong, restoreSong, copySong, shareSong, songById, ensurePart } = useSongs()
+  const { state, reload, removeSong, restoreSong, copySong, shareSong, songById, ensurePart, savePlayback } = useSongs()
   const setlists = useSetlists()
   const listaId = searchParams.get('lista')
   const [settings, setSettings] = useState<ViewSettings>(() => loadSettings())
@@ -181,6 +192,24 @@ export function SongView() {
   )
   const playbackAudio = effectiveAudio(playbackSettings.audio, media)
   const { pace, useBpm } = playbackSettings
+  // Calibration lives on the song row, so every instrument shares it.
+  const songPlayback: SongPlayback = (chart ?? guitar)?.playback ?? {}
+  const audioKind = playbackAudio === 'off' ? null : playbackAudio
+  const audioSrc = audioKind === 'youtube' ? media.youtubeId : audioKind === 'mp3' ? media.audioUrl : null
+  const track = referenceTrack(songPlayback, playbackAudio, media)
+  const staleMarks = Boolean(audioKind && songPlayback[audioKind] && !track)
+  // Lead and speed tweaks stay for this visit until someone saves them to the song.
+  const [session, setSession] = useState<{ leadMs: number; speed: number } | null>(null)
+  const [marking, setMarking] = useState<Marking | null>(null)
+  const markingRef = useRef(marking)
+  markingRef.current = marking
+  useEffect(() => {
+    setSession(null)
+    setMarking(null)
+  }, [songId, playbackAudio])
+  const leadMs = marking ? 0 : (session?.leadMs ?? track?.introMs ?? 0)
+  const playSpeed = session?.speed ?? songPlayback.speed ?? 1
+  const trackParts = marking ? null : (track?.parts ?? null)
   const makeTimeline = useCallback(
     (mediaMs: number | null) =>
       buildTimeline({
@@ -189,19 +218,142 @@ export function SongView() {
         bpm: media.bpm,
         durationMs: media.durationMs,
         mediaMs,
+        introMs: leadMs,
+        parts: trackParts,
       }),
-    [blocks, media.bpm, media.durationMs, pace, useBpm],
+    [blocks, leadMs, media.bpm, media.durationMs, pace, trackParts, useBpm],
   )
-  const playback = usePlayback({ makeTimeline, audio: playbackAudio, media })
-  const playCursor = playback.cursor
+  const playback = usePlayback({ makeTimeline, audio: playbackAudio, media, leadMs, speed: playSpeed })
+  // Marking taps the real starts; the estimated cursor would only distract.
+  const playCursor = marking ? null : playback.cursor
   const stopPlayback = playback.stop
   const playingRef = useRef(false)
   playingRef.current = playback.playing
   const showPlayHighlights = playbackSettings.highlights
+  const cues = useMemo(() => cuePoints(playback.timeline), [playback.timeline])
+  const keysForParts = useMemo(() => partKeys(blocks), [blocks])
+  const measuredParts = track ? keysForParts.filter((key) => (track.parts[key] ?? 0) > 0).length : 0
 
   useEffect(() => {
     stopPlayback()
   }, [songId, stopPlayback])
+
+  // Another version plays other parts; fold modes keep the same timing.
+  useEffect(() => {
+    stopPlayback()
+    setMarking(null)
+  }, [version?.id, stopPlayback])
+
+  // Stopping while marking leaves the taps to review.
+  useEffect(() => {
+    if (!playback.playing && marking?.phase === 'marking') setMarking({ ...marking, phase: 'review' })
+  }, [marking, playback.playing])
+
+  const storePlayback = (next: SongPlayback) => {
+    if (!songId) return
+    void savePlayback(songId, next).catch((error: unknown) =>
+      setAnnounce(error instanceof Error ? error.message : 'No pude guardar la reproducción.'),
+    )
+  }
+
+  const startMarking = () => {
+    if (!audioKind) return
+    setMarking({ phase: 'marking', starts: [], endMs: null })
+    playback.start(0)
+  }
+
+  const markNext = () => {
+    const state = markingRef.current
+    const time = playback.mediaTime()
+    if (!state || state.phase !== 'marking' || time == null) return
+    if (state.starts.length >= blocks.length) {
+      setMarking({ ...state, endMs: time })
+      stopPlayback()
+      setAnnounce(`Final marcado en ${formatClock(time)}.`)
+      return
+    }
+    const block = blocks[state.starts.length]!
+    setMarking({ ...state, starts: [...state.starts, time] })
+    setCurrent(block.id)
+    spyPausedUntil.current = Date.now() + 900
+    document.getElementById(`sec-${block.id}`)?.scrollIntoView({ behavior: 'auto', block: 'start' })
+    setAnnounce(`Marcada ${block.label} en ${formatClock(time)}.`)
+  }
+
+  const undoMark = () => {
+    const state = markingRef.current
+    if (!state) return
+    if (state.endMs != null) setMarking({ ...state, endMs: null })
+    else setMarking({ ...state, starts: state.starts.slice(0, -1) })
+  }
+
+  const saveMarks = () => {
+    if (!marking || !audioKind || !audioSrc) return
+    const { introMs, parts } = marksToParts(keysForParts, marking.starts, marking.endMs)
+    storePlayback({ ...songPlayback, [audioKind]: { src: audioSrc, introMs: introMs ?? 0, parts } })
+    setMarking(null)
+    setSession(null)
+  }
+
+  const clearMarks = () => {
+    if (!audioKind) return
+    const next = { ...songPlayback }
+    delete next[audioKind]
+    storePlayback(next)
+    setSession(null)
+  }
+
+  const saveSync = () => {
+    if (!session) return
+    const next: SongPlayback = { ...songPlayback }
+    if (audioKind && audioSrc) {
+      next[audioKind] = { src: audioSrc, parts: track?.parts ?? {}, introMs: session.leadMs }
+    } else {
+      next.speed = session.speed
+    }
+    storePlayback(next)
+    setSession(null)
+  }
+
+  const setLead = (ms: number) =>
+    setSession({ leadMs: Math.min(LEAD_MAX_MS, Math.max(0, Math.round(ms))), speed: playSpeed })
+  const setSpeed = (speed: number) => setSession({ leadMs, speed: Math.round(speed * 100) / 100 })
+
+  /** "We are here now": the next cue (or this one again, or the one before). */
+  const resyncCue = (direction: -1 | 1) => {
+    const t = playback.elapsed()
+    const index = cueIndexAt(cues, t)
+    const here = cues[index]
+    const target =
+      direction > 0 ? cues[index + 1] : here && t - here.at > 2000 ? here : cues[Math.max(0, index - 1)]
+    if (!target) return
+    const lead = playback.resync(target.at)
+    if (lead != null) setSession({ leadMs: lead, speed: playSpeed })
+    setAnnounce(`Ahora: ${target.label}${target.repeat > 1 ? ` ${target.pass}/${target.repeat}` : ''}`)
+  }
+
+  const nudge = (sign: -1 | 1) => {
+    if (audioKind) setLead(leadMs + sign * NUDGE_MS)
+    else playback.shift(-sign * NUDGE_MS)
+  }
+
+  const playKeysRef = useRef({ resyncCue, nudge, markNext, undoMark })
+  playKeysRef.current = { resyncCue, nudge, markNext, undoMark }
+  const dockEscape = useRef<(() => boolean) | null>(null)
+  const escapePlayback = () => {
+    const state = markingRef.current
+    if (state?.phase === 'marking') {
+      stopPlayback()
+      return true
+    }
+    if (state?.phase === 'review') {
+      setMarking(null)
+      return true
+    }
+    return dockEscape.current?.() ?? false
+  }
+  const escapePlaybackRef = useRef(escapePlayback)
+  escapePlaybackRef.current = escapePlayback
 
   useEffect(() => {
     if (!version) return
@@ -527,7 +679,7 @@ export function SongView() {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
+      if (event.altKey || event.ctrlKey || event.metaKey) return
       const target = event.target
       if (
         target instanceof HTMLElement &&
@@ -535,6 +687,34 @@ export function SongView() {
       ) {
         return
       }
+      const keys = playKeysRef.current
+      // While marking, the arrows and the pedal tap part starts instead of moving.
+      if (markingRef.current?.phase === 'marking' && !event.shiftKey) {
+        if (event.key === 'm' || event.key === 'M' || event.key === 'ArrowRight' || event.key === 'PageDown') {
+          event.preventDefault()
+          keys.markNext()
+          return
+        }
+        if (event.key === 'ArrowLeft' || event.key === 'PageUp') {
+          event.preventDefault()
+          keys.undoMark()
+          return
+        }
+      }
+      if (playingRef.current && !markingRef.current) {
+        if (event.shiftKey && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
+          event.preventDefault()
+          keys.resyncCue(event.key === 'ArrowLeft' ? -1 : 1)
+          return
+        }
+        // Spanish keyboards type + without Shift; the numpad sends its own keys.
+        if (event.key === '-' || event.key === '+' || event.key === '=') {
+          event.preventDefault()
+          keys.nudge(event.key === '-' ? -1 : 1)
+          return
+        }
+      }
+      if (event.shiftKey) return
       if (event.key === ' ' || event.code === 'Space') {
         event.preventDefault()
         setHeaderOpen((open) => !open)
@@ -589,6 +769,8 @@ export function SongView() {
       if (event.key !== 'Escape' || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
       if (typing(event.target)) return
       event.preventDefault()
+      // Marking and the open settings panel close first; the next Escape leaves the song.
+      if (escapePlaybackRef.current()) return
       navigate(listaId ? `/listas/${encodeURIComponent(listaId)}` : '/')
     }
     window.addEventListener('keydown', onKey, true)
@@ -1057,6 +1239,26 @@ export function SongView() {
                 { id: 'jump', keys: <Kbd>1–9</Kbd>, label: 'Ir a esa parte' },
                 { id: 'play', keys: <Kbd>P</Kbd>, label: 'Reproducir o parar' },
                 {
+                  id: 'sync',
+                  keys: (
+                    <>
+                      <Kbd>⇧←</Kbd>
+                      <Kbd>⇧→</Kbd>
+                    </>
+                  ),
+                  label: 'Reproduciendo: estamos aquí',
+                },
+                {
+                  id: 'lead',
+                  keys: (
+                    <>
+                      <Kbd>−</Kbd>
+                      <Kbd>+</Kbd>
+                    </>
+                  ),
+                  label: 'Entrada ¼ s',
+                },
+                {
                   id: 'song',
                   keys: (
                     <>
@@ -1296,6 +1498,9 @@ export function SongView() {
                 </span>
               )}
             </span>
+            {playback.playing && !marking ? (
+              <FooterNext elapsed={playback.elapsed} cues={cues} totalMs={playback.timeline.totalMs} />
+            ) : (
             <span
               className={cn(
                 'block max-w-full truncate rounded-md px-2 text-xs transition-colors motion-reduce:transition-none',
@@ -1314,6 +1519,7 @@ export function SongView() {
                 'Última parte'
               )}
             </span>
+            )}
           </p>
           <Button
             size="lg"
@@ -1341,9 +1547,61 @@ export function SongView() {
           startLabel={partLabel}
           bottom={32 + footerHeight + 12}
           onToggle={togglePlayback}
+          cues={cues}
+          escapeRef={dockEscape}
+          sync={{
+            leadMs,
+            speed: playSpeed,
+            dirty: session != null,
+            canSave: Boolean(song?.editable),
+            onLead: setLead,
+            onSpeed: setSpeed,
+            onSave: saveSync,
+          }}
+          marks={{
+            state: marking,
+            canMark: Boolean(song?.editable && audioSrc && !playback.error),
+            measured: measuredParts,
+            total: blocks.length,
+            stale: staleMarks,
+            nextLabel: marking && marking.starts.length < blocks.length ? blocks[marking.starts.length]!.label : null,
+            onStart: startMarking,
+            onMark: markNext,
+            onUndo: undoMark,
+            onDone: stopPlayback,
+            onSave: saveMarks,
+            onDiscard: () => setMarking(null),
+            onClear: clearMarks,
+          }}
         />
       )}
     </div>
+  )
+}
+
+/** While playing, the footer counts down to the next part (own component: it re-renders on its own clock). */
+function FooterNext({ elapsed, cues, totalMs }: { elapsed: () => number; cues: Cue[]; totalMs: number }) {
+  const t = useFrameTime(elapsed, true, 500) ?? 0
+  const index = cueIndexAt(cues, t)
+  const next = cues[index + 1]
+  const left = (next ? next.at : totalMs) - t
+  const near = Boolean(next) && left <= NEAR_CUE_MS
+  return (
+    <span
+      className={cn(
+        'block max-w-full truncate rounded-md px-2 text-xs tabular-nums transition-colors motion-reduce:transition-none',
+        near ? 'bg-primary/20 py-0.5 text-sm text-foreground ring-1 ring-primary' : 'text-muted-foreground',
+      )}
+    >
+      {next ? (
+        <>
+          {index < 0 ? 'Empieza' : 'Sigue'} <span className="font-semibold text-foreground">{next.label}</span>
+          {next.repeat > 1 ? ` ${next.pass}/${next.repeat}` : ''} en {formatClock(Math.max(0, left))}
+        </>
+      ) : (
+        <>Última parte · termina en {formatClock(Math.max(0, left))}</>
+      )}
+    </span>
   )
 }
 

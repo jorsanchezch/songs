@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS songs (
   bpm INTEGER,
   duration_ms INTEGER,
   audio_url TEXT NOT NULL DEFAULT '',
+  playback TEXT NOT NULL DEFAULT '{}',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   revision INTEGER NOT NULL DEFAULT 1

@@ -26,12 +26,22 @@ import { can, currentUser, roleLabel } from '../src/lib/access.ts'
 import { parseChart } from '../src/lib/parseChart.ts'
 import {
   buildTimeline,
+  cueIndexAt,
+  cuePoints,
   effectiveAudio,
+  formatClock,
+  formatLead,
+  impliedBpm,
   locate,
+  marksToParts,
+  parsePlaybackSettings,
+  partKeys,
+  referenceTrack,
   songMediaSources,
   startOffset,
   youtubeVideoId,
 } from '../src/lib/playback.ts'
+import { songPlayback } from '../server/playback.ts'
 import { sectionDegrees, sectionProgressions } from '../src/lib/sectionProgression.ts'
 import { diatonicChords, keyName, parseStudyKey, pianoVoicings, signature } from '../src/lib/theory.ts'
 import { distinctMarks, songIconIndex, songMarkTone, SONG_ICON_SHAPES, SONG_MARK_HUES } from '../src/lib/songMark.ts'
@@ -610,7 +620,7 @@ assert(pattern.alternatives.every((item) => item.key !== 'C'), 'another song in 
   assert(locate(byDuration, 50_000) === null, 'playback ends with the song')
   assert(startOffset(byDuration, 'verso', 1) === 20_000, 'a slice starts at its line')
   // BPM: intro 4 bars, verso 2 + 2, coro 2 × 2 = 12 bars at 120 = 24 s.
-  const byBpm = buildTimeline({ blocks: playBlocks, settings: { pace: 'parts', useBpm: true }, bpm: 120, durationMs: 50_000 })
+  const byBpm = buildTimeline({ blocks: playBlocks, settings: { pace: 'tempo', useBpm: true }, bpm: 120, durationMs: 50_000 })
   assert(byBpm.basis === 'bpm' && byBpm.totalMs === 24_000, `bpm timeline ${byBpm.totalMs}`)
   const refined = buildTimeline({ blocks: playBlocks, settings: { pace: 'duration', useBpm: true }, bpm: 120, durationMs: 48_000 })
   assert(refined.blocks[1]?.start === 16_000, 'bpm weighs bars inside the duration')
@@ -626,6 +636,37 @@ assert(pattern.alternatives.every((item) => item.key !== 'C'), 'another song in 
   const playMedia = songMediaSources({ ...playSong, audioUrl: '', bpm: null, durationMs: null })
   assert(playMedia.youtubeId === 'dQw4w9WgXcQ', 'song media finds the YouTube source')
   assert(effectiveAudio('mp3', playMedia) === 'off' && effectiveAudio('youtube', playMedia) === 'youtube', 'missing audio falls back to silence')
+  const starts = (timeline: { blocks: { start: number }[] }) => timeline.blocks.map((block) => block.start).join(',')
+  const dur = { pace: 'duration' as const, useBpm: false }
+  assert(partKeys([{ id: 'verso' }, { id: 'coro' }, { id: 'verso' }]).join(',') === 'verso,coro,verso~2', 'a part played again keys its occurrence')
+  const intro = buildTimeline({ blocks: playBlocks, settings: dur, durationMs: 54_000, introMs: 4_000 })
+  assert(intro.totalMs === 50_000 && starts(intro) === '0,10000,30000', `the intro comes off the length ${starts(intro)}`)
+  const marked = buildTimeline({ blocks: playBlocks, settings: dur, durationMs: 99_000, parts: { intro: 8000, verso: 20000, coro: 12000 } })
+  assert(marked.basis === 'marks' && starts(marked) === '0,8000,28000' && marked.totalMs === 40_000, `full marks win ${starts(marked)}`)
+  assert(marked.blocks[2]?.passMs === 6000 && marked.measured === 3, 'a measured repeat splits its passes')
+  const partial = buildTimeline({ blocks: playBlocks, settings: dur, durationMs: 48_000, parts: { intro: 8000 } })
+  assert(partial.basis === 'marks' && starts(partial) === '0,8000,28000', `the rest shares what is left ${starts(partial)}`)
+  const noLength = buildTimeline({ blocks: playBlocks, settings: dur, parts: { intro: 8000 } })
+  assert(noLength.blocks[1]?.start === 8000 && noLength.blocks[2]?.start === 24_000, 'without a length the measured rate sets the pace')
+  const tempoMarks = buildTimeline({ blocks: playBlocks, settings: { pace: 'tempo', useBpm: true }, bpm: 120, parts: { intro: 8000 } })
+  assert(tempoMarks.basis === 'bpm' && tempoMarks.totalMs === 24_000, 'tempo pace ignores marks')
+  const stray = buildTimeline({ blocks: playBlocks, settings: dur, durationMs: 50_000, parts: { puente: 9000 } })
+  assert(stray.basis === 'duration' && starts(stray) === '0,10000,30000', 'marks for missing parts change nothing')
+  const fromMarks = marksToParts(['intro', 'verso', 'coro'], [4000, 12_000, 32_000], 44_000)
+  assert(fromMarks.introMs === 4000 && Object.values(fromMarks.parts).join(',') === '8000,20000,12000', 'taps become part lengths')
+  assert(Object.keys(marksToParts(['intro', 'verso', 'coro'], [4000, null, 32_000], null).parts).length === 0, 'a missed tap skips its neighbours')
+  const cues = cuePoints(byDuration)
+  assert(cues.length === 4 && cues[3]?.at === 40_000 && cues[3]?.pass === 2, 'each pass of a repeat is a cue')
+  assert(cueIndexAt(cues, -1) === -1 && cueIndexAt(cues, 41_000) === 3, 'cue lookup')
+  assert(impliedBpm(refined) === 60 && impliedBpm(byDuration) === null, 'implied tempo only when bars are weighed')
+  assert(parsePlaybackSettings('{"pace":"parts"}').pace === 'tempo' && parsePlaybackSettings('junk').audio === 'off', 'old and broken settings load')
+  assert(formatClock(-4000) === '\u22120:04' && formatLead(4500) === '0:04,5', 'clock formats')
+  const playTrack = { src: 'dQw4w9WgXcQ', introMs: 1000, parts: {} }
+  assert(referenceTrack({ youtube: playTrack }, 'off', playMedia) === playTrack, 'silent play borrows the YouTube marks')
+  assert(referenceTrack({ youtube: { ...playTrack, src: 'other123456' } }, 'youtube', playMedia) === null, 'marks from another video are stale')
+  const cleaned = songPlayback({ youtube: { src: 'x', introMs: -5, parts: { verso: 9000, 'bad key': 1, coro: 'x' } }, speed: 1 })
+  assert(JSON.stringify(cleaned) === '{"youtube":{"src":"x","introMs":0,"parts":{"verso":9000}}}', `server cleans playback ${JSON.stringify(cleaned)}`)
+  assert(JSON.stringify(songPlayback('junk')) === '{}' && songPlayback({ speed: 3 }).speed === 2, 'junk and speed bounds')
 }
 
 console.log(`Parsed ${files.length} charts`)

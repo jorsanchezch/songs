@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
+  LEAD_MAX_MS,
   locate,
   sameCursor,
   type PlaybackAudio,
@@ -22,18 +23,48 @@ type MediaClock = {
 type MediaEvents = {
   onLength: (ms: number) => void
   onEnded: () => void
+  /** The player paused itself, e.g. someone tapped the video. */
+  onPaused: () => void
   onError: (message: string) => void
+}
+
+const LOADING_HINT_MS = 12_000
+
+/** Playback time rounded to `stepMs`, refreshed every frame while active. */
+export function useFrameTime(elapsed: () => number, active: boolean, stepMs: number): number | null {
+  const [time, setTime] = useState<number | null>(null)
+  useEffect(() => {
+    if (!active) {
+      setTime(null)
+      return
+    }
+    let frame = 0
+    const step = () => {
+      const rounded = Math.floor(elapsed() / stepMs) * stepMs
+      setTime((prev) => (prev === rounded ? prev : rounded))
+      frame = requestAnimationFrame(step)
+    }
+    frame = requestAnimationFrame(step)
+    return () => cancelAnimationFrame(frame)
+  }, [active, elapsed, stepMs])
+  return time
 }
 
 export function usePlayback({
   makeTimeline,
   audio,
   media,
+  leadMs = 0,
+  speed = 1,
 }: {
   /** Builds the timeline; gets the loaded audio's length once known. Keep it stable with useCallback. */
   makeTimeline: (mediaMs: number | null) => Timeline
   audio: PlaybackAudio
   media: SongMediaSources
+  /** Media time before the chart's first part; chart time is media time minus this. */
+  leadMs?: number
+  /** Silent playback only: how fast the chart runs. */
+  speed?: number
 }) {
   const [status, setStatus] = useState<PlaybackStatus>('idle')
   const [cursor, setCursor] = useState<PlaybackCursor | null>(null)
@@ -51,15 +82,22 @@ export function usePlayback({
   const anchorRef = useRef({ media: 0, at: 0 })
   const cursorRef = useRef<PlaybackCursor | null>(null)
   const pendingRef = useRef<number | null>(null)
+  const leadRef = useRef(leadMs)
+  const speedRef = useRef(speed)
+  leadRef.current = leadMs
 
   useLayoutEffect(() => {
     timelineRef.current = timeline
   }, [timeline])
 
+  /** Chart time: negative while the audio plays its intro. */
   const elapsed = useCallback((): number => {
     const now = performance.now()
     const clock = mediaRef.current
-    if (!clock) return silentRef.current.from + (playingRef.current ? now - silentRef.current.at : 0)
+    if (!clock) {
+      const silent = silentRef.current
+      return silent.from + (playingRef.current ? (now - silent.at) * speedRef.current : 0)
+    }
     // Until the audio really starts, hold the part where play was pressed.
     if (pendingRef.current != null) {
       if (!clock.running()) return pendingRef.current
@@ -70,10 +108,16 @@ export function usePlayback({
     const anchor = anchorRef.current
     if (!clock.running() || reported !== anchor.media) {
       anchorRef.current = { media: reported, at: now }
-      return reported
+      return reported - leadRef.current
     }
-    return anchor.media + Math.min(now - anchor.at, 1000)
+    return anchor.media + Math.min(now - anchor.at, 1000) - leadRef.current
   }, [])
+
+  // A new speed keeps the chart where it is and runs on from there.
+  useEffect(() => {
+    if (playingRef.current && !mediaRef.current) silentRef.current = { from: elapsed(), at: performance.now() }
+    speedRef.current = speed
+  }, [elapsed, speed])
 
   const stop = useCallback(() => {
     playingRef.current = false
@@ -97,8 +141,8 @@ export function usePlayback({
       return
     }
     if (clock && clock.running()) setStatus((prev) => (prev === 'playing' ? prev : 'playing'))
-    // With audio, the last line holds until the audio itself ends.
-    const next = locate(line, Math.min(t, line.totalMs - 1))
+    // With audio, the last line holds until the audio itself ends; the intro shows no line.
+    const next = t < 0 ? null : locate(line, Math.min(t, line.totalMs - 1))
     if (!sameCursor(next, cursorRef.current)) {
       cursorRef.current = next
       setCursor(next)
@@ -117,9 +161,11 @@ export function usePlayback({
         silentRef.current = { from, at: performance.now() }
         setStatus('playing')
       } else {
-        pendingRef.current = from
+        // Playing from the first part plays the intro too.
+        const seek = from <= 0 ? 0 : from + leadRef.current
+        pendingRef.current = seek - leadRef.current
         setStatus('loading')
-        clock.play(from).catch((reason: unknown) => {
+        clock.play(seek).catch((reason: unknown) => {
           if (!playingRef.current) return
           setError(reason instanceof Error && reason.message ? reason.message : 'No se pudo reproducir el audio.')
           stopRef.current()
@@ -129,6 +175,39 @@ export function usePlayback({
     },
     [tick],
   )
+
+  /** "We are at this moment now." Silent play jumps there; with audio it returns the lead that makes it true. */
+  const resync = useCallback(
+    (chartMs: number): number | null => {
+      const clock = mediaRef.current
+      if (!clock) {
+        silentRef.current = { from: chartMs, at: performance.now() }
+        return null
+      }
+      const lead = Math.min(LEAD_MAX_MS, Math.max(0, elapsed() + leadRef.current - chartMs))
+      leadRef.current = lead
+      return lead
+    },
+    [elapsed],
+  )
+
+  /** Silent play only: move the chart by `deltaMs`. */
+  const shift = useCallback((deltaMs: number) => {
+    if (mediaRef.current) return
+    silentRef.current = { ...silentRef.current, from: silentRef.current.from + deltaMs }
+  }, [])
+
+  const mediaTime = useCallback((): number | null => {
+    const clock = mediaRef.current
+    return clock ? elapsed() + leadRef.current : null
+  }, [elapsed])
+
+  // iOS may refuse to start the video outside the tap; the player is visible, so a tap on it works.
+  useEffect(() => {
+    if (status !== 'loading') return
+    const timer = window.setTimeout(() => setError('El audio no arranca. Toca el video para empezar.'), LOADING_HINT_MS)
+    return () => window.clearTimeout(timer)
+  }, [status])
 
   const youtubeId = audio === 'youtube' ? media.youtubeId : null
   const audioUrl = audio === 'mp3' ? media.audioUrl : null
@@ -141,6 +220,9 @@ export function usePlayback({
     const events: MediaEvents = {
       onLength: (ms) => setMediaMs((prev) => (prev && Math.abs(prev - ms) < 500 ? prev : Math.round(ms))),
       onEnded: () => stopRef.current(),
+      onPaused: () => {
+        if (playingRef.current && pendingRef.current == null) stopRef.current()
+      },
       onError: (message) => {
         setError(message)
         stopRef.current()
@@ -175,6 +257,9 @@ export function usePlayback({
     elapsed,
     start,
     stop,
+    resync,
+    shift,
+    mediaTime,
     /** Ref for the element that holds the YouTube player. */
     youtubeHost: setYoutubeHost,
   }
@@ -255,6 +340,7 @@ declare global {
 
 const YT_PLAYING = 1
 const YT_ENDED = 0
+const YT_PAUSED = 2
 
 let youtubeApi: Promise<YouTubeApi> | null = null
 
@@ -302,7 +388,8 @@ function createYouTubeClock(host: HTMLElement, videoId: string, events: MediaEve
           videoId,
           width: '100%',
           height: '100%',
-          playerVars: { playsinline: 1, rel: 0, modestbranding: 1 },
+          // No keyboard in the player, so P and the arrows keep working when it has focus.
+          playerVars: { playsinline: 1, rel: 0, modestbranding: 1, controls: 0, disablekb: 1, fs: 0, iv_load_policy: 3 },
           events: {
             onReady: () => {
               player = created
@@ -313,6 +400,7 @@ function createYouTubeClock(host: HTMLElement, videoId: string, events: MediaEve
               state = data
               if (data === YT_PLAYING) reportLength()
               if (data === YT_ENDED) events.onEnded()
+              if (data === YT_PAUSED) events.onPaused()
             },
             onError: () => {
               events.onError('YouTube no deja reproducir este video aquí.')

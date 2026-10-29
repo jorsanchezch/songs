@@ -5,6 +5,7 @@ import {
   deleteSong,
   getSong,
   listSongs,
+  putPlayback,
   restoreSong as restoreSongApi,
   revealSongs,
   saveSong as saveSongApi,
@@ -13,7 +14,7 @@ import {
 } from '@/lib/api'
 import { INSTRUMENTS, isInstrument, type InstrumentId } from '@/lib/instruments'
 import { parseChart } from '@/lib/parseChart'
-import type { Song, SongOrigin } from '@/lib/types'
+import type { Song, SongOrigin, SongPlayback } from '@/lib/types'
 import { useUser } from '@/hooks/useUser'
 
 type LoadState =
@@ -36,6 +37,7 @@ type Entry = {
   revision: number
   partRevisions: Partial<Record<InstrumentId, number>>
   parts: Partial<Record<InstrumentId, string>>
+  playback: SongPlayback
   missing?: boolean
 }
 
@@ -68,6 +70,7 @@ function upsert(row: ApiSong) {
       revision: row.revision,
       partRevisions: {},
       parts: {},
+      playback: {},
     }
     entries.push(entry)
   }
@@ -83,6 +86,7 @@ function upsert(row: ApiSong) {
   entry.hasCopy = row.hasCopy
   entry.revision = row.revision
   entry.missing = false
+  entry.playback = row.playback ?? {}
   entry.parts[row.instrument] = row.sourceText
   entry.partRevisions[row.instrument] = row.partRevision
 }
@@ -127,6 +131,7 @@ function materialize(entry: Entry, instrument: InstrumentId): Song | null {
     removable: entry.removable,
     shares: entry.shares,
     hasCopy: entry.hasCopy,
+    playback: entry.playback,
     instrument,
   }
 }
@@ -230,6 +235,7 @@ export function useSongs() {
           revision: 0,
           partRevisions: {},
           parts: {},
+          playback: {},
           missing: true,
         })
       } else if (status !== 404) {
@@ -334,9 +340,26 @@ export function useSongs() {
     emit()
   }
 
+  const savePlayback = async (id: string, playback: SongPlayback) => {
+    const entry = entries.find((item) => item.id === id)
+    if (!entry) return
+    const before = entry.playback
+    entry.playback = playback
+    emit()
+    try {
+      entry.playback = (await putPlayback(id, playback)).playback
+      emit()
+    } catch (error) {
+      entry.playback = before
+      emit()
+      throw error
+    }
+  }
+
   return {
     state,
     reload,
+    savePlayback,
     saveSong,
     removeSong,
     restoreSong,
