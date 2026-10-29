@@ -9,10 +9,13 @@ import { isImmutableAdmin, isStaff, roleLabel, type Role } from '@/lib/access'
 import {
   createPerson,
   getAdmin,
+  getMediaBackfill,
   removePerson,
+  runMediaBackfill,
   updatePerson,
   type AdminOverview,
   type AdminPerson,
+  type MediaBackfillReport,
 } from '@/lib/api'
 
 const page = 'mx-auto w-full max-w-[52.8rem] px-4'
@@ -225,6 +228,8 @@ function AdminPanel() {
               onCreate={(body) => run(() => createPerson(body), 'Persona creada.')}
             />
 
+            <MediaBackfillPanel />
+
             <section className="flex flex-col gap-3">
               <h2 className="font-semibold">Personas</h2>
               <p className="text-sm text-muted-foreground">
@@ -279,6 +284,98 @@ function AdminPanel() {
         {!loading && <InfraLinks />}
       </main>
     </div>
+  )
+}
+
+function MediaBackfillPanel() {
+  const [status, setStatus] = useState<MediaBackfillReport | null>(null)
+  const [report, setReport] = useState<MediaBackfillReport | null>(null)
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    let cancel = false
+    void getMediaBackfill()
+      .then((next) => {
+        if (!cancel) setStatus(next)
+      })
+      .catch((reason) => {
+        if (!cancel) setError(reason instanceof Error ? reason.message : 'No pude leer el estado del relleno.')
+      })
+    return () => {
+      cancel = true
+    }
+  }, [])
+
+  const run = async (dryRun: boolean) => {
+    setBusy(true)
+    setError('')
+    try {
+      const next = await runMediaBackfill({ limit: 20, dryRun })
+      setReport(next)
+      setStatus(next)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'No pude completar el relleno.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const shown = report ?? status
+
+  return (
+    <section className="flex flex-col gap-3">
+      <h2 className="font-semibold">Medios (YouTube / duración / BPM)</h2>
+      <p className="text-sm text-muted-foreground">
+        Rellena YouTube, duración y BPM en canciones que aún no tienen video. Escribe los campos en el texto del chart
+        (y en <code className="text-xs">catalog_source</code> / columnas) para que la reproducción los lea. Cupo ~100
+        búsquedas/día con la clave de YouTube; el resto queda en cola. MP3 solo si R2 está configurado (si no, usa la
+        subida del editor).
+      </p>
+      {error && <p className="text-sm text-destructive">{error}</p>}
+      {shown && (
+        <div className="rounded-xl border bg-card p-4 text-sm">
+          <p>
+            Sin YouTube: <strong>{shown.missingBefore}</strong>
+            {' · '}
+            Cupo hoy: {shown.searchQuota.used}/{shown.searchQuota.limit} (quedan {shown.searchQuota.remaining})
+            {' · '}
+            Cola: {shown.queueSize}
+          </p>
+          <p className="mt-1 text-muted-foreground">
+            Clave YouTube: {shown.apiKeyPresent ? 'sí' : 'no'} · R2: {shown.r2Configured ? 'sí' : 'no'}
+          </p>
+          {shown.note && <p className="mt-2 text-muted-foreground">{shown.note}</p>}
+          {report && (
+            <p className="mt-2">
+              Última corrida{report.dryRun ? ' (simulación)' : ''}: {report.updated} actualizadas, {report.skipped}{' '}
+              omitidas, {report.queued} en cola, {report.errors} errores.
+            </p>
+          )}
+          {report && report.results.length > 0 && (
+            <ul className="mt-3 max-h-48 list-disc overflow-y-auto pl-5 text-muted-foreground">
+              {report.results.slice(0, 40).map((item) => (
+                <li key={`${item.id}:${item.status}:${item.youtubeUrl ?? ''}`}>
+                  {item.title}: {item.status}
+                  {item.youtubeUrl ? ` → ${item.youtubeUrl}` : ''}
+                  {item.reason ? ` (${item.reason})` : ''}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+      <div className="flex flex-wrap gap-2">
+        <Button type="button" variant="outline" disabled={busy} onClick={() => void run(true)}>
+          {busy ? <Loader2 className="animate-spin" /> : null}
+          Simular lote
+        </Button>
+        <Button type="button" disabled={busy} onClick={() => void run(false)}>
+          {busy ? <Loader2 className="animate-spin" /> : null}
+          Completar lote
+        </Button>
+      </div>
+    </section>
   )
 }
 

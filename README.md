@@ -45,6 +45,19 @@ Entrar es por nombre. Jorge Sanchez queda como dueño. Un nombre nuevo entra com
 
 El workflow de Pages construye con `VITE_SONGBOOK_API=https://songbook.jorsanchezch.workers.dev`, así el sitio publicado llama a D1. GitHub Pages sigue sirviendo solo el frontend.
 
+### Medios: YouTube, BPM, duración, MP3
+
+La reproducción lee `bpm`, `duration_ms`, `audio_url` y la fuente YouTube del **texto del chart** (`parseChart` / `materialize`), no solo de las columnas D1. El relleno escribe ambos.
+
+1. Crea una clave gratuita de [YouTube Data API v3](https://developers.google.com/youtube/v3/getting-started).
+2. En el Worker: `npx wrangler secret put YOUTUBE_API_KEY`.
+3. Despliega el Worker (`npx wrangler deploy`).
+4. En **Administración → Medios**, pulsa *Completar lote* (o `POST /api/admin/media-backfill`). Respeta ~100 `search.list`/día; el resto queda en cola (`app_meta`).
+
+Sin clave el endpoint sigue existiendo: usa búsqueda pública best-effort (sin duración ISO fiable) y documenta el aviso en la respuesta. En local también puedes exportar `YOUTUBE_API_KEY` y correr `npx tsx scripts/media-backfill.ts`.
+
+MP3 desde YouTube solo si hay bucket R2 (`AUDIO_BUCKET` en `wrangler.toml`). Si no está, el relleno omite el extract y deja la URL/subida del editor. Este Worker no ejecuta un extractor de audio; R2 queda listo para alojar archivos subidos a mano.
+
 ### Copia de seguridad
 
 Después de un cambio importante:

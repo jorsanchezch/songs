@@ -1,10 +1,13 @@
 import { findPublicChart } from './chartSearch.ts'
 import { DEFAULT_INSTRUMENT, INSTRUMENTS, isInstrument, type InstrumentId } from './instruments.ts'
 import { shareLyrics } from './lyrics.ts'
+import { mediaBackfillStatus, runMediaBackfill, type MediaBackfillEnv } from './mediaBackfill.ts'
 import { chartMeta } from './meta.ts'
 import { hashPassword, verifyPassword } from './password.ts'
 import { OWNER_ID } from './schema.ts'
 import type { Sql } from './sql.ts'
+
+export type ApiEnv = MediaBackfillEnv
 
 type Role = 'owner' | 'admin' | 'viewer'
 type Origin = 'catalog' | 'local' | 'copy'
@@ -46,7 +49,7 @@ class RevisionConflict extends Error {
 
 const ID_OK = /^[A-Za-z0-9_-]{1,80}$/
 
-export async function handleApi(sql: Sql, request: Request): Promise<Response> {
+export async function handleApi(sql: Sql, request: Request, env: ApiEnv = {}): Promise<Response> {
   const url = new URL(request.url)
   const { pathname } = url
   try {
@@ -69,6 +72,12 @@ export async function handleApi(sql: Sql, request: Request): Promise<Response> {
     if (pathname === '/api/profile/password' && request.method === 'PUT') return setOwnPassword(sql, user, request)
     if (pathname === '/api/admin' && request.method === 'GET') return adminOverview(sql, user)
     if (pathname === '/api/admin/users' && request.method === 'POST') return adminCreateUser(sql, user, request)
+    if (pathname === '/api/admin/media-backfill' && request.method === 'GET') {
+      return adminMediaBackfillGet(sql, user, env)
+    }
+    if (pathname === '/api/admin/media-backfill' && request.method === 'POST') {
+      return adminMediaBackfillPost(sql, user, request, env)
+    }
     const adminUserPath = pathname.match(/^\/api\/admin\/users\/([^/]+)$/)
     if (adminUserPath) {
       const id = decodeURIComponent(adminUserPath[1] ?? '')
@@ -1134,6 +1143,29 @@ async function searchCharts(url: URL): Promise<Response> {
     const message = error instanceof Error && error.message ? error.message : 'No pude buscar en la web. Pega un enlace.'
     return json({ error: message }, 502)
   }
+}
+
+async function adminMediaBackfillGet(sql: Sql, user: User, env: ApiEnv): Promise<Response> {
+  const denied = staffOnly(user)
+  if (denied) return denied
+  return json(await mediaBackfillStatus(sql, env))
+}
+
+async function adminMediaBackfillPost(
+  sql: Sql,
+  user: User,
+  request: Request,
+  env: ApiEnv,
+): Promise<Response> {
+  const denied = staffOnly(user)
+  if (denied) return denied
+  const body = await readJson<{ limit?: number; dryRun?: boolean; extractAudio?: boolean }>(request)
+  const report = await runMediaBackfill(sql, env, {
+    limit: typeof body.limit === 'number' ? body.limit : undefined,
+    dryRun: body.dryRun === true,
+    extractAudio: body.extractAudio !== false,
+  })
+  return json(report)
 }
 
 function json(data: unknown, status = 200): Response {

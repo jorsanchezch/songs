@@ -5,6 +5,9 @@ import { ensureSchema } from '../server/seed.ts'
 type Env = {
   DB: D1Database
   SONGBOOK_ORIGIN?: string
+  YOUTUBE_API_KEY?: string
+  /** Optional R2 bucket for future MP3 hosting. When absent, backfill skips extract. */
+  AUDIO_BUCKET?: unknown
 }
 
 let ready: Promise<void> | null = null
@@ -17,9 +20,12 @@ export default {
     if (!ready) ready = ensureSchema(openD1(env.DB))
     await ready
     if (url.pathname === '/' || url.pathname === '') {
-      return cors(text('Songbook API. Las rutas están en /api/.'), origin)
+      return cors(text('Songbook API. Las rutas van en /api/.'), origin)
     }
-    const response = await handleApi(openD1(env.DB), request)
+    const response = await handleApi(openD1(env.DB), request, {
+      YOUTUBE_API_KEY: env.YOUTUBE_API_KEY,
+      AUDIO_BUCKET: env.AUDIO_BUCKET,
+    })
     return cors(response, origin)
   },
 }

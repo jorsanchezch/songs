@@ -522,6 +522,56 @@ async function checkPasswords(files: { id: string; sourceText: string }[]) {
   assert(!finalHash?.password_hash, 'jorge still has no password')
 }
 
+{
+  const { applyChartMedia } = await import('../server/chartMedia.ts')
+  const owner = await signIn(sql, 'Jorge Sanchez')
+  const status = await call(sql, owner.token, 'GET', '/api/admin/media-backfill')
+  assert(status.status === 200, `media backfill status ${status.status}`)
+  assert(typeof status.data.missingBefore === 'number' && (status.data.missingBefore as number) > 0, 'songs missing youtube')
+  assert(status.data.apiKeyPresent === false, 'no youtube key in test env')
+  const viewer = await signIn(sql, 'Nila Backfill')
+  const denied = await call(sql, viewer.token, 'POST', '/api/admin/media-backfill', { dryRun: true, limit: 1 })
+  assert(denied.status === 403, 'viewer cannot backfill')
+
+  const sample = await sql.get<{ id: string; source_text: string; catalog_source: string }>(
+    `SELECT s.id, p.source_text, s.catalog_source
+     FROM songs s
+     JOIN instrument_parts p ON p.song_id = s.id AND p.instrument = 'guitar'
+     WHERE s.origin = 'catalog' AND p.source_text NOT LIKE '%youtu%'
+     LIMIT 1`,
+  )
+  assert(sample, 'catalog sample without youtube')
+  const patched = applyChartMedia(sample.source_text, {
+    youtubeUrl: 'https://www.youtube.com/watch?v=backfilltest1',
+    bpm: 96,
+    durationMs: 201_000,
+  })
+  await sql.transaction(async (tx) => {
+    await tx.run(`UPDATE instrument_parts SET source_text = ?, revision = revision + 1 WHERE song_id = ?`, [
+      patched,
+      sample.id,
+    ])
+    await tx.run(
+      `UPDATE songs SET bpm = ?, duration_ms = ?, catalog_source = ?, updated_at = ?, revision = revision + 1 WHERE id = ?`,
+      [96, 201_000, applyChartMedia(sample.catalog_source || sample.source_text, {
+        youtubeUrl: 'https://www.youtube.com/watch?v=backfilltest1',
+        bpm: 96,
+        durationMs: 201_000,
+      }), new Date().toISOString(), sample.id],
+    )
+  })
+  const got = await call(sql, owner.token, 'GET', `/api/songs/${encodeURIComponent(sample.id)}?instrument=guitar`)
+  assert(got.status === 200, 'fetch patched song')
+  const song = got.data.song as { bpm: number; durationMs: number; sourceText: string }
+  assert(song.bpm === 96 && song.durationMs === 201_000, 'dto carries bpm and duration')
+  assert(song.sourceText.includes('backfilltest1') && song.sourceText.includes('bpm: 96'), 'chart text carries media for playback')
+  const after = await call(sql, owner.token, 'GET', '/api/admin/media-backfill')
+  assert(
+    (after.data.missingBefore as number) < (status.data.missingBefore as number),
+    'missing youtube count drops after chart write',
+  )
+}
+
 async function enter(sql: Sql, name: string, password?: string) {
   return call(sql, '', 'POST', '/api/session', password ? { name, password } : { name })
 }

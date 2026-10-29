@@ -80,7 +80,10 @@ async function answer(
   if (typeof req.headers['content-type'] === 'string') headers.set('content-type', req.headers['content-type'])
   const body = method === 'GET' || method === 'HEAD' ? undefined : await readRaw(req)
   const request = new Request(`http://127.0.0.1${req.url ?? '/'}`, { method, headers, body })
-  const response = await handleApi(sql, request)
+  const response = await handleApi(sql, request, {
+    YOUTUBE_API_KEY: process.env.YOUTUBE_API_KEY,
+    AUDIO_BUCKET: process.env.SONGBOOK_AUDIO_BUCKET ? { configured: true } : undefined,
+  })
   await writeResponse(res, response)
 }
 

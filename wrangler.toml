@@ -11,3 +11,10 @@ database_id = "a3f3f9f3-33d7-4f07-a94f-cd44a64f483b"
 
 [vars]
 SONGBOOK_ORIGIN = "*"
+
+# Secrets (not in this file):
+#   npx wrangler secret put YOUTUBE_API_KEY
+# Optional R2 for future MP3 hosting / extract pipeline:
+# [[r2_buckets]]
+# binding = "AUDIO_BUCKET"
+# bucket_name = "songbook-audio"

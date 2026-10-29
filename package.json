@@ -12,7 +12,8 @@
     "check": "tsx --tsconfig tsconfig.app.json scripts/smoke.ts",
     "db:check": "tsx scripts/db-check.ts",
     "db:export-seed": "tsx scripts/export-seed.ts",
-    "db:backup": "tsx scripts/db-backup.ts"
+    "db:backup": "tsx scripts/db-backup.ts",
+    "media:backfill": "tsx scripts/media-backfill.ts"
   },
   "dependencies": {
     "class-variance-authority": "^0.7.1",

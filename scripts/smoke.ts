@@ -138,6 +138,57 @@ assert(
   roundMedia.sources.some((item) => item.label === 'YouTube' && item.url.includes('youtube.com')),
   'reads YouTube source',
 )
+
+const { applyChartMedia, chartHasYoutube } = await import('../server/chartMedia.ts')
+const { parseIsoDurationMs, bpmFromText, searchLanguage, youtubeWatchUrl } = await import('../server/youtubeMedia.ts')
+assert(parseIsoDurationMs('PT3M25S') === 205_000, 'ISO duration minutes+seconds')
+assert(parseIsoDurationMs('PT1H2S') === 3_602_000, 'ISO duration hour')
+assert(bpmFromText('Live worship 72 BPM in G') === 72, 'bpm from blurb')
+assert(searchLanguage('Al Que Está Sentado', 'Marcos Brunet').relevanceLanguage === 'es', 'spanish bias')
+assert(searchLanguage('Living Hope', 'Phil Wickham').relevanceLanguage === 'en', 'english bias')
+assert(youtubeWatchUrl('dQw4w9WgXcQ').includes('dQw4w9WgXcQ'), 'watch url')
+const choBase = `{title: Prueba}
+{artist: Demo}
+{key: C}
+{source: https://www.cifraclub.com/demo/prueba/}
+
+{start_of_verse}
+[C]hola
+{end_of_verse}
+`
+assert(!chartHasYoutube(choBase), 'cho without youtube')
+const choPatched = applyChartMedia(choBase, {
+  youtubeUrl: 'https://www.youtube.com/watch?v=abcdefghijk',
+  bpm: 88,
+  durationMs: 210_000,
+})
+assert(chartHasYoutube(choPatched), 'cho with youtube')
+assert(choPatched.includes('{bpm: 88}'), 'cho bpm tag')
+assert(choPatched.includes('{duration_ms: 210000}'), 'cho duration tag')
+assert(choPatched.includes('YouTube'), 'cho youtube label')
+const choParsed = parseChart(choPatched, 'prueba.cho')
+assert(choParsed.bpm === 88 && choParsed.durationMs === 210_000, 'parseChart reads patched cho media')
+assert(
+  choParsed.sources.some((item) => item.label === 'YouTube' && item.url.includes('abcdefghijk')),
+  'parseChart keeps youtube source on cho',
+)
+const mdPatched = applyChartMedia(
+  `---
+title: Demo
+artist: Alguien
+source: https://example.com/cifra
+---
+
+## Verse {#v}
+[C]hola
+`,
+  { youtubeUrl: 'https://youtu.be/xyzxyzxyzxy', durationMs: 90_000, audioUrl: 'https://cdn.example/a.mp3' },
+)
+const mdParsed = parseChart(mdPatched, 'demo.song.md')
+assert(mdParsed.durationMs === 90_000 && mdParsed.audioUrl.includes('cdn.example'), 'patched md media')
+assert(mdParsed.sources.some((item) => item.label === 'YouTube'), 'patched md youtube source')
+assert(mdParsed.source.includes('example.com/cifra'), 'keeps chord source as primary')
+
 const prefixCredit = foldComposerIntoArtist({ ...keySample, artist: 'Marcela Gándara', composer: 'Marcela Gándara / Vino Nuevo' })
 assert(prefixCredit.artist === 'Marcela Gándara / Vino Nuevo' && prefixCredit.composer === '', 'composer that extends the artist replaces it')
 const joinedCredit = foldComposerIntoArtist({ ...keySample, artist: 'Marcos Brunet', composer: 'Abbie Gamboa' })

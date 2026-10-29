@@ -135,6 +135,43 @@ export function getAdmin(): Promise<AdminOverview> {
   return request('/api/admin')
 }
 
+export type MediaBackfillReport = {
+  apiKeyPresent: boolean
+  r2Configured: boolean
+  dryRun: boolean
+  searchQuota: { day: string; used: number; limit: number; remaining: number }
+  missingBefore: number
+  updated: number
+  skipped: number
+  queued: number
+  errors: number
+  queueSize: number
+  results: Array<{
+    id: string
+    title: string
+    status: 'updated' | 'skipped' | 'queued' | 'error'
+    reason?: string
+    youtubeUrl?: string
+    durationMs?: number | null
+    bpm?: number | null
+    audio?: string
+    via?: string
+  }>
+  note?: string
+}
+
+export function getMediaBackfill(): Promise<MediaBackfillReport> {
+  return request('/api/admin/media-backfill')
+}
+
+export function runMediaBackfill(body: {
+  limit?: number
+  dryRun?: boolean
+  extractAudio?: boolean
+} = {}): Promise<MediaBackfillReport> {
+  return request('/api/admin/media-backfill', { method: 'POST', body })
+}
+
 export function createPerson(body: { name: string; role: Role; password?: string }): Promise<AdminOverview> {
   return request('/api/admin/users', { method: 'POST', body })
 }
