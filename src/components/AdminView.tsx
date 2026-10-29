@@ -78,6 +78,12 @@ const INFRA: { href: string; label: string; detail: string }[] = [
     detail: 'Base de datos D1 songbook en el panel de Cloudflare.',
   },
   {
+    href: 'https://dash.cloudflare.com/?to=/:account/r2/default/buckets/songbook-audio',
+    label: 'Audio R2 songbook-audio',
+    detail:
+      'Bucket R2 donde viven los MP3 (binding AUDIO_BUCKET). D1 solo guarda audio_url; en local los archivos van a data/audio/.',
+  },
+  {
     href: 'https://github.com/jorsanchezch/songs',
     label: 'Repositorio',
     detail: 'Código en GitHub.',
@@ -91,6 +97,11 @@ const INFRA: { href: string; label: string; detail: string }[] = [
     href: 'https://github.com/jorsanchezch/songs/actions/workflows/deploy-pages.yml',
     label: 'Despliegue de Pages',
     detail: 'Workflow de GitHub Actions que publica el sitio.',
+  },
+  {
+    href: 'https://github.com/jorsanchezch/songs/actions/workflows/deploy-worker.yml',
+    label: 'Despliegue del Worker',
+    detail: 'Workflow de GitHub Actions que publica la API en Cloudflare.',
   },
 ]
 
