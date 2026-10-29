@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   ArrowLeft,
@@ -22,6 +22,7 @@ import { SongMark } from '@/components/SongMark'
 import { InstrumentCharts } from '@/components/InstrumentCharts'
 import { InstrumentSwitch } from '@/components/InstrumentSwitch'
 import { Kbd, ShortcutLegend } from '@/components/KeyHint'
+import { PlaybackDock } from '@/components/PlaybackDock'
 import { SpellingToggle } from '@/components/SpellingToggle'
 import { Button } from '@/components/ui/button'
 import { UserBadge } from '@/components/UserBadge'
@@ -45,7 +46,18 @@ import { NOTE_HINT, NOTE_LABEL, NOTE_TYPES } from '@/lib/types'
 import { useSetlists } from '@/hooks/useSetlists'
 import { useSession, useUser } from '@/hooks/useUser'
 import { useSongs } from '@/hooks/useSongs'
+import { usePlayback } from '@/hooks/usePlayback'
 import { can, isStaff } from '@/lib/access'
+import {
+  buildTimeline,
+  effectiveAudio,
+  loadPlaybackSettings,
+  savePlaybackSettings,
+  songMediaSources,
+  startOffset,
+  type PlaybackCursor,
+  type PlaybackSettings,
+} from '@/lib/playback'
 import { neighborSong, setSetlistSemitones, songPath } from '@/lib/setlists'
 import { cn } from '@/lib/utils'
 import {
@@ -94,8 +106,10 @@ export function SongView() {
   useEffect(() => {
     setSettings(loadSettings())
   }, [user.id])
-  const guitar = state.status === 'ready' ? songById(songId, 'guitar') : undefined
-  const chart = state.status === 'ready' ? songById(songId, instrument) : undefined
+  // songById builds a fresh object per call; memoized so blocks and timings stay stable between renders.
+  const ready = state.status === 'ready'
+  const guitar = useMemo(() => (ready ? songById(songId, 'guitar') : undefined), [ready, songById, songId])
+  const chart = useMemo(() => (ready ? songById(songId, instrument) : undefined), [ready, songById, songId, instrument])
   const song = chart ?? guitar
 
   useEffect(() => {
@@ -146,6 +160,49 @@ export function SongView() {
     null
   const activeStepKey = activeStep?.key ?? null
 
+  const [playbackSettings, setPlaybackSettings] = useState<PlaybackSettings>(() => loadPlaybackSettings())
+  const updatePlayback = (patch: Partial<PlaybackSettings>) => {
+    setPlaybackSettings((prev) => {
+      const next = { ...prev, ...patch }
+      savePlaybackSettings(next)
+      return next
+    })
+  }
+  // Media lives on the song row; a part chart may not carry it.
+  const media = useMemo(
+    () =>
+      songMediaSources({
+        sources: chart?.sources?.length ? chart.sources : (guitar?.sources ?? []),
+        audioUrl: chart?.audioUrl || guitar?.audioUrl,
+        bpm: chart?.bpm ?? guitar?.bpm,
+        durationMs: chart?.durationMs ?? guitar?.durationMs,
+      }),
+    [chart, guitar],
+  )
+  const playbackAudio = effectiveAudio(playbackSettings.audio, media)
+  const { pace, useBpm } = playbackSettings
+  const makeTimeline = useCallback(
+    (mediaMs: number | null) =>
+      buildTimeline({
+        blocks,
+        settings: { pace, useBpm },
+        bpm: media.bpm,
+        durationMs: media.durationMs,
+        mediaMs,
+      }),
+    [blocks, media.bpm, media.durationMs, pace, useBpm],
+  )
+  const playback = usePlayback({ makeTimeline, audio: playbackAudio, media })
+  const playCursor = playback.cursor
+  const stopPlayback = playback.stop
+  const playingRef = useRef(false)
+  playingRef.current = playback.playing
+  const showPlayHighlights = playbackSettings.highlights
+
+  useEffect(() => {
+    stopPlayback()
+  }, [songId, stopPlayback])
+
   useEffect(() => {
     if (!version) return
     setSettings((prev) => {
@@ -186,9 +243,11 @@ export function SongView() {
     update({ semitones: { ...settings.semitones, [song.id]: wrapped } })
   }
 
+  // Choosing a part by hand always ends playback.
   const goStep = (step: ViewportNavStep) => {
     const block = blocks.find((item) => item.id === step.blockId)
     if (!block) return
+    stopPlayback()
     const shown = steps.findIndex((item) => item.key === step.key)
     setCurrent(step.blockId)
     setStepKey(step.key)
@@ -213,6 +272,7 @@ export function SongView() {
     const index = blocks.findIndex((block) => block.id === id)
     const block = blocks[index]
     if (!block) return
+    stopPlayback()
     const shown = nav.findIndex((chip) => chip.id === id || chip.ids.includes(id))
     setCurrent(id)
     setStepKey(id)
@@ -221,6 +281,49 @@ export function SongView() {
     spyPausedUntil.current = Date.now() + (smooth ? 900 : 100)
     document.getElementById(`sec-${id}`)?.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', block: 'start' })
   }
+
+  const togglePlayback = () => {
+    if (playback.playing) {
+      stopPlayback()
+      return
+    }
+    // Play starts where the reader is: the current part, or its viewport slice.
+    const sliceLine = activeStep?.chipIds.includes(activeId ?? '') ? activeStep.lineIndex : null
+    playback.start(startOffset(playback.timeline, activeId, sliceLine))
+  }
+  const togglePlaybackRef = useRef(togglePlayback)
+  togglePlaybackRef.current = togglePlayback
+
+  // Playback moves the part, the step, and the scroll. New parts land under the header;
+  // inside a long part the playing line is brought back on screen when it leaves it.
+  const lastPlayed = useRef<PlaybackCursor | null>(null)
+  useEffect(() => {
+    const previous = lastPlayed.current
+    lastPlayed.current = playCursor
+    if (!playCursor) return
+    setCurrent(playCursor.blockId)
+    const step = playbackStep(steps, playCursor)
+    if (step) setStepKey(step.key)
+    const smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    const behavior: ScrollBehavior = smooth ? 'smooth' : 'auto'
+    const line =
+      playCursor.lineIndex == null
+        ? null
+        : document.getElementById(`line-${playCursor.blockId}-${playCursor.lineIndex}`)
+    if (!previous || previous.blockId !== playCursor.blockId) {
+      spyPausedUntil.current = Date.now() + (smooth ? 900 : 100)
+      const target = !previous && playCursor.lineIndex ? line : document.getElementById(`sec-${playCursor.blockId}`)
+      target?.scrollIntoView({ behavior, block: 'start' })
+      return
+    }
+    if (!line || previous.lineIndex === playCursor.lineIndex) return
+    const rect = line.getBoundingClientRect()
+    const footerTop = footerRef.current?.getBoundingClientRect().top ?? window.innerHeight
+    if (rect.bottom > footerTop - 8 || rect.top < headerHeight) {
+      spyPausedUntil.current = Date.now() + (smooth ? 900 : 100)
+      line.scrollIntoView({ behavior, block: 'start' })
+    }
+  }, [playCursor])
 
   // The sticky header changes height with the controls. Parts land just under it.
   useLayoutEffect(() => {
@@ -249,7 +352,7 @@ export function SongView() {
   // Line heights feed equal viewport slices when the live-jump option is on.
   useLayoutEffect(() => {
     if (!settings.viewportJumps) {
-      setLineHeights({})
+      setLineHeights((prev) => (Object.keys(prev).length ? {} : prev))
       return
     }
     const measure = () => {
@@ -292,7 +395,8 @@ export function SongView() {
     const onScroll = () => {
       cancelAnimationFrame(frame)
       frame = requestAnimationFrame(() => {
-        if (Date.now() < spyPausedUntil.current || !blocks.length) return
+        // While playing, the clock owns the current part; scrolling by hand only looks around.
+        if (playingRef.current || Date.now() < spyPausedUntil.current || !blocks.length) return
         const line = headerHeight + 48
         let index = 0
         blocks.forEach((block, position) => {
@@ -434,6 +538,11 @@ export function SongView() {
       if (event.key === ' ' || event.code === 'Space') {
         event.preventDefault()
         setHeaderOpen((open) => !open)
+        return
+      }
+      if (event.key === 'p' || event.key === 'P') {
+        event.preventDefault()
+        togglePlaybackRef.current()
         return
       }
       const partNumber = Number(event.key)
@@ -946,6 +1055,7 @@ export function SongView() {
                   label: 'Parte anterior o siguiente',
                 },
                 { id: 'jump', keys: <Kbd>1–9</Kbd>, label: 'Ir a esa parte' },
+                { id: 'play', keys: <Kbd>P</Kbd>, label: 'Reproducir o parar' },
                 {
                   id: 'song',
                   keys: (
@@ -1010,6 +1120,8 @@ export function SongView() {
             const showLyrics = !foldHidesLyrics(settings.fold)
             const following = blocks[index + 1]
             const followingChord = following ? chordSequence(following.section.lines)[0] : undefined
+            const playingHere = playCursor?.blockId === block.id ? playCursor : null
+            const playingLine = showPlayHighlights ? playingHere?.lineIndex : null
             return (
               <section
                 key={block.id}
@@ -1032,9 +1144,14 @@ export function SongView() {
                   </h2>
                   {block.repeat > 1 && (
                     <span
-                      className="rounded-md bg-primary/15 px-1.5 py-0.5 font-sans text-[0.55em] font-bold"
+                      className={cn(
+                        'rounded-md px-1.5 py-0.5 font-sans text-[0.55em] font-bold tabular-nums',
+                        playingHere ? 'bg-primary text-primary-foreground' : 'bg-primary/15',
+                      )}
                     >
-                      <span aria-hidden>×{block.repeat}</span>
+                      <span aria-hidden>
+                        {playingHere ? `${playingHere.pass}/${playingHere.repeat}` : `×${block.repeat}`}
+                      </span>
                       <span className="sr-only">se repite {block.repeat} veces</span>
                     </span>
                   )}
@@ -1066,6 +1183,8 @@ export function SongView() {
                         openNote={openNote}
                         onToggle={setOpenNote}
                         wrapAt={wrapAt}
+                        playing={playingLine === lineIndex}
+                        playingChord={playingLine === lineIndex ? playingHere?.chordIndex : null}
                       />
                     </div>
                   ))}
@@ -1210,8 +1329,29 @@ export function SongView() {
           </div>
         </div>
       </footer>
+
+      {chart && blocks.length > 0 && (
+        <PlaybackDock
+          playback={playback}
+          settings={playbackSettings}
+          onSettings={updatePlayback}
+          media={media}
+          audio={playbackAudio}
+          timeline={playback.timeline}
+          startLabel={partLabel}
+          bottom={32 + footerHeight + 12}
+          onToggle={togglePlayback}
+        />
+      )}
     </div>
   )
+}
+
+/** The nav step that holds the playing line: the last slice of its part that starts at or before it. */
+function playbackStep(steps: ViewportNavStep[], cursor: PlaybackCursor): ViewportNavStep | undefined {
+  const own = steps.filter((step) => step.chipIds.includes(cursor.blockId))
+  const line = cursor.lineIndex ?? 0
+  return own.filter((step) => (step.lineIndex ?? 0) <= line).pop() ?? own[0]
 }
 
 const SHARE_HINT =

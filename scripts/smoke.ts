@@ -24,6 +24,14 @@ import {
 } from '../src/lib/setlists.ts'
 import { can, currentUser, roleLabel } from '../src/lib/access.ts'
 import { parseChart } from '../src/lib/parseChart.ts'
+import {
+  buildTimeline,
+  effectiveAudio,
+  locate,
+  songMediaSources,
+  startOffset,
+  youtubeVideoId,
+} from '../src/lib/playback.ts'
 import { sectionDegrees, sectionProgressions } from '../src/lib/sectionProgression.ts'
 import { diatonicChords, keyName, parseStudyKey, pianoVoicings, signature } from '../src/lib/theory.ts'
 import { distinctMarks, songIconIndex, songMarkTone, SONG_ICON_SHAPES, SONG_MARK_HUES } from '../src/lib/songMark.ts'
@@ -509,5 +517,64 @@ assert(pattern, '1-5-6m-2m comes from the stored sections')
 assert(pattern.reference.key === 'C' && (pattern.reference.section === 'Verso' || pattern.reference.section === 'Coro'), 'the example is one section in that key')
 assert(pattern.alternatives.length === 1 && pattern.alternatives[0]?.key === 'G' && pattern.alternatives[0]?.title === 'Tres', 'another key is another way to play it')
 assert(pattern.alternatives.every((item) => item.key !== 'C'), 'another song in the same key is not an example')
+
+{
+  const line = (chords: string[], lyric: string | null) => ({
+    chords: chords.map((raw, column) => ({ raw, column: column * 4, notes: [] })),
+    lyric,
+    notes: [],
+  })
+  const section = (id: string, label: string, repeat: number, lines: ReturnType<typeof line>[]) => ({
+    id,
+    label,
+    repeat,
+    notes: [],
+    lines,
+  })
+  const playSong = {
+    id: 'play',
+    title: 'Play',
+    artist: '',
+    composer: '',
+    key: 'G',
+    source: '',
+    sources: [{ url: 'https://youtu.be/dQw4w9WgXcQ', label: 'YouTube' }],
+    lyricsText: '',
+    versions: [],
+    sections: [
+      section('intro', 'Intro', 1, [line(['G', 'D', 'Em', 'C'], null)]),
+      section('verso', 'Verso', 1, [line(['G', 'D'], 'Uno dos'), line([], 'Tres cuatro')]),
+      section('coro', 'Coro', 2, [line(['C'], 'Cinco')]),
+    ],
+  }
+  const playBlocks = blocksFor(playSong, null)
+  // Lines × repeats: intro 1, verso 2, coro 1 × 2 = 5 units over 50 s.
+  const byDuration = buildTimeline({ blocks: playBlocks, settings: { pace: 'duration', useBpm: false }, durationMs: 50_000 })
+  assert(byDuration.basis === 'duration' && byDuration.totalMs === 50_000, 'duration timeline spans the song')
+  assert(byDuration.blocks.map((block) => block.start).join(',') === '0,10000,30000', `duration starts ${byDuration.blocks.map((block) => block.start)}`)
+  assert(locate(byDuration, 5_000)?.chordIndex === 2, 'chords share an intro line evenly')
+  assert(locate(byDuration, 25_000)?.lineIndex === 1, 'second verse line')
+  const secondPass = locate(byDuration, 45_000)
+  assert(secondPass?.blockId === 'coro' && secondPass.pass === 2, 'repeat counts its passes')
+  assert(locate(byDuration, 50_000) === null, 'playback ends with the song')
+  assert(startOffset(byDuration, 'verso', 1) === 20_000, 'a slice starts at its line')
+  // BPM: intro 4 bars, verso 2 + 2, coro 2 × 2 = 12 bars at 120 = 24 s.
+  const byBpm = buildTimeline({ blocks: playBlocks, settings: { pace: 'parts', useBpm: true }, bpm: 120, durationMs: 50_000 })
+  assert(byBpm.basis === 'bpm' && byBpm.totalMs === 24_000, `bpm timeline ${byBpm.totalMs}`)
+  const refined = buildTimeline({ blocks: playBlocks, settings: { pace: 'duration', useBpm: true }, bpm: 120, durationMs: 48_000 })
+  assert(refined.blocks[1]?.start === 16_000, 'bpm weighs bars inside the duration')
+  const fromMedia = buildTimeline({ blocks: playBlocks, settings: { pace: 'duration', useBpm: false }, durationMs: 50_000, mediaMs: 60_000 })
+  assert(fromMedia.basis === 'media' && fromMedia.totalMs === 60_000, 'loaded audio length wins')
+  const estimate = buildTimeline({ blocks: playBlocks, settings: { pace: 'duration', useBpm: true } })
+  assert(estimate.basis === 'estimate' && estimate.totalMs > 0, 'no duration or bpm still plays')
+  assert(youtubeVideoId('https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=3') === 'dQw4w9WgXcQ', 'watch link id')
+  assert(youtubeVideoId('https://youtu.be/dQw4w9WgXcQ') === 'dQw4w9WgXcQ', 'short link id')
+  assert(youtubeVideoId('https://music.youtube.com/watch?v=dQw4w9WgXcQ') === 'dQw4w9WgXcQ', 'music link id')
+  assert(youtubeVideoId('https://www.youtube.com/shorts/dQw4w9WgXcQ') === 'dQw4w9WgXcQ', 'shorts link id')
+  assert(youtubeVideoId('https://example.com/watch?v=dQw4w9WgXcQ') === null, 'not youtube')
+  const playMedia = songMediaSources({ ...playSong, audioUrl: '', bpm: null, durationMs: null })
+  assert(playMedia.youtubeId === 'dQw4w9WgXcQ', 'song media finds the YouTube source')
+  assert(effectiveAudio('mp3', playMedia) === 'off' && effectiveAudio('youtube', playMedia) === 'youtube', 'missing audio falls back to silence')
+}
 
 console.log(`Parsed ${files.length} charts`)

@@ -70,6 +70,8 @@ export function ChartRow({
   onToggle,
   wrapAt,
   showLyrics = true,
+  playing = false,
+  playingChord = null,
 }: {
   block: DisplayBlock
   lineIndex: number
@@ -86,6 +88,10 @@ export function ChartRow({
   wrapAt?: number
   /** Chords-only modes keep the chord row and drop the lyric line. */
   showLyrics?: boolean
+  /** Playback is on this line: the lyric gets a light wash. */
+  playing?: boolean
+  /** Playback is on this chord, by its index in the line. */
+  playingChord?: number | null
 }) {
   const line = block.section.lines[lineIndex]
   if (!line) return null
@@ -119,7 +125,14 @@ export function ChartRow({
                 const open = note ? openNote === key : false
                 return (
                   <span key={key} className="absolute top-0" style={{ left: `${left}ch` }}>
-                    <span className="-ml-[0.28em] inline-block rounded-[0.3em] bg-chart-chord/15 px-[0.28em] py-[0.14em] text-[0.72em] leading-none font-semibold whitespace-nowrap text-chart-chord">
+                    <span
+                      className={cn(
+                        '-ml-[0.28em] inline-block rounded-[0.3em] px-[0.28em] py-[0.14em] text-[0.72em] leading-none font-semibold whitespace-nowrap text-chart-chord transition-colors duration-150 motion-reduce:transition-none',
+                        playing && playingChord === index
+                          ? 'bg-chart-chord/35 ring-1 ring-chart-chord/70'
+                          : 'bg-chart-chord/15',
+                      )}
+                    >
                       {item.name}
                       {note && (
                         <button
@@ -137,7 +150,13 @@ export function ChartRow({
             </div>
           )}
           {segment.lyric != null && (
-            <p className="font-medium whitespace-pre" style={{ width: `${segment.width}ch` }}>
+            <p
+              className={cn(
+                'font-medium whitespace-pre transition-colors duration-150 motion-reduce:transition-none',
+                playing && '-mx-[0.25em] rounded-[0.3em] bg-primary/10 px-[0.25em]',
+              )}
+              style={{ width: playing ? `calc(${segment.width}ch + 0.5em)` : `${segment.width}ch` }}
+            >
               {segment.lyric || ' '}
             </p>
           )}
