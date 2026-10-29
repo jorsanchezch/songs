@@ -13,7 +13,17 @@ Abre http://127.0.0.1:4322/
 
 ## Publicar
 
-El workflow de GitHub Actions publica `dist` en GitHub Pages al empujar a `main`. El sitio sigue siendo estático. La base no vive en el navegador ni en Pages.
+Al empujar a `main`, GitHub Actions publica el frontend en GitHub Pages y el Worker en Cloudflare (`deploy-pages.yml` y `deploy-worker.yml`). El sitio de Pages es estático; la API vive en el Worker.
+
+Secretos del repositorio (Settings → Secrets and variables → Actions), o desde tu máquina con `gh` autenticado como dueño del repo:
+
+```bash
+# Account ID de la cuenta (barra lateral del dashboard), NO el database_id de D1
+printf '%s' 'TU_ACCOUNT_ID' | gh secret set CLOUDFLARE_ACCOUNT_ID -R jorsanchezch/songs
+printf '%s' 'TU_API_TOKEN' | gh secret set CLOUDFLARE_API_TOKEN -R jorsanchezch/songs
+```
+
+`CLOUDFLARE_API_TOKEN` = token con plantilla **Edit Cloudflare Workers**. `CLOUDFLARE_ACCOUNT_ID` = Account ID (en este proyecto: `a3568bed2d3a17ee343a6714d68c15f2`). El UUID en `wrangler.toml` es solo el `database_id` de D1.
 
 ## Base de datos
 

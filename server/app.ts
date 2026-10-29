@@ -354,6 +354,8 @@ async function removeSong(sql: Sql, user: User, id: string): Promise<Response> {
   const row = await oneSong(sql, id, 'guitar')
   if (!row || !canSee(user, row)) return json({ error: 'No está esta canción.' }, 404)
   if (!canRemove(user, row)) return json({ error: 'No puedes borrar esta canción.' }, 403)
+  // Always hard-delete. Catalog ids go in deleted_songs so a reseed cannot restore them.
+  // Never soft-hide from Eliminar — hide is only for one-time local import archival.
   const now = new Date().toISOString()
   await sql.transaction(async (tx) => {
     await tx.run(
@@ -362,6 +364,7 @@ async function removeSong(sql: Sql, user: User, id: string): Promise<Response> {
       [id, now],
     )
     await tx.run(`DELETE FROM setlist_items WHERE song_id = ?`, [id])
+    await tx.run(`DELETE FROM day_list_history_items WHERE song_id = ?`, [id])
     await tx.run(`DELETE FROM songs WHERE id = ?`, [id])
   })
   return json({ ok: true, hidden: false })
