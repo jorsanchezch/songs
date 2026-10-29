@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import { applyChartMedia, chartHasYoutube, selectedYoutubeUrl } from './chartMedia.ts'
-import { audioStoreReady, putAudioObject, type AudioStoreEnv } from './audioStorage.ts'
+import { audioFolder, audioStoreReady, putAudioObject, type AudioStoreEnv } from './audioStorage.ts'
 import { chartMeta } from './meta.ts'
 import type { Sql } from './sql.ts'
 
@@ -98,7 +98,7 @@ export async function extractYoutubeLinkAudio(
   songId?: string,
 ): Promise<{ audioUrl: string; key: string }> {
   const bytes = await downloadYoutubeMp3(youtubeUrl)
-  const folder = songId?.trim() || 'tmp'
+  const folder = songId?.trim() ? audioFolder(songId) : 'tmp'
   const key = `songs/${folder}/${Date.now()}.mp3`
   return putAudioObject(env, key, bytes, 'audio/mpeg')
 }
@@ -188,7 +188,7 @@ export async function runYoutubeAudioExtract(
     }
     try {
       const bytes = await downloadYoutubeMp3(youtubeUrl)
-      const key = `songs/${song.id}/${Date.now()}.mp3`
+      const key = `songs/${audioFolder(song.id)}/${Date.now()}.mp3`
       const stored = await putAudioObject(env, key, bytes, 'audio/mpeg')
       await writeSongAudio(sql, song, stored.audioUrl)
       updated += 1

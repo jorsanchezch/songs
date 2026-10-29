@@ -54,6 +54,18 @@ export function sanitizeAudioKey(raw: string): string | null {
   return key
 }
 
+/** A song id (`charts/Hosanna - Hillsong en Español`) as one safe folder name for an audio key. */
+export function audioFolder(songId: string): string {
+  const slug = songId
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^A-Za-z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80)
+    .replace(/-+$/g, '')
+  return slug || 'tmp'
+}
+
 export function audioApiPath(key: string): string {
   return `/api/audio/${key.split('/').map(encodeURIComponent).join('/')}`
 }

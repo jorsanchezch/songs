@@ -1,4 +1,5 @@
 import {
+  audioFolder,
   audioStoreReady,
   contentTypeForKey,
   extensionForType,
@@ -1674,7 +1675,7 @@ async function uploadAudio(sql: Sql, user: User, request: Request, env: ApiEnv):
   const file = form.get('file')
   if (!(file instanceof File)) return json({ error: 'Falta el archivo (file).' }, 400)
   const songIdRaw = String(form.get('songId') ?? '').trim()
-  const songId = songIdRaw && ID_OK.test(songIdRaw) ? songIdRaw : `tmp-${user.id}`
+  const songId = songIdRaw ? audioFolder(songIdRaw) : audioFolder(`tmp-${user.id}`)
   if (songIdRaw) {
     const row = await oneSong(sql, songIdRaw, 'guitar')
     if (!row || !canSee(user, row)) return json({ error: 'No está esta canción.' }, 404)

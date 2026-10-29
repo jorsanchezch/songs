@@ -16,7 +16,8 @@
     "media:backfill": "tsx scripts/media-backfill.ts",
     "media:extract-audio": "tsx scripts/extract-youtube-audio.ts",
     "media:sync": "tsx scripts/media-sync.ts",
-    "db:set-password": "tsx scripts/set-password.ts"
+    "db:set-password": "tsx scripts/set-password.ts",
+    "media:audio-to-r2": "tsx scripts/audio-to-r2.ts"
   },
   "dependencies": {
     "class-variance-authority": "^0.7.1",
