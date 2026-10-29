@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Loader2, Play, SlidersHorizontal, Square } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Kbd } from '@/components/KeyHint'
 import type { Playback } from '@/hooks/usePlayback'
 import {
@@ -9,6 +11,7 @@ import {
   type SongMediaSources,
   type Timeline,
 } from '@/lib/playback'
+import { formatDurationMmSs, parseDurationMmSs } from '@/lib/songMedia'
 import { cn } from '@/lib/utils'
 
 export function PlaybackDock({
@@ -21,6 +24,8 @@ export function PlaybackDock({
   startLabel,
   bottom,
   onToggle,
+  canEditDuration,
+  onDurationChange,
 }: {
   playback: Playback
   settings: PlaybackSettings
@@ -33,6 +38,9 @@ export function PlaybackDock({
   /** Distance from the bottom of the viewport, above the part footer. */
   bottom: number
   onToggle: () => void
+  canEditDuration?: boolean
+  /** Persist duration (ms) while playing or from the panel. */
+  onDurationChange?: (durationMs: number | null) => void
 }) {
   // Hover opens the panel for a mouse; the settings button pins it for touch and keyboard.
   const [hovered, setHovered] = useState(false)
@@ -40,6 +48,11 @@ export function PlaybackDock({
   const open = hovered || pinned
   const closeTimer = useRef(0)
   const rootRef = useRef<HTMLDivElement>(null)
+  const [durationDraft, setDurationDraft] = useState(() => formatDurationMmSs(media.durationMs))
+
+  useEffect(() => {
+    setDurationDraft(formatDurationMmSs(media.durationMs))
+  }, [media.durationMs])
 
   const openNow = () => {
     window.clearTimeout(closeTimer.current)
@@ -64,7 +77,13 @@ export function PlaybackDock({
   useEffect(() => () => window.clearTimeout(closeTimer.current), [])
 
   const { playing, status } = playback
+  // Duration mode uses the song's duration_ms (or a length you set). Audio is optional.
   const hasLength = Boolean(media.durationMs || playback.mediaMs)
+  const commitDuration = () => {
+    if (!onDurationChange) return
+    const next = parseDurationMmSs(durationDraft)
+    onDurationChange(next)
+  }
 
   return (
     <div
@@ -82,14 +101,15 @@ export function PlaybackDock({
         <div
           role="dialog"
           aria-label="Ajustes de reproducción"
-          className="w-[min(19rem,calc(100vw-1.5rem))] rounded-xl border bg-popover p-3 text-sm text-popover-foreground shadow-lg"
+          className="w-[min(22rem,calc(100vw-1.5rem))] rounded-xl border bg-card p-3.5 text-sm text-card-foreground shadow-md"
         >
           <div className="mb-2 flex items-baseline justify-between gap-2">
-            <p className="font-semibold">Reproducción</p>
+            <p className="text-base font-semibold">Reproducción</p>
             <p className="text-xs text-muted-foreground tabular-nums">{basisText(timeline)}</p>
           </div>
           <p className="mb-3 text-xs leading-snug text-muted-foreground">
-            Avanza solo por las partes de esta vista, sin sonido salvo que elijas audio. Elegir una parte a mano la para.
+            Avanza solo por las partes de esta vista. El modo Duración usa el tiempo de la canción y no necesita
+            YouTube ni MP3. Elegir una parte a mano la para.
             {!playing && startLabel ? (
               <>
                 {' '}
@@ -100,7 +120,7 @@ export function PlaybackDock({
 
           <Field label="Ritmo">
             <Segmented
-              value={hasLength ? settings.pace : 'parts'}
+              value={hasLength ? settings.pace : settings.pace === 'duration' && !hasLength ? 'parts' : settings.pace}
               onChange={(pace) => onSettings({ pace })}
               options={[
                 {
@@ -108,8 +128,8 @@ export function PlaybackDock({
                   label: 'Duración',
                   disabled: !hasLength,
                   title: hasLength
-                    ? 'Reparte la duración de la canción entre las partes, según líneas y repeticiones.'
-                    : 'Esta canción no tiene duración todavía.',
+                    ? 'Reparte la duración de la canción entre las partes. No hace falta audio.'
+                    : 'Pon una duración (m:ss) abajo para usar este modo sin audio.',
                 },
                 {
                   value: 'parts',
@@ -118,6 +138,37 @@ export function PlaybackDock({
                 },
               ]}
             />
+          </Field>
+
+          <Field label="Duración">
+            <div className="flex items-center gap-1.5">
+              <Input
+                aria-label="Duración en minutos y segundos"
+                value={durationDraft}
+                onChange={(event) => setDurationDraft(event.target.value)}
+                onBlur={commitDuration}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault()
+                    commitDuration()
+                  }
+                }}
+                disabled={!canEditDuration && !onDurationChange}
+                placeholder="4:00"
+                inputMode="numeric"
+                className="h-8 w-[5.5rem] text-center tabular-nums"
+                title={
+                  canEditDuration
+                    ? 'Edita mientras reproduces. Se guarda en la canción (m:ss).'
+                    : 'Duración de la canción (m:ss).'
+                }
+              />
+              {onDurationChange ? (
+                <Button type="button" size="sm" variant="outline" className="h-8" onClick={commitDuration}>
+                  Aplicar
+                </Button>
+              ) : null}
+            </div>
           </Field>
 
           <Field label="BPM">
@@ -140,7 +191,7 @@ export function PlaybackDock({
               value={audio}
               onChange={(next) => onSettings({ audio: next })}
               options={[
-                { value: 'off', label: 'Sin audio', title: 'Solo avanza la cifra, en silencio.' },
+                { value: 'off', label: 'Sin audio', title: 'Solo avanza la cifra, en silencio. Compatible con Duración.' },
                 {
                   value: 'youtube',
                   label: 'YouTube',
@@ -177,15 +228,17 @@ export function PlaybackDock({
       {audio === 'youtube' && (
         <div
           ref={playback.youtubeHost}
-          className="aspect-video w-56 overflow-hidden rounded-lg border bg-black shadow-lg sm:w-64 [&_iframe]:size-full"
+          className="aspect-video w-64 overflow-hidden rounded-lg border bg-black shadow-md sm:w-72 [&_iframe]:size-full"
         />
       )}
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2.5">
         {playing && <PlaybackClock playback={playback} timeline={timeline} />}
-        <button
+        <Button
           type="button"
-          className="inline-flex size-9 items-center justify-center rounded-full border bg-card text-muted-foreground shadow-md hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/60 focus-visible:outline-none"
+          size="icon"
+          variant="outline"
+          className="size-11 rounded-md border bg-card shadow-sm"
           aria-label="Ajustes de reproducción"
           aria-expanded={open}
           title="Ajustes de reproducción"
@@ -194,28 +247,30 @@ export function PlaybackDock({
             setPinned(!pinned)
           }}
         >
-          <SlidersHorizontal className="size-4" />
-        </button>
-        <button
+          <SlidersHorizontal className="size-5" />
+        </Button>
+        <Button
           type="button"
+          size="icon"
+          variant={playing ? 'secondary' : 'default'}
           aria-label={playing ? 'Parar la reproducción' : `Reproducir desde ${startLabel || 'el inicio'}`}
           aria-pressed={playing}
           aria-keyshortcuts="P"
           title={playing ? 'Parar' : 'Reproducir'}
           onClick={onToggle}
           className={cn(
-            'relative inline-flex size-14 items-center justify-center rounded-full shadow-lg ring-offset-2 ring-offset-background transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/60 focus-visible:outline-none motion-reduce:transition-none',
-            playing ? 'bg-foreground text-background' : 'bg-primary text-primary-foreground hover:bg-primary/90',
+            'size-16 rounded-md shadow-sm focus-visible:ring-[3px] focus-visible:ring-ring/60',
+            playing && 'bg-foreground text-background hover:bg-foreground/90',
           )}
         >
           {status === 'loading' ? (
-            <Loader2 className="size-6 animate-spin" />
+            <Loader2 className="size-7 animate-spin" />
           ) : playing ? (
-            <Square className="size-5 fill-current" />
+            <Square className="size-6 fill-current" />
           ) : (
-            <Play className="ml-0.5 size-6 fill-current" />
+            <Play className="ml-0.5 size-7 fill-current" />
           )}
-        </button>
+        </Button>
       </div>
     </div>
   )
@@ -241,14 +296,14 @@ function PlaybackClock({ playback, timeline }: { playback: Playback; timeline: T
 
   return (
     <span
-      className="inline-flex h-9 items-center gap-1.5 rounded-full border bg-card px-3 text-sm font-semibold shadow-md tabular-nums"
+      className="inline-flex h-11 items-center gap-2 rounded-md border bg-card px-3.5 text-base font-semibold shadow-sm tabular-nums"
       aria-label="Tiempo de reproducción"
       role="timer"
     >
       {beatMs > 0 && (
         <span
           aria-hidden
-          className={cn('size-2 rounded-full transition-colors duration-75', now.beat ? 'bg-primary' : 'bg-muted-foreground/30')}
+          className={cn('size-2.5 rounded-full transition-colors duration-75', now.beat ? 'bg-primary' : 'bg-muted-foreground/30')}
         />
       )}
       {formatClock(Math.max(0, now.second) * 1000)}
@@ -267,7 +322,7 @@ function basisText(timeline: Timeline): string {
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="mb-2 flex items-center justify-between gap-3">
+    <div className="mb-2.5 flex items-center justify-between gap-3">
       <span className="text-xs font-medium text-muted-foreground">{label}</span>
       {children}
     </div>
@@ -295,8 +350,8 @@ function Toggle({
       title={title}
       onClick={onClick}
       className={cn(
-        'rounded-full border px-2.5 py-1 text-xs font-medium disabled:opacity-50',
-        on ? 'border-primary bg-primary/15 text-foreground' : 'text-muted-foreground hover:text-foreground',
+        'rounded-md border px-2.5 py-1 text-xs font-medium disabled:opacity-50',
+        on ? 'border-primary bg-primary/15 text-foreground' : 'bg-card text-muted-foreground hover:text-foreground',
       )}
     >
       {children}
@@ -314,7 +369,7 @@ function Segmented<T extends string>({
   options: { value: T; label: string; title: string; disabled?: boolean }[]
 }) {
   return (
-    <span className="inline-flex rounded-full border p-0.5" role="group">
+    <span className="inline-flex rounded-md border bg-card p-0.5" role="group">
       {options.map((option) => {
         const on = option.value === value
         return (
@@ -326,7 +381,7 @@ function Segmented<T extends string>({
             title={option.title}
             onClick={() => onChange(option.value)}
             className={cn(
-              'rounded-full px-2.5 py-0.5 text-xs font-medium disabled:opacity-40',
+              'rounded-md px-2.5 py-1 text-xs font-medium disabled:opacity-40',
               on ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground',
             )}
           >

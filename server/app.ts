@@ -1,3 +1,12 @@
+import {
+  audioStoreReady,
+  contentTypeForKey,
+  extensionForType,
+  getAudioObject,
+  MAX_AUDIO_BYTES,
+  putAudioObject,
+} from './audioStorage.ts'
+import { applyChartMedia } from './chartMedia.ts'
 import { findPublicChart } from './chartSearch.ts'
 import { DEFAULT_INSTRUMENT, INSTRUMENTS, isInstrument, type InstrumentId } from './instruments.ts'
 import { shareLyrics } from './lyrics.ts'
@@ -6,8 +15,16 @@ import { chartMeta } from './meta.ts'
 import { hashPassword, verifyPassword } from './password.ts'
 import { OWNER_ID } from './schema.ts'
 import type { Sql } from './sql.ts'
+import {
+  extractAudioBlockedReport,
+  runYoutubeAudioExtract,
+  songsMissingAudio,
+} from './youtubeExtract.ts'
 
-export type ApiEnv = MediaBackfillEnv
+export type ApiEnv = MediaBackfillEnv & {
+  /** Node/sqlite only — enables Admin Extraer MP3 via yt-dlp. Never set on the Worker. */
+  ALLOW_YT_EXTRACT?: boolean
+}
 
 type Role = 'owner' | 'admin' | 'viewer'
 type Origin = 'catalog' | 'local' | 'copy'
@@ -53,6 +70,12 @@ export async function handleApi(sql: Sql, request: Request, env: ApiEnv = {}): P
   const url = new URL(request.url)
   const { pathname } = url
   try {
+    // Public audio playback — <audio> cannot send Authorization.
+    const audioGet = pathname.match(/^\/api\/audio\/(.+)$/)
+    if (audioGet && request.method === 'GET') {
+      return serveAudio(env, decodeURIComponent(audioGet[1] ?? ''))
+    }
+
     if (pathname === '/api/session' && request.method === 'POST') return sessionCreate(sql, request)
     const user = await userFrom(sql, request)
     if (!user) return json({ error: 'Entra con tu nombre para usar Songbook.' }, 401)
@@ -60,6 +83,7 @@ export async function handleApi(sql: Sql, request: Request, env: ApiEnv = {}): P
     if (pathname === '/api/session' && request.method === 'DELETE') return sessionDelete(sql, request)
     if (pathname === '/api/users' && request.method === 'GET') return listUsers(sql)
     if (pathname === '/api/search-charts' && request.method === 'GET') return searchCharts(url)
+    if (pathname === '/api/audio' && request.method === 'POST') return uploadAudio(sql, user, request, env)
     if (pathname === '/api/songs' && request.method === 'GET') return listSongs(sql, user, url)
     if (pathname === '/api/songs' && request.method === 'POST') return createSong(sql, user, request)
     if (pathname === '/api/catalog' && request.method === 'POST') return upsertCatalog(sql, user, request)
@@ -78,13 +102,19 @@ export async function handleApi(sql: Sql, request: Request, env: ApiEnv = {}): P
     if (pathname === '/api/admin/media-backfill' && request.method === 'POST') {
       return adminMediaBackfillPost(sql, user, request, env)
     }
+    if (pathname === '/api/admin/audio-extract' && request.method === 'GET') {
+      return adminAudioExtractGet(sql, user, env)
+    }
+    if (pathname === '/api/admin/audio-extract' && request.method === 'POST') {
+      return adminAudioExtractPost(sql, user, request, env)
+    }
     const adminUserPath = pathname.match(/^\/api\/admin\/users\/([^/]+)$/)
     if (adminUserPath) {
       const id = decodeURIComponent(adminUserPath[1] ?? '')
       if (request.method === 'PUT') return adminUpdateUser(sql, user, id, request)
       if (request.method === 'DELETE') return adminRemoveUser(sql, user, id)
     }
-    const songPath = pathname.match(/^\/api\/songs\/([^/]+)(?:\/(copy|share|restore))?$/)
+    const songPath = pathname.match(/^\/api\/songs\/([^/]+)(?:\/(copy|share|restore|media))?$/)
     if (songPath) {
       const id = decodeURIComponent(songPath[1] ?? '')
       const action = songPath[2]
@@ -94,6 +124,7 @@ export async function handleApi(sql: Sql, request: Request, env: ApiEnv = {}): P
       if (request.method === 'POST' && action === 'copy') return copySong(sql, user, id)
       if (request.method === 'POST' && action === 'share') return shareSong(sql, user, id, request)
       if (request.method === 'POST' && action === 'restore') return restoreSong(sql, user, id)
+      if (request.method === 'PUT' && action === 'media') return patchSongMedia(sql, user, id, request)
     }
     return json({ error: 'No está esa ruta.' }, 404)
   } catch (error) {
@@ -1166,6 +1197,178 @@ async function adminMediaBackfillPost(
     extractAudio: body.extractAudio !== false,
   })
   return json(report)
+}
+
+async function adminAudioExtractGet(sql: Sql, user: User, env: ApiEnv): Promise<Response> {
+  const denied = staffOnly(user)
+  if (denied) return denied
+  const missing = await songsMissingAudio(sql)
+  if (!env.ALLOW_YT_EXTRACT) {
+    return json(
+      await extractAudioBlockedReport(
+        sql,
+        env,
+        'El Worker de Cloudflare no ejecuta yt-dlp. En un entorno Node con yt-dlp: npm run media:extract-audio. O sube el MP3 en el editor (R2 / data/audio).',
+      ),
+    )
+  }
+  return json({
+    extractorAvailable: true,
+    r2Configured: Boolean(env.AUDIO_BUCKET),
+    storeReady: audioStoreReady(env),
+    dryRun: true,
+    missingAudio: missing.length,
+    updated: 0,
+    skipped: 0,
+    errors: 0,
+    results: [],
+    blocked: false,
+    note: 'Listo para extraer en este servidor Node. POST con { limit, dryRun }.',
+  })
+}
+
+async function adminAudioExtractPost(
+  sql: Sql,
+  user: User,
+  request: Request,
+  env: ApiEnv,
+): Promise<Response> {
+  const denied = staffOnly(user)
+  if (denied) return denied
+  const body = await readJson<{ limit?: number; dryRun?: boolean }>(request)
+  if (!env.ALLOW_YT_EXTRACT) {
+    return json(
+      await extractAudioBlockedReport(
+        sql,
+        env,
+        'Bloqueado en el Worker: no hay yt-dlp. Corre `npm run media:extract-audio` en local/CI con yt-dlp + almacén (R2 o data/audio), o sube el MP3 en el editor.',
+      ),
+    )
+  }
+  const report = await runYoutubeAudioExtract(sql, env, {
+    limit: typeof body.limit === 'number' ? body.limit : undefined,
+    dryRun: body.dryRun === true,
+  })
+  return json(report)
+}
+
+async function serveAudio(env: ApiEnv, rawKey: string): Promise<Response> {
+  const object = await getAudioObject(env, rawKey)
+  if (!object) return json({ error: 'No está ese audio.' }, 404)
+  return new Response(object.bytes, {
+    status: 200,
+    headers: {
+      'content-type': object.contentType || contentTypeForKey(rawKey),
+      'cache-control': 'public, max-age=31536000, immutable',
+      'access-control-allow-origin': '*',
+    },
+  })
+}
+
+async function uploadAudio(sql: Sql, user: User, request: Request, env: ApiEnv): Promise<Response> {
+  if (!audioStoreReady(env)) {
+    return json(
+      {
+        error:
+          'No hay almacén de audio. En Cloudflare enlaza R2 (AUDIO_BUCKET). En local usa data/audio. No se guardan MP3 en D1.',
+      },
+      503,
+    )
+  }
+  const contentType = request.headers.get('content-type') || ''
+  if (!contentType.toLowerCase().includes('multipart/form-data')) {
+    return json({ error: 'Envía el MP3 como multipart/form-data (campo file).' }, 400)
+  }
+  const form = await request.formData()
+  const file = form.get('file')
+  if (!(file instanceof File)) return json({ error: 'Falta el archivo (file).' }, 400)
+  const songIdRaw = String(form.get('songId') ?? '').trim()
+  const songId = songIdRaw && ID_OK.test(songIdRaw) ? songIdRaw : `tmp-${user.id}`
+  if (songIdRaw) {
+    const row = await oneSong(sql, songIdRaw, 'guitar')
+    if (!row || !canSee(user, row)) return json({ error: 'No está esta canción.' }, 404)
+    if (!canEdit(user, row)) return json({ error: 'No puedes cambiar el audio de esta canción.' }, 403)
+  }
+  if (file.size > MAX_AUDIO_BYTES) {
+    return json({ error: `El MP3 supera ${Math.round(MAX_AUDIO_BYTES / (1024 * 1024))} MB.` }, 413)
+  }
+  const bytes = new Uint8Array(await file.arrayBuffer())
+  const ext = extensionForType(file.type || 'audio/mpeg', file.name)
+  const key = `songs/${songId}/${Date.now()}.${ext}`
+  const stored = await putAudioObject(env, key, bytes, file.type || contentTypeForKey(key))
+  return json({ audioUrl: stored.audioUrl, key: stored.key })
+}
+
+async function patchSongMedia(sql: Sql, user: User, id: string, request: Request): Promise<Response> {
+  const body = await readJson<{
+    durationMs?: number | null
+    bpm?: number | null
+    audioUrl?: string | null
+    instrument?: string
+  }>(request)
+  const instrument = body.instrument && isInstrument(body.instrument) ? body.instrument : DEFAULT_INSTRUMENT
+  const row = await oneSong(sql, id, instrument)
+  if (!row || !canSee(user, row)) return json({ error: 'No está esta canción.' }, 404)
+  if (!canEdit(user, row)) {
+    return json(
+      {
+        error:
+          row.origin === 'catalog'
+            ? 'El catálogo solo lo cambia el dueño o un admin. Crea tu copia.'
+            : 'Esta copia no es tuya.',
+      },
+      403,
+    )
+  }
+  const patch = {
+    durationMs: body.durationMs !== undefined ? body.durationMs : undefined,
+    bpm: body.bpm !== undefined ? body.bpm : undefined,
+    audioUrl: body.audioUrl !== undefined ? body.audioUrl : undefined,
+  }
+  if (patch.durationMs === undefined && patch.bpm === undefined && patch.audioUrl === undefined) {
+    return json({ error: 'Nada que actualizar.' }, 400)
+  }
+  const parts = await sql.all<{ instrument: string; source_text: string }>(
+    `SELECT instrument, source_text FROM instrument_parts WHERE song_id = ?`,
+    [id],
+  )
+  if (!parts.length) return json({ error: 'Sin instrument_parts.' }, 500)
+  const now = new Date().toISOString()
+  let guitarText = row.source_text
+  await sql.transaction(async (tx) => {
+    for (const part of parts) {
+      const nextText = applyChartMedia(part.source_text, patch)
+      if (part.instrument === 'guitar') guitarText = nextText
+      await tx.run(
+        `UPDATE instrument_parts SET source_text = ?, revision = revision + 1 WHERE song_id = ? AND instrument = ?`,
+        [nextText, id, part.instrument],
+      )
+    }
+    const meta = chartMeta(guitarText, id)
+    const catalogSource =
+      row.origin === 'catalog' ? applyChartMedia(row.catalog_source || row.source_text, patch) : row.catalog_source
+    await tx.run(
+      `UPDATE songs SET title = ?, artist = ?, composer = ?, key_name = ?, source = ?, lyrics_text = ?, bpm = ?, duration_ms = ?, audio_url = ?, catalog_source = ?, updated_at = ?, revision = revision + 1 WHERE id = ?`,
+      [
+        meta.title || row.title,
+        meta.artist || row.artist,
+        meta.composer,
+        meta.key || row.key_name,
+        meta.source,
+        meta.lyrics,
+        meta.bpm,
+        meta.durationMs,
+        meta.audioUrl,
+        catalogSource,
+        now,
+        id,
+      ],
+    )
+  })
+  const next = await oneSong(sql, id, instrument)
+  if (!next) return json({ error: 'No está esta canción.' }, 404)
+  const copies = await copyCatalogIds(sql, user.id)
+  return json({ song: toDto(user, next, instrument, copies.has(next.id)), parts: await partDump(sql, id) })
 }
 
 function json(data: unknown, status = 200): Response {

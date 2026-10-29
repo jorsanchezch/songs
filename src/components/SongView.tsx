@@ -74,7 +74,7 @@ export function SongView() {
   const navigate = useNavigate()
   const user = useUser()
   const { people } = useSession()
-  const { state, reload, removeSong, restoreSong, copySong, shareSong, songById, ensurePart } = useSongs()
+  const { state, reload, removeSong, restoreSong, copySong, shareSong, patchMedia, songById, ensurePart } = useSongs()
   const setlists = useSetlists()
   const listaId = searchParams.get('lista')
   const [settings, setSettings] = useState<ViewSettings>(() => loadSettings())
@@ -168,17 +168,21 @@ export function SongView() {
       return next
     })
   }
-  // Media lives on the song row; a part chart may not carry it.
-  const media = useMemo(
-    () =>
-      songMediaSources({
-        sources: chart?.sources?.length ? chart.sources : (guitar?.sources ?? []),
-        audioUrl: chart?.audioUrl || guitar?.audioUrl,
-        bpm: chart?.bpm ?? guitar?.bpm,
-        durationMs: chart?.durationMs ?? guitar?.durationMs,
-      }),
-    [chart, guitar],
-  )
+  // Local override so Jorge can tweak duration while playing before/while it persists.
+  const [durationOverride, setDurationOverride] = useState<number | null | undefined>(undefined)
+  useEffect(() => {
+    setDurationOverride(undefined)
+  }, [songId])
+  // Media lives on the song row; a part chart may not carry it. Audio is optional for duration mode.
+  const media = useMemo(() => {
+    const stored = chart?.durationMs ?? guitar?.durationMs
+    return songMediaSources({
+      sources: chart?.sources?.length ? chart.sources : (guitar?.sources ?? []),
+      audioUrl: chart?.audioUrl || guitar?.audioUrl,
+      bpm: chart?.bpm ?? guitar?.bpm,
+      durationMs: durationOverride !== undefined ? durationOverride : stored,
+    })
+  }, [chart, durationOverride, guitar])
   const playbackAudio = effectiveAudio(playbackSettings.audio, media)
   const { pace, useBpm } = playbackSettings
   const makeTimeline = useCallback(
@@ -789,28 +793,15 @@ export function SongView() {
       </p>
       <header ref={headerRef} className="sticky top-0 z-20 border-b bg-background/95 backdrop-blur">
         <div className="mx-auto flex max-w-[70.4rem] flex-col gap-3 px-4 py-2">
-          {headerOpen ? (
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-              <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:min-w-0 sm:flex-1">
-                <SongMark songId={song.id} />
-                <h1 className="min-w-0 shrink truncate text-lg font-semibold">{song.title}</h1>
-                {author && <p className="min-w-0 shrink-[2] truncate text-sm text-muted-foreground">{author}</p>}
-              </div>
-              {toolbarFloat}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <div className="flex min-w-0 flex-1 items-center gap-2">
+              <SongMark songId={song.id} />
+              <h1 className="min-w-0 shrink truncate text-lg font-semibold">{song.title}</h1>
+              {author && <p className="min-w-0 shrink-[2] truncate text-sm text-muted-foreground">{author}</p>}
+              {!headerOpen && transposer(true)}
             </div>
-          ) : (
-            <div className="flex flex-col gap-2">
-              <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-2">
-                {toolbarFloat}
-              </div>
-              <div className="flex min-w-0 items-center gap-2">
-                <SongMark songId={song.id} />
-                <h1 className="min-w-0 shrink truncate text-lg font-semibold">{song.title}</h1>
-                {author && <p className="min-w-0 shrink-[2] truncate text-sm text-muted-foreground">{author}</p>}
-                {transposer(true)}
-              </div>
-            </div>
-          )}
+            {toolbarFloat}
+          </div>
           {headerOpen && transposer(false)}
           {headerOpen && (
           <>
@@ -1247,7 +1238,7 @@ export function SongView() {
         )}
       </main>
 
-      <footer ref={footerRef} className="fixed inset-x-0 bottom-8 z-20 border-t bg-background/95 px-4 py-3 backdrop-blur">
+      <footer ref={footerRef} className="fixed inset-x-0 bottom-0 z-20 border-t bg-background/95 px-4 py-3 backdrop-blur">
         <div className="mx-auto flex max-w-[70.4rem] flex-col gap-2">
           <div
             className="flex h-2.5 items-center gap-1"
@@ -1339,8 +1330,17 @@ export function SongView() {
           audio={playbackAudio}
           timeline={playback.timeline}
           startLabel={partLabel}
-          bottom={32 + footerHeight + 12}
+          bottom={footerHeight + 12}
           onToggle={togglePlayback}
+          canEditDuration={Boolean(song?.editable)}
+          onDurationChange={
+            song?.editable
+              ? (durationMs) => {
+                  setDurationOverride(durationMs)
+                  void patchMedia(song.id, { durationMs }, instrument).catch((error) => console.error(error))
+                }
+              : (durationMs) => setDurationOverride(durationMs)
+          }
         />
       )}
     </div>

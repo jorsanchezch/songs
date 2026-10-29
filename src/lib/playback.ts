@@ -1,6 +1,11 @@
 import type { DisplayBlock } from '@/lib/display'
-import { findYoutubeSource } from '@/lib/songMedia'
+import { findYoutubeSource, resolveAudioUrl } from '@/lib/songMedia'
 import type { ChartLine, Song } from '@/lib/types'
+
+function apiRoot(): string {
+  const value = import.meta.env?.VITE_SONGBOOK_API
+  return typeof value === 'string' ? value.replace(/\/$/, '') : ''
+}
 
 export type PlaybackPace = 'duration' | 'parts'
 export type PlaybackAudio = 'off' | 'youtube' | 'mp3'
@@ -229,7 +234,8 @@ export type SongMediaSources = {
 
 export function songMediaSources(song: Pick<Song, 'sources' | 'audioUrl' | 'bpm' | 'durationMs'>): SongMediaSources {
   const youtube = findYoutubeSource(song.sources ?? [])
-  const audioUrl = song.audioUrl?.trim() || null
+  const raw = song.audioUrl?.trim() || ''
+  const audioUrl = raw ? resolveAudioUrl(raw, apiRoot()) : null
   return {
     youtubeId: youtube ? youtubeVideoId(youtube.url) : null,
     audioUrl,

@@ -47,16 +47,31 @@ El workflow de Pages construye con `VITE_SONGBOOK_API=https://songbook.jorsanche
 
 ### Medios: YouTube, BPM, duración, MP3
 
-La reproducción lee `bpm`, `duration_ms`, `audio_url` y la fuente YouTube del **texto del chart** (`parseChart` / `materialize`), no solo de las columnas D1. El relleno escribe ambos.
+La reproducción lee `bpm`, `duration_ms`, `audio_url` y la fuente YouTube del **texto del chart** (`parseChart` / `materialize`), no solo de las columnas D1. El relleno escribe ambos. El modo **Duración** usa `duration_ms` y **no necesita** YouTube ni MP3.
 
 1. Crea una clave gratuita de [YouTube Data API v3](https://developers.google.com/youtube/v3/getting-started).
 2. En el Worker: `npx wrangler secret put YOUTUBE_API_KEY`.
 3. Despliega el Worker (`npx wrangler deploy`).
-4. En **Administración → Medios**, pulsa *Completar lote* (o `POST /api/admin/media-backfill`). Respeta ~100 `search.list`/día; el resto queda en cola (`app_meta`).
+4. En **Administración → Medios**, pulsa *Completar lote* (o `POST /api/admin/media-backfill`). Rellena YouTube faltante y, en un segundo paso, BPM/duración en canciones que ya tienen video. Cupo ~100 `search.list`/día; el resto queda en cola (`app_meta`).
 
-Sin clave el endpoint sigue existiendo: usa búsqueda pública best-effort (sin duración ISO fiable) y documenta el aviso en la respuesta. En local también puedes exportar `YOUTUBE_API_KEY` y correr `npx tsx scripts/media-backfill.ts`.
+Sin clave el endpoint sigue existiendo: usa búsqueda pública best-effort (sin duración ISO fiable) y documenta el aviso en la respuesta. En local: `YOUTUBE_API_KEY=… npm run media:backfill`.
 
-MP3 desde YouTube solo si hay bucket R2 (`AUDIO_BUCKET` en `wrangler.toml`). Si no está, el relleno omite el extract y deja la URL/subida del editor. Este Worker no ejecuta un extractor de audio; R2 queda listo para alojar archivos subidos a mano.
+### Audio MP3 (R2, no D1)
+
+D1/SQLite solo guarda `audio_url` (texto). Los bytes van a Cloudflare R2 o, en local, a `data/audio/` (gitignored).
+
+1. `npx wrangler r2 bucket create songbook-audio`
+2. Descomenta `[[r2_buckets]]` / `AUDIO_BUCKET` en `wrangler.toml` y `npx wrangler deploy`.
+3. Sube desde el editor (*Subir MP3*) o `POST /api/audio` (multipart `file`). La API responde `audio_url` tipo `/api/audio/songs/…/….mp3`; `GET` lo sirve desde R2 (público, para `<audio>`).
+
+### YouTube → MP3
+
+El Worker **no** ejecuta yt-dlp. Con YouTube y sin audio:
+
+- Local/CI: instala `yt-dlp` (+ `ffmpeg`) y corre `npm run media:extract-audio` (o Admin → *Extraer MP3* cuando `ALLOW_YT_EXTRACT` está activo en el servidor Node).
+- En el Worker, Admin → *Extraer MP3* responde bloqueado y apunta a ese script.
+
+Sin R2 ni `data/audio`, la extracción y la subida fallan a propósito: no se vuelcan MP3 a D1.
 
 ### Copia de seguridad
 
