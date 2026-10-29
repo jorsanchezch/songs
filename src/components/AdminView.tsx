@@ -33,7 +33,7 @@ const ROLE_GUIDE: { role: Role; points: string[] }[] = [
       'Crea canciones y copias. Edita, borra y comparte cualquier copia.',
       'Cambia las listas y los días de servicio.',
       'Importa la biblioteca de este navegador.',
-      'En este panel crea personas, cambia roles, pone o quita contraseñas y quita a quien no es Admin.',
+      'En este panel crea personas (usuario, nombre y contraseña), cambia roles y quita a quien no es Admin.',
       'No puede dejar el grupo sin Admin, ni borrar a un Admin.',
     ],
   },
@@ -41,7 +41,7 @@ const ROLE_GUIDE: { role: Role; points: string[] }[] = [
     role: 'admin',
     points: [
       'Con el catálogo, las copias, las listas y los días de servicio puede lo mismo que el Admin.',
-      'En este panel crea personas de Lectura o Ayudante, cambia el rol de quien no es Admin, pone o quita su contraseña y lo quita.',
+      'En este panel crea personas de Lectura o Ayudante, cambia el rol de quien no es Admin, pone su contraseña y lo quita.',
       'No cambia el rol del Admin, no lo borra y no le cambia la contraseña.',
       'No nombra Admins ni importa la biblioteca de este navegador.',
     ],
@@ -54,7 +54,7 @@ const ROLE_GUIDE: { role: Role; points: string[] }[] = [
       'Al editar una canción del catálogo guarda su versión personal: solo esa persona la ve y la canción compartida no cambia. Un Admin o un Ayudante la revisa en Versiones de usuarios.',
       'Comparte sus propias copias, con todos o con una persona.',
       'Ve las listas y los días de servicio. No los cambia.',
-      'No abre este panel. Un nombre nuevo entra así, sin contraseña, hasta que la ponga en su perfil.',
+      'No abre este panel. Entra solo con el usuario y la contraseña que le dio un Admin.',
     ],
   },
 ]
@@ -260,17 +260,14 @@ function AdminPanel() {
               <div className="flex flex-col gap-3">
                 {overview.users.map((person) => (
                   <PersonCard
-                    key={`${person.id}:${person.role}:${person.hasPassword}`}
+                    key={`${person.id}:${person.role}:${person.username}:${person.hasPassword}`}
                     person={person}
                     actorRole={user.role}
                     actorId={user.id}
                     owners={overview.users.filter((item) => item.role === 'owner').length}
                     onRole={(id, role) => run(() => updatePerson(id, { role }), 'Rol guardado.')}
                     onPassword={(id, password) =>
-                      run(
-                        () => updatePerson(id, { password }),
-                        password ? 'Contraseña guardada.' : 'Contraseña quitada.',
-                      )
+                      run(() => updatePerson(id, { password }), 'Contraseña guardada.')
                     }
                     onRemove={async (id) => {
                       const name = overview.users.find((item) => item.id === id)?.name ?? 'esta persona'
@@ -492,10 +489,11 @@ function CreatePerson({
   onCreate,
 }: {
   actorRole: Role
-  onCreate: (body: { name: string; role: Role; password?: string }) => Promise<void>
+  onCreate: (body: { name: string; username: string; role: Role; password: string }) => Promise<void>
 }) {
   const roles: Role[] = actorRole === 'owner' ? ['viewer', 'admin', 'owner'] : ['viewer', 'admin']
   const [name, setName] = useState('')
+  const [username, setUsername] = useState('')
   const [role, setRole] = useState<Role>('viewer')
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
@@ -507,16 +505,20 @@ function CreatePerson({
         className="grid gap-2 sm:grid-cols-2"
         onSubmit={(event) => {
           event.preventDefault()
-          const trimmed = name.trim()
-          if (!trimmed) return
+          const trimmedName = name.trim()
+          const trimmedUser = username.trim()
+          const trimmedPass = password.trim()
+          if (!trimmedName || !trimmedUser || !trimmedPass) return
           setBusy(true)
           void onCreate({
-            name: trimmed,
+            name: trimmedName,
+            username: trimmedUser,
             role,
-            ...(password.trim() ? { password: password.trim() } : {}),
+            password: trimmedPass,
           }).then(
             () => {
               setName('')
+              setUsername('')
               setPassword('')
               setRole('viewer')
               setBusy(false)
@@ -532,6 +534,13 @@ function CreatePerson({
           aria-label="Nombre de la persona"
           autoComplete="off"
         />
+        <Input
+          value={username}
+          onChange={(event) => setUsername(event.target.value)}
+          placeholder="Usuario"
+          aria-label="Usuario de la persona"
+          autoComplete="off"
+        />
         <Segmented
           value={role}
           onValueChange={setRole}
@@ -542,11 +551,15 @@ function CreatePerson({
         <PasswordInput
           value={password}
           onChange={(event) => setPassword(event.target.value)}
-          placeholder="Contraseña, opcional"
-          aria-label="Contraseña, opcional"
+          placeholder="Contraseña"
+          aria-label="Contraseña"
           autoComplete="new-password"
         />
-        <Button type="submit" disabled={busy || !name.trim()}>
+        <Button
+          type="submit"
+          className="sm:col-span-2"
+          disabled={busy || !name.trim() || !username.trim() || !password.trim()}
+        >
           Crear persona
         </Button>
       </form>
@@ -568,7 +581,7 @@ function PersonCard({
   actorId: string
   owners: number
   onRole: (id: string, role: Role) => Promise<void>
-  onPassword: (id: string, password: string | null) => Promise<void>
+  onPassword: (id: string, password: string) => Promise<void>
   onRemove: (id: string) => Promise<void>
 }) {
   const [role, setRole] = useState<Role>(person.role)
@@ -597,7 +610,8 @@ function PersonCard({
           {person.id === actorId ? <span className="text-muted-foreground"> · tú</span> : null}
         </h3>
         <p className="text-sm text-muted-foreground">
-          {roleLabel(person.role)} · {person.hasPassword ? 'Con contraseña' : 'Sin contraseña'}
+          @{person.username} · {roleLabel(person.role)} ·{' '}
+          {person.hasPassword ? 'Con contraseña' : 'Sin contraseña'}
         </p>
       </div>
       <p className="text-sm">
@@ -659,17 +673,6 @@ function PersonCard({
           <Button type="submit" size="sm" variant="outline" disabled={busy || !password.trim()}>
             Poner contraseña
           </Button>
-          {person.hasPassword && (
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              disabled={busy}
-              onClick={() => void wrap(() => onPassword(person.id, null))}
-            >
-              Quitar contraseña
-            </Button>
-          )}
         </form>
       )}
       {!immutable && person.role !== 'owner' && (

@@ -51,7 +51,7 @@ D1 es el plan gratuito de SQLite de Cloudflare. A diferencia de Neon o Supabase,
 7. Para desarrollar contra D1: `SONGBOOK_DB=d1` y `SONGBOOK_D1_URL=https://songbook.<tu-subdominio>.workers.dev`.
 8. Para Pages, construye con `VITE_SONGBOOK_API` igual a esa URL. Opcional: en el Worker cambia `SONGBOOK_ORIGIN` de `*` al origen de Pages.
 
-Entrar es por nombre. Jorge Sanchez queda como dueño. Un nombre nuevo entra como lectura: puede crear su copia y sus canciones, y no puede cambiar el catálogo. No pongas la URL del Worker en público si no quieres que cualquiera entre con un nombre.
+Entrar es con usuario y contraseña. Jorge Sanchez queda como dueño (`jsanchezch`). Las demás cuentas las crea un Admin o Ayudante desde el panel (usuario, nombre y contraseña). Sin cuenta no se entra.
 
 El workflow de Pages construye con `VITE_SONGBOOK_API=https://songbook.jorsanchezch.workers.dev`, así el sitio publicado llama a D1. GitHub Pages sigue sirviendo solo el frontend.
 

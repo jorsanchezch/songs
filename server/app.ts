@@ -33,7 +33,9 @@ export type ApiEnv = MediaBackfillEnv & {
 type Role = 'owner' | 'admin' | 'viewer'
 type Origin = 'catalog' | 'local' | 'copy'
 
-type User = { id: string; name: string; role: Role; has_password: number }
+type User = { id: string; name: string; username: string; role: Role; has_password: number }
+
+const USERNAME_OK = /^[A-Za-z0-9._-]{2,40}$/
 
 type SongRecord = {
   id: string
@@ -85,7 +87,7 @@ export async function handleApi(sql: Sql, request: Request, env: ApiEnv = {}): P
 
     if (pathname === '/api/session' && request.method === 'POST') return sessionCreate(sql, request)
     const user = await userFrom(sql, request)
-    if (!user) return json({ error: 'Entra con tu nombre para usar Songbook.' }, 401)
+    if (!user) return json({ error: 'Entra con tu usuario y contraseña para usar Songbook.' }, 401)
     if (pathname === '/api/session' && request.method === 'GET') return json({ user: publicUser(user) })
     if (pathname === '/api/session' && request.method === 'DELETE') return sessionDelete(sql, request)
     if (pathname === '/api/users' && request.method === 'GET') return listUsers(sql)
@@ -160,29 +162,46 @@ export async function handleApi(sql: Sql, request: Request, env: ApiEnv = {}): P
   }
 }
 
+const LOGIN_TRIES = 5
+const LOGIN_LOCK_MS = 15 * 60_000
+
 async function sessionCreate(sql: Sql, request: Request): Promise<Response> {
-  const body = await readJson<{ name?: string; password?: string }>(request)
-  const name = body.name?.trim() ?? ''
-  if (!name || name.length > 80) return json({ error: 'Escribe un nombre.' }, 400)
-  const row = await sql.get<{ id: string; name: string; role: Role; password_hash: string | null }>(
-    `SELECT id, name, role, password_hash FROM users WHERE name = ? COLLATE NOCASE`,
-    [name],
+  const body = await readJson<{ username?: string; password?: string }>(request)
+  const username = normalizeUsername(body.username)
+  if (!username) return json({ error: 'Escribe tu usuario.' }, 400)
+  if (!USERNAME_OK.test(username)) return json({ error: 'Ese usuario no es válido.' }, 400)
+  const password = typeof body.password === 'string' ? body.password.trim() : ''
+  if (!password) return json({ error: 'Escribe tu contraseña.' }, 401)
+  // Short passwords are guessable; a few wrong tries lock that username for a while.
+  const since = new Date(Date.now() - LOGIN_LOCK_MS).toISOString()
+  await sql.run(`DELETE FROM login_failures WHERE at < ?`, [since])
+  const failures = await sql.get<{ n: number }>(`SELECT COUNT(*) AS n FROM login_failures WHERE username = ?`, [username])
+  if (Number(failures?.n ?? 0) >= LOGIN_TRIES) {
+    return json({ error: 'Demasiados intentos. Espera 15 minutos y vuelve a probar.' }, 429)
+  }
+  const refuse = async () => {
+    await sql.run(`INSERT INTO login_failures (username, at) VALUES (?, ?)`, [username, new Date().toISOString()])
+    return json({ error: 'Usuario o contraseña incorrectos.' }, 401)
+  }
+  const row = await sql.get<{
+    id: string
+    name: string
+    username: string
+    role: Role
+    password_hash: string | null
+  }>(
+    `SELECT id, name, username, role, password_hash FROM users WHERE username = ? COLLATE NOCASE`,
+    [username],
   )
-  let user: { id: string; name: string; role: Role; has_password: number }
-  if (!row) {
-    const id = await freshUserId(sql, name)
-    // A new name stays without a password until that person sets one.
-    await sql.run(`INSERT INTO users (id, name, role) VALUES (?, ?, 'viewer')`, [id, name])
-    user = { id, name, role: 'viewer', has_password: 0 }
-  } else {
-    if (row.password_hash) {
-      const password = typeof body.password === 'string' ? body.password.trim() : ''
-      if (!password) return json({ error: 'Esta cuenta tiene contraseña. Escríbela para entrar.' }, 401)
-      if (!(await verifyPassword(password, row.password_hash))) {
-        return json({ error: 'La contraseña no es correcta.' }, 401)
-      }
-    }
-    user = { id: row.id, name: row.name, role: row.role, has_password: row.password_hash ? 1 : 0 }
+  if (!row || !row.password_hash) return refuse()
+  if (!(await verifyPassword(password, row.password_hash))) return refuse()
+  await sql.run(`DELETE FROM login_failures WHERE username = ?`, [username])
+  const user: User = {
+    id: row.id,
+    name: row.name,
+    username: row.username,
+    role: row.role,
+    has_password: 1,
   }
   const token = crypto.randomUUID()
   await sql.run(`INSERT INTO sessions (token, user_id, created_at) VALUES (?, ?, ?)`, [
@@ -1211,7 +1230,7 @@ async function userFrom(sql: Sql, request: Request): Promise<User | undefined> {
   const token = bearer(request)
   if (!token) return undefined
   return sql.get<User>(
-    `SELECT u.id, u.name, u.role, ${hasPasswordSql('u')} FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ?`,
+    `SELECT u.id, u.name, u.username, u.role, ${hasPasswordSql('u')} FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ?`,
     [token],
   )
 }
@@ -1222,11 +1241,30 @@ function bearer(request: Request): string {
 }
 
 function publicUser(user: User) {
-  return { id: user.id, name: user.name, role: user.role, hasPassword: Number(user.has_password) === 1 }
+  return {
+    id: user.id,
+    name: user.name,
+    username: user.username,
+    role: user.role,
+    hasPassword: Number(user.has_password) === 1,
+  }
 }
 
 function userColumns(): string {
-  return `SELECT id, name, role, ${hasPasswordSql()} FROM users`
+  return `SELECT id, name, username, role, ${hasPasswordSql()} FROM users`
+}
+
+function normalizeUsername(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function parseUsername(value: unknown): string | Response {
+  const username = normalizeUsername(value)
+  if (!username) return json({ error: 'Escribe un usuario.' }, 400)
+  if (!USERNAME_OK.test(username)) {
+    return json({ error: 'El usuario solo admite letras, números, punto, guion y guion bajo (2–40).' }, 400)
+  }
+  return username
 }
 
 function hasPasswordSql(alias = ''): string {
@@ -1265,10 +1303,14 @@ async function setOwnPassword(sql: Sql, user: User, request: Request): Promise<R
   if (immutableAdmin(user.id)) return json({ error: 'La cuenta de Admin no cambia de contraseña.' }, 403)
   const body = await readJson<{ password?: string | null }>(request)
   if (!Object.prototype.hasOwnProperty.call(body, 'password')) return json({ error: 'Falta la contraseña.' }, 400)
-  const next = await storedPassword(body.password ?? null)
+  if (body.password == null || !String(body.password).trim()) {
+    return json({ error: 'La contraseña es obligatoria para entrar.' }, 400)
+  }
+  const next = await storedPassword(body.password)
   if (next instanceof Response) return next
+  if (!next) return json({ error: 'La contraseña es obligatoria para entrar.' }, 400)
   await sql.run(`UPDATE users SET password_hash = ? WHERE id = ?`, [next, user.id])
-  return json({ user: publicUser({ ...user, has_password: next ? 1 : 0 }) })
+  return json({ user: publicUser({ ...user, has_password: 1 }) })
 }
 
 async function adminOverview(sql: Sql, actor: User): Promise<Response> {
@@ -1356,34 +1398,48 @@ async function adminOverview(sql: Sql, actor: User): Promise<Response> {
 async function adminCreateUser(sql: Sql, actor: User, request: Request): Promise<Response> {
   const denied = staffOnly(actor)
   if (denied) return denied
-  const body = await readJson<{ name?: string; role?: unknown; password?: string }>(request)
+  const body = await readJson<{ name?: string; username?: string; role?: unknown; password?: string }>(request)
   const name = body.name?.trim() ?? ''
   if (!name || name.length > 80) return json({ error: 'Escribe un nombre.' }, 400)
+  const username = parseUsername(body.username)
+  if (username instanceof Response) return username
   const role = parseRole(body.role)
   if (!role) return json({ error: 'Ese rol no existe.' }, 400)
   if (actor.role !== 'owner' && role === 'owner') return json({ error: 'Un admin no puede nombrar a un dueño.' }, 403)
-  const existing = await sql.get(`SELECT id FROM users WHERE name = ? COLLATE NOCASE`, [name])
-  if (existing) return json({ error: 'Ya hay alguien con ese nombre.' }, 409)
-  let passwordHash: string | null = null
-  if (typeof body.password === 'string' && body.password.trim()) {
-    const stored = await storedPassword(body.password)
-    if (stored instanceof Response) return stored
-    passwordHash = stored
+  const existingName = await sql.get(`SELECT id FROM users WHERE name = ? COLLATE NOCASE`, [name])
+  if (existingName) return json({ error: 'Ya hay alguien con ese nombre.' }, 409)
+  const existingUser = await sql.get(`SELECT id FROM users WHERE username = ? COLLATE NOCASE`, [username])
+  if (existingUser) return json({ error: 'Ya hay alguien con ese usuario.' }, 409)
+  if (typeof body.password !== 'string' || !body.password.trim()) {
+    return json({ error: 'Escribe una contraseña.' }, 400)
   }
+  const stored = await storedPassword(body.password)
+  if (stored instanceof Response) return stored
+  if (!stored) return json({ error: 'Escribe una contraseña.' }, 400)
   const id = await freshUserId(sql, name)
-  await sql.run(`INSERT INTO users (id, name, role, password_hash) VALUES (?, ?, ?, ?)`, [id, name, role, passwordHash])
+  await sql.run(`INSERT INTO users (id, name, username, role, password_hash) VALUES (?, ?, ?, ?, ?)`, [
+    id,
+    name,
+    username,
+    role,
+    stored,
+  ])
   return adminOverview(sql, actor)
 }
 
 async function adminUpdateUser(sql: Sql, actor: User, id: string, request: Request): Promise<Response> {
   const denied = staffOnly(actor)
   if (denied) return denied
-  const target = await sql.get<{ id: string; role: Role }>(`SELECT id, role FROM users WHERE id = ?`, [id])
+  const target = await sql.get<{ id: string; role: Role; username: string }>(
+    `SELECT id, role, username FROM users WHERE id = ?`,
+    [id],
+  )
   if (!target) return json({ error: 'No está esa persona.' }, 404)
-  const body = await readJson<{ role?: unknown; password?: string | null }>(request)
+  const body = await readJson<{ role?: unknown; username?: string; password?: string | null }>(request)
   const touchesRole = Object.prototype.hasOwnProperty.call(body, 'role')
+  const touchesUsername = Object.prototype.hasOwnProperty.call(body, 'username')
   const touchesPassword = Object.prototype.hasOwnProperty.call(body, 'password')
-  if (!touchesRole && !touchesPassword) return json({ error: 'Nada que cambiar.' }, 400)
+  if (!touchesRole && !touchesUsername && !touchesPassword) return json({ error: 'Nada que cambiar.' }, 400)
   if (immutableAdmin(id)) return json({ error: 'La cuenta de Admin no se cambia.' }, 403)
 
   let role = target.role
@@ -1403,17 +1459,31 @@ async function adminUpdateUser(sql: Sql, actor: User, id: string, request: Reque
     role = next
   }
 
-  let passwordHash: string | null | undefined
+  let username = target.username
+  if (touchesUsername) {
+    const next = parseUsername(body.username)
+    if (next instanceof Response) return next
+    const taken = await sql.get(`SELECT id FROM users WHERE username = ? COLLATE NOCASE AND id != ?`, [next, id])
+    if (taken) return json({ error: 'Ya hay alguien con ese usuario.' }, 409)
+    username = next
+  }
+
+  let passwordHash: string | undefined
   if (touchesPassword) {
     if (actor.role !== 'owner' && target.role === 'owner') {
       return json({ error: 'Un admin no puede cambiar la contraseña del dueño.' }, 403)
     }
-    const stored = await storedPassword(body.password ?? null)
+    if (body.password == null || !String(body.password).trim()) {
+      return json({ error: 'La contraseña es obligatoria para entrar.' }, 400)
+    }
+    const stored = await storedPassword(body.password)
     if (stored instanceof Response) return stored
+    if (!stored) return json({ error: 'La contraseña es obligatoria para entrar.' }, 400)
     passwordHash = stored
   }
 
   if (role !== target.role) await sql.run(`UPDATE users SET role = ? WHERE id = ?`, [role, id])
+  if (username !== target.username) await sql.run(`UPDATE users SET username = ? WHERE id = ?`, [username, id])
   if (passwordHash !== undefined) await sql.run(`UPDATE users SET password_hash = ? WHERE id = ?`, [passwordHash, id])
   return adminOverview(sql, actor)
 }

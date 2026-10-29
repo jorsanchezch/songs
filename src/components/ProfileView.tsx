@@ -18,7 +18,7 @@ export function ProfileView() {
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
 
-  const save = async (next: string | null) => {
+  const save = async (next: string) => {
     setBusy(true)
     setError('')
     setNotice('')
@@ -26,7 +26,7 @@ export function ProfileView() {
       const updated = await putPassword(next)
       adopt(updated)
       setPassword('')
-      setNotice(updated.hasPassword ? 'Contraseña guardada.' : 'Contraseña quitada. Con tu nombre entras.')
+      setNotice('Contraseña guardada.')
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'No pude guardar la contraseña.')
     } finally {
@@ -52,12 +52,9 @@ export function ProfileView() {
       <main className={`${page} flex max-w-md flex-col gap-4 py-4`}>
         <section className="rounded-xl border bg-card p-4">
           <p className="text-lg font-medium">{user.name}</p>
+          <p className="text-sm text-muted-foreground">@{user.username}</p>
           <p className="text-sm text-muted-foreground">{roleLabel(user.role)}</p>
-          <p className="mt-2 text-sm">
-            {user.hasPassword
-              ? 'Tienes contraseña. Con el nombre no basta para entrar.'
-              : 'Sin contraseña. Con tu nombre entras.'}
-          </p>
+          <p className="mt-2 text-sm">Entras con tu usuario y tu contraseña.</p>
         </section>
         {isImmutableAdmin(user.id) ? (
           <p className="text-sm text-muted-foreground">La cuenta de Admin no cambia de contraseña.</p>
@@ -89,19 +86,6 @@ export function ProfileView() {
                 Guardar contraseña
               </Button>
             </form>
-            {user.hasPassword && (
-              <Button
-                type="button"
-                variant="outline"
-                disabled={busy}
-                onClick={() => {
-                  if (!window.confirm('¿Quitar tu contraseña? Con el nombre basta para entrar.')) return
-                  void save(null)
-                }}
-              >
-                Quitar contraseña
-              </Button>
-            )}
           </>
         )}
         {notice && <p className="text-sm text-muted-foreground">{notice}</p>}

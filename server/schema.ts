@@ -2,6 +2,7 @@ export const SCHEMA = `
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  username TEXT UNIQUE COLLATE NOCASE,
   role TEXT NOT NULL CHECK (role IN ('owner', 'admin', 'viewer')),
   password_hash TEXT
 );
@@ -11,6 +12,12 @@ CREATE TABLE IF NOT EXISTS sessions (
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS login_failures (
+  username TEXT NOT NULL COLLATE NOCASE,
+  at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_login_failures ON login_failures(username, at);
 
 CREATE TABLE IF NOT EXISTS songs (
   id TEXT PRIMARY KEY,
@@ -122,3 +129,4 @@ CREATE INDEX IF NOT EXISTS idx_song_drafts_user ON song_drafts(user_id);
 /** Jorge Sanchez, the seeded owner. Seed, import, backfill, and media scripts create songs as this user. */
 export const OWNER_ID = 'jorge'
 export const OWNER_NAME = 'Jorge Sanchez'
+export const OWNER_USERNAME = 'jsanchezch'

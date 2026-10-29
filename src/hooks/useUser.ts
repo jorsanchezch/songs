@@ -4,7 +4,7 @@ import type { Account } from '@/lib/access'
 export type SessionValue = {
   user: Account
   people: Account[]
-  signIn: (name: string, password?: string) => Promise<void>
+  signIn: (username: string, password: string) => Promise<void>
   signOut: () => Promise<void>
   reloadPeople: () => Promise<void>
   adopt: (next: Account) => void

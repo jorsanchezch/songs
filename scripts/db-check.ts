@@ -29,13 +29,65 @@ async function call(sql: Sql, token: string, method: string, pathname: string, b
   return { status: response.status, data }
 }
 
-async function signIn(sql: Sql, name: string) {
-  const response = await call(sql, '', 'POST', '/api/session', { name })
-  assert(response.status === 200, `sign in ${name} ${response.status} ${JSON.stringify(response.data)}`)
+/** Test-only password; real passwords live only in the database. */
+const TEST_PASSWORD = 'prueba-1234'
+
+function usernameFor(name: string): string {
+  return name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '.').replace(/^\.|\.$/g, '')
+}
+
+/** Signs a person in by name, creating a viewer account first when there is none (the owner gets its test password). */
+async function account(db: Sql, name: string) {
+  const { hashPassword } = await import('../server/password.ts')
+  const hash = await hashPassword(TEST_PASSWORD)
+  if (name === 'Jorge Sanchez') {
+    await db.run(`UPDATE users SET password_hash = ? WHERE id = 'jorge' AND password_hash IS NULL`, [hash])
+    return signIn(db, 'jsanchezch', TEST_PASSWORD)
+  }
+  const username = usernameFor(name)
+  const row = await db.get<{ id: string }>(`SELECT id FROM users WHERE name = ? COLLATE NOCASE`, [name])
+  if (!row) {
+    await db.run(`INSERT INTO users (id, name, username, role, password_hash) VALUES (?, ?, ?, 'viewer', ?)`, [
+      username.replace(/\./g, '-'),
+      name,
+      username,
+      hash,
+    ])
+  }
+  const existing = await db.get<{ username: string }>(`SELECT username FROM users WHERE name = ? COLLATE NOCASE`, [name])
+  return signIn(db, existing!.username, TEST_PASSWORD)
+}
+
+async function signIn(sql: Sql, username: string, password: string) {
+  const response = await call(sql, '', 'POST', '/api/session', { username, password })
+  assert(response.status === 200, `sign in ${username} ${response.status} ${JSON.stringify(response.data)}`)
   const token = response.data.token
-  const user = response.data.user as { id: string; role: string }
+  const user = response.data.user as { id: string; role: string; username: string; name: string; hasPassword: boolean }
   assert(typeof token === 'string', 'token')
   return { token, user }
+}
+
+async function addPerson(
+  sql: Sql,
+  ownerToken: string,
+  body: { name: string; username: string; role?: string; password?: string },
+) {
+  return call(sql, ownerToken, 'POST', '/api/admin/users', {
+    role: 'viewer',
+    password: 'clave',
+    ...body,
+  })
+}
+
+async function openAs(
+  sql: Sql,
+  ownerToken: string,
+  body: { name: string; username: string; role?: string; password?: string },
+) {
+  const password = body.password ?? 'clave'
+  const made = await addPerson(sql, ownerToken, { ...body, password })
+  assert(made.status === 200, `create ${body.username} ${made.status} ${JSON.stringify(made.data)}`)
+  return signIn(sql, body.username, password)
 }
 
 const sql = openSqlite(':memory:')
@@ -43,8 +95,10 @@ const files = await readCatalogFiles(root)
 assert(files.length >= 30, `catalog files ${files.length}`)
 await seedCatalog(sql, files)
 
-const owner = await signIn(sql, 'Jorge Sanchez')
+const owner = await account(sql, 'Jorge Sanchez')
 assert(owner.user.role === 'owner', 'jorge is owner')
+assert(owner.user.username === 'jsanchezch' && owner.user.name === 'Jorge Sanchez', 'jorge account fields')
+assert(owner.user.hasPassword === true, 'jorge has a password')
 
 const listed = await call(sql, owner.token, 'GET', '/api/songs?instrument=guitar')
 assert(listed.status === 200, 'list')
@@ -82,7 +136,7 @@ assert(
   'opening without an instrument uses electric guitar',
 )
 
-const ana = await signIn(sql, 'Ana Ruiz')
+const ana = await openAs(sql, owner.token, { name: 'Ana Ruiz', username: 'ana' })
 assert(ana.user.role === 'viewer', 'ana is a viewer')
 const denied = await call(sql, ana.token, 'PUT', `/api/songs/${encodeURIComponent(catalog.id)}`, {
   sourceText: `${original}\n{comment: ana}\n`,
@@ -112,7 +166,7 @@ assert((copyGuitarNow.data.song as { sourceText: string }).sourceText === copyGu
 const catalogAfter = await call(sql, owner.token, 'GET', `/api/songs/${encodeURIComponent(catalog.id)}?instrument=bass`)
 assert((catalogAfter.data.song as { sourceText: string }).sourceText === original, 'catalog bass untouched by the copy')
 
-const luis = await signIn(sql, 'Luis Mora')
+const luis = await openAs(sql, owner.token, { name: 'Luis Mora', username: 'luis' })
 const hiddenCopy = await call(sql, luis.token, 'GET', `/api/songs/${encodeURIComponent(copy.id)}?instrument=guitar`)
 assert(hiddenCopy.status === 404, 'private copy is hidden from another viewer')
 const shared = await call(sql, ana.token, 'POST', `/api/songs/${encodeURIComponent(copy.id)}/share`, { shared: true })
@@ -223,9 +277,9 @@ async function checkDraftsAndCreators(files: { id: string; sourceText: string }[
   }
   const db = openSqlite(':memory:')
   await seedCatalog(db, files)
-  const boss = await signIn(db, 'Jorge Sanchez')
-  const ana = await signIn(db, 'Ana Borrador')
-  const luis = await signIn(db, 'Luis Borrador')
+  const boss = await account(db, 'Jorge Sanchez')
+  const ana = await account(db, 'Ana Borrador')
+  const luis = await account(db, 'Luis Borrador')
   const sample = files.find((file) => file.sourceText.includes('title'))
   assert(sample, 'catalog file with a title')
   const path = `/api/songs/${encodeURIComponent(sample.id)}`
@@ -321,7 +375,7 @@ async function checkDraftsAndCreators(files: { id: string; sourceText: string }[
 async function checkCreatorBackfill(files: { id: string; sourceText: string }[]) {
   const db = openSqlite(':memory:')
   await seedCatalog(db, files)
-  const ana = await signIn(db, 'Ana Antigua')
+  const ana = await account(db, 'Ana Antigua')
   const made = await call(db, ana.token, 'POST', '/api/songs', { sourceText: '{title: Vieja}\n[C]Hola\n' })
   const id = (made.data.song as { id: string }).id
   await db.run(`UPDATE songs SET creator_id = NULL`)
@@ -337,8 +391,8 @@ async function checkCreatorBackfill(files: { id: string; sourceText: string }[])
 async function checkDeleteSurvivesSeed(files: { id: string; sourceText: string }[]) {
   const db = openSqlite(':memory:')
   await seedCatalog(db, files)
-  const boss = await signIn(db, 'Jorge Sanchez')
-  const reader = await signIn(db, 'Lector Borrar')
+  const boss = await account(db, 'Jorge Sanchez')
+  const reader = await openAs(db, boss.token, { name: 'Lector Borrar', username: 'lector-borrar' })
   const sample = files[0]
   assert(sample, 'a catalog file to delete')
   const denied = await call(db, reader.token, 'DELETE', `/api/songs/${encodeURIComponent(sample.id)}`)
@@ -377,7 +431,7 @@ async function checkDeleteSurvivesSeed(files: { id: string; sourceText: string }
 async function checkImport(files: { id: string; sourceText: string }[]) {
   const db = openSqlite(':memory:')
   await seedCatalog(db, files)
-  const boss = await signIn(db, 'Jorge Sanchez')
+  const boss = await account(db, 'Jorge Sanchez')
   const changed = await call(db, boss.token, 'PUT', '/api/setlists', {
     days: [1],
     setlists: [{ id: 'lista-x', name: 'Ensayo', items: [{ songId: 'a', semitones: 0 }] }],
@@ -424,7 +478,7 @@ async function checkImport(files: { id: string; sourceText: string }[]) {
   assert((still.data.song as { sourceText: string }).sourceText.includes('importada'), 'a second import does not wipe newer charts')
   const prefsStill = await call(db, boss.token, 'GET', '/api/prefs')
   assert((prefsStill.data.prefs as { semitones: { a: number } }).semitones.a === 2, 'a second import does not wipe prefs')
-  const reader = await signIn(db, 'Ana Ruiz')
+  const reader = await openAs(db, boss.token, { name: 'Ana Ruiz', username: 'ana-import' })
   const denied = await call(db, reader.token, 'POST', '/api/import-local', {})
   assert(denied.status === 403, 'a reader cannot import')
 }
@@ -432,7 +486,7 @@ async function checkImport(files: { id: string; sourceText: string }[]) {
 async function checkSeedLists(files: { id: string; sourceText: string }[]) {
   const db = openSqlite(':memory:')
   await seedCatalog(db, files)
-  const boss = await signIn(db, 'Jorge Sanchez')
+  const boss = await account(db, 'Jorge Sanchez')
   const imported = await call(db, boss.token, 'POST', '/api/import-local', {
     overrides: {},
     hidden: [],
@@ -452,7 +506,7 @@ async function checkSeedLists(files: { id: string; sourceText: string }[]) {
 async function checkDayListHistory(files: { id: string; sourceText: string }[]) {
   const db = openSqlite(':memory:')
   await seedCatalog(db, files)
-  const boss = await signIn(db, 'Jorge Sanchez')
+  const boss = await account(db, 'Jorge Sanchez')
   const before = await call(db, boss.token, 'GET', '/api/setlists')
   assert(Array.isArray(before.data.history) && (before.data.history as unknown[]).length === 0, 'history starts empty')
   const saved = await call(db, boss.token, 'PUT', '/api/setlists', {
@@ -515,65 +569,114 @@ async function checkPasswords(files: { id: string; sourceText: string }[]) {
   await seedCatalog(migrated, files)
   const columns = await migrated.all<{ name: string }>(`PRAGMA table_info(users)`)
   assert(columns.some((column) => column.name === 'password_hash'), 'old databases gain password_hash')
+  assert(columns.some((column) => column.name === 'username'), 'old databases gain username')
+  const migratedOwner = await migrated.get<{ username: string; password_hash: string | null }>(
+    `SELECT username, password_hash FROM users WHERE id = 'jorge'`,
+  )
+  // The password is never in the code: a fresh owner has none until db:set-password writes one.
+  assert(migratedOwner?.username === 'jsanchezch' && migratedOwner.password_hash == null, 'migration seeds jorge without a password')
 
   const db = openSqlite(':memory:')
   await seedCatalog(db, files)
-  const entered = await enter(db, 'Jorge Sanchez')
-  assert(entered.status === 200, 'jorge still enters by name')
-  const jorge = entered.data.user as { id: string; hasPassword: boolean; role: string }
+  const locked = await enter(db, 'jsanchezch', TEST_PASSWORD)
+  assert(locked.status === 401, 'an owner without a password cannot enter')
+  const { hashPassword } = await import('../server/password.ts')
+  await db.run(`UPDATE users SET password_hash = ? WHERE username = 'jsanchezch'`, [await hashPassword(TEST_PASSWORD)])
+  const entered = await enter(db, 'jsanchezch', TEST_PASSWORD)
+  assert(entered.status === 200, 'jorge enters with username and password')
+  const jorge = entered.data.user as {
+    id: string
+    hasPassword: boolean
+    role: string
+    username: string
+    name: string
+  }
   const token = entered.data.token as string
-  assert(jorge.role === 'owner' && jorge.hasPassword === false, 'jorge has no password')
+  assert(jorge.role === 'owner' && jorge.hasPassword === true, 'jorge is owner with a password')
+  assert(jorge.username === 'jsanchezch' && jorge.name === 'Jorge Sanchez', 'jorge fields')
 
-  const alone = await enter(db, 'Nila Prueba', 'se-ignora')
-  assert(alone.status === 200, 'a new name still enters')
-  const nila = alone.data.user as { id: string; role: string; hasPassword: boolean }
-  assert(nila.role === 'viewer' && nila.hasPassword === false, 'signup ignores a password and stays a viewer')
-  const nilaToken = alone.data.token as string
-  const again = await enter(db, 'Nila Prueba')
-  assert(again.status === 200, 'the new account still enters by name')
+  const guest = await enter(db, 'cualquiera', 'lo-que-sea')
+  assert(guest.status === 401, 'unknown users are refused')
+  const nameOnly = await enter(db, 'jsanchezch')
+  assert(nameOnly.status === 401, 'password is required')
+  const wrongOwner = await enter(db, 'jsanchezch', '0000')
+  assert(wrongOwner.status === 401, 'a wrong password is refused')
+  for (let tries = 0; tries < 4; tries++) await enter(db, 'jsanchezch', `mal-${tries}`)
+  const lockedOut = await enter(db, 'jsanchezch', TEST_PASSWORD)
+  assert(lockedOut.status === 429, `five wrong tries lock the username ${lockedOut.status}`)
+  await db.run(`DELETE FROM login_failures`)
+  const back = await enter(db, 'jsanchezch', TEST_PASSWORD)
+  assert(back.status === 200, 'the lock lifts once the window passes')
+  const failuresLeft = await db.get<{ n: number }>(`SELECT COUNT(*) AS n FROM login_failures`)
+  assert(Number(failuresLeft?.n) === 0, 'a good login clears the failures')
+  const byDisplayName = await call(db, '', 'POST', '/api/session', {
+    name: 'Jorge Sanchez',
+    password: TEST_PASSWORD,
+  })
+  assert(byDisplayName.status === 400 || byDisplayName.status === 401, 'display name alone is not a username')
+
+  const nilaMade = await addPerson(db, token, {
+    name: 'Nila Prueba',
+    username: 'nila',
+    password: 'secreto-nila',
+  })
+  assert(nilaMade.status === 200, `create nila ${nilaMade.status} ${JSON.stringify(nilaMade.data)}`)
+  const nilaEnter = await enter(db, 'nila', 'secreto-nila')
+  assert(nilaEnter.status === 200, 'nila enters')
+  const nila = nilaEnter.data.user as { id: string; role: string; hasPassword: boolean; username: string }
+  assert(nila.role === 'viewer' && nila.hasPassword === true && nila.username === 'nila', 'nila account')
+  const nilaToken = nilaEnter.data.token as string
 
   const panel = await call(db, nilaToken, 'GET', '/api/admin')
   assert(panel.status === 403, `viewer admin ${panel.status}`)
   assert(String(panel.data.error).includes('dueño'), 'the refusal names the owner')
 
-  const saved = await call(db, nilaToken, 'PUT', '/api/profile/password', { password: 'secreto-nila' })
+  const saved = await call(db, nilaToken, 'PUT', '/api/profile/password', { password: 'otra-nila' })
   assert(saved.status === 200, `set password ${saved.status} ${JSON.stringify(saved.data)}`)
   assert((saved.data.user as { hasPassword: boolean }).hasPassword === true, 'profile reports a password')
   const stored = await db.get<{ password_hash: string }>(`SELECT password_hash FROM users WHERE id = ?`, [nila.id])
   assert(stored?.password_hash.startsWith('pbkdf2$'), 'password is stored as a hash')
-  assert(!stored.password_hash.includes('secreto-nila'), 'the plain password is not stored')
-
-  const missing = await enter(db, 'Nila Prueba')
-  assert(missing.status === 401 && String(missing.data.error).includes('contraseña'), 'name alone is refused')
-  const wrong = await enter(db, 'Nila Prueba', 'no-es')
-  assert(wrong.status === 401 && String(wrong.data.error).includes('no es correcta'), 'a wrong password is refused')
-  const right = await enter(db, 'Nila Prueba', 'secreto-nila')
-  assert(right.status === 200, 'the password enters')
-  const cleared = await call(db, right.data.token as string, 'PUT', '/api/profile/password', { password: null })
-  assert(cleared.status === 200 && (cleared.data.user as { hasPassword: boolean }).hasPassword === false, 'clear password')
-  assert((await enter(db, 'Nila Prueba')).status === 200, 'name alone works after clearing')
+  assert(!stored.password_hash.includes('otra-nila'), 'the plain password is not stored')
+  assert((await enter(db, 'nila', 'secreto-nila')).status === 401, 'the old password stops working')
+  assert((await enter(db, 'nila', 'otra-nila')).status === 200, 'the new password enters')
+  const cleared = await call(db, nilaToken, 'PUT', '/api/profile/password', { password: null })
+  assert(cleared.status === 400, 'password cannot be cleared')
 
   const stuck = await call(db, token, 'PUT', '/api/admin/users/jorge', { role: 'admin' })
   assert(stuck.status === 403, `admin account stays fixed ${stuck.status} ${JSON.stringify(stuck.data)}`)
 
-  const made = await call(db, token, 'POST', '/api/admin/users', { name: 'Ivo Admin', role: 'admin' })
+  const made = await addPerson(db, token, {
+    name: 'Ivo Admin',
+    username: 'ivo',
+    role: 'admin',
+    password: 'ivo-clave',
+  })
   assert(made.status === 200, `create admin ${made.status} ${JSON.stringify(made.data.error ?? '')}`)
-  const ivo = await enter(db, 'Ivo Admin')
+  const ivo = await enter(db, 'ivo', 'ivo-clave')
   const ivoToken = ivo.data.token as string
   assert((ivo.data.user as { role: string }).role === 'admin', 'ivo is admin')
   const roleBlocked = await call(db, ivoToken, 'PUT', '/api/admin/users/jorge', { role: 'viewer' })
   const passBlocked = await call(db, ivoToken, 'PUT', '/api/admin/users/jorge', { password: 'tomada' })
   const dropBlocked = await call(db, ivoToken, 'DELETE', '/api/admin/users/jorge')
-  const crownBlocked = await call(db, ivoToken, 'POST', '/api/admin/users', { name: 'Falso Dueño', role: 'owner' })
+  const crownBlocked = await addPerson(db, ivoToken, {
+    name: 'Falso Dueño',
+    username: 'falso',
+    role: 'owner',
+    password: 'falso',
+  })
   assert(roleBlocked.status === 403 && passBlocked.status === 403 && dropBlocked.status === 403, 'admin cannot touch the owner')
   assert(crownBlocked.status === 403, 'admin cannot name an owner')
-  const jorgeStill = await db.get<{ role: string; password_hash: string | null }>(
-    `SELECT role, password_hash FROM users WHERE id = 'jorge'`,
+  const jorgeStill = await db.get<{ role: string; username: string; password_hash: string | null }>(
+    `SELECT role, username, password_hash FROM users WHERE id = 'jorge'`,
   )
-  assert(jorgeStill?.role === 'owner' && !jorgeStill.password_hash, 'jorge stays owner without a password')
+  assert(
+    jorgeStill?.role === 'owner' && jorgeStill.username === 'jsanchezch' && jorgeStill.password_hash?.startsWith('pbkdf2$'),
+    'jorge stays owner with credentials',
+  )
 
-  const luz = await call(db, token, 'POST', '/api/admin/users', {
+  const luz = await addPerson(db, token, {
     name: 'Luz Lector',
+    username: 'luz',
     role: 'viewer',
     password: 'luz-clave',
   })
@@ -583,8 +686,10 @@ async function checkPasswords(files: { id: string; sourceText: string }[]) {
   const people = await call(db, token, 'GET', '/api/users')
   const peopleJson = JSON.stringify(people.data)
   assert(!peopleJson.includes('pbkdf2') && !peopleJson.includes('luz-clave'), 'the people list hides secrets')
-  assert((await enter(db, 'Luz Lector')).status === 401, 'created password is required')
-  assert((await enter(db, 'Luz Lector', 'luz-clave')).status === 200, 'created password works')
+  assert((await enter(db, 'luz')).status === 401, 'created password is required')
+  assert((await enter(db, 'luz', 'luz-clave')).status === 200, 'created password works')
+  const noPass = await addPerson(db, token, { name: 'Sin Clave', username: 'sinclave', password: '' })
+  assert(noPass.status === 400, 'create requires a password')
 
   const catalogBefore = await db.get<{ n: number }>(`SELECT COUNT(*) AS n FROM songs WHERE origin = 'catalog'`)
   const songs = await call(db, nilaToken, 'GET', '/api/songs?instrument=guitar')
@@ -623,7 +728,12 @@ async function checkPasswords(files: { id: string; sourceText: string }[]) {
   const opened = await call(db, token, 'GET', `/api/songs/${encodeURIComponent(sharedId)}?instrument=guitar`)
   assert(opened.status === 200, 'the kept copy still opens')
 
-  const ottoMade = await call(db, token, 'POST', '/api/admin/users', { name: 'Otto Duenio', role: 'owner' })
+  const ottoMade = await addPerson(db, token, {
+    name: 'Otto Duenio',
+    username: 'otto',
+    role: 'owner',
+    password: 'otto-clave',
+  })
   assert(ottoMade.status === 200, 'a second owner can be created')
   const demoted = await call(db, token, 'PUT', '/api/admin/users/jorge', { role: 'admin' })
   assert(demoted.status === 403, `owner cannot change the admin role ${demoted.status} ${JSON.stringify(demoted.data)}`)
@@ -633,7 +743,7 @@ async function checkPasswords(files: { id: string; sourceText: string }[]) {
   assert(selfPass.status === 403, 'the admin cannot change their own password')
   const dropAdmin = await call(db, token, 'DELETE', '/api/admin/users/jorge')
   assert(dropAdmin.status === 403, 'the admin cannot be deleted')
-  const otto = await enter(db, 'Otto Duenio')
+  const otto = await enter(db, 'otto', 'otto-clave')
   const restored = await call(db, otto.data.token as string, 'PUT', '/api/admin/users/jorge', { role: 'viewer' })
   assert(restored.status === 403, 'another owner cannot change the admin')
   const stillOwner = await call(db, token, 'DELETE', `/api/admin/users/${encodeURIComponent((otto.data.user as { id: string }).id)}`)
@@ -651,15 +761,17 @@ async function checkPasswords(files: { id: string; sourceText: string }[]) {
     const gone = await call(db, token, 'DELETE', `/api/admin/users/${encodeURIComponent(row.id)}`)
     assert(gone.status === 200, `remove ${name}`)
   }
-  const left = await db.all<{ name: string }>(`SELECT name FROM users`)
+  const left = await db.all<{ name: string; username: string }>(`SELECT name, username FROM users`)
   assert(left.length === 1 && left[0]?.name === 'Jorge Sanchez', `only jorge remains, got ${left.map((row) => row.name).join(', ')}`)
+  assert(left[0]?.username === 'jsanchezch', 'jorge keeps username')
   const finalHash = await db.get<{ password_hash: string | null }>(`SELECT password_hash FROM users WHERE id = 'jorge'`)
-  assert(!finalHash?.password_hash, 'jorge still has no password')
+  assert(finalHash?.password_hash?.startsWith('pbkdf2$'), 'jorge still has a password')
+  assert((await enter(db, 'jsanchezch', TEST_PASSWORD)).status === 200, 'jorge still enters with his password')
 }
 
 {
   const { applyChartMedia } = await import('../server/chartMedia.ts')
-  const owner = await signIn(sql, 'Jorge Sanchez')
+  const owner = await account(sql, 'Jorge Sanchez')
   // Every catalog chart ships with YouTube now; take it off one so backfill has work.
   const bare = await sql.get<{ id: string; catalog_source: string }>(
     `SELECT id, catalog_source FROM songs WHERE origin = 'catalog' AND hidden = 0 ORDER BY id LIMIT 1`,
@@ -683,7 +795,7 @@ async function checkPasswords(files: { id: string; sourceText: string }[]) {
   assert(status.status === 200, `media backfill status ${status.status}`)
   assert(typeof status.data.missingBefore === 'number' && (status.data.missingBefore as number) > 0, 'songs missing youtube')
   assert(status.data.apiKeyPresent === false, 'no youtube key in test env')
-  const viewer = await signIn(sql, 'Nila Backfill')
+  const viewer = await account(sql, 'Nila Backfill')
   const denied = await call(sql, viewer.token, 'POST', '/api/admin/media-backfill', { dryRun: true, limit: 1 })
   assert(denied.status === 403, 'viewer cannot backfill')
 
@@ -737,6 +849,6 @@ async function checkPasswords(files: { id: string; sourceText: string }[]) {
   assert(blocked.status === 403, `viewer cannot save catalog playback ${blocked.status}`)
 }
 
-async function enter(sql: Sql, name: string, password?: string) {
-  return call(sql, '', 'POST', '/api/session', password ? { name, password } : { name })
+async function enter(sql: Sql, username: string, password?: string) {
+  return call(sql, '', 'POST', '/api/session', password ? { username, password } : { username })
 }
