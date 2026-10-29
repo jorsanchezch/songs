@@ -51,7 +51,14 @@ D1 es el plan gratuito de SQLite de Cloudflare. A diferencia de Neon o Supabase,
 7. Para desarrollar contra D1: `SONGBOOK_DB=d1` y `SONGBOOK_D1_URL=https://songbook.<tu-subdominio>.workers.dev`.
 8. Para Pages, construye con `VITE_SONGBOOK_API` igual a esa URL. Opcional: en el Worker cambia `SONGBOOK_ORIGIN` de `*` al origen de Pages.
 
-Entrar es con usuario y contraseña. Jorge Sanchez queda como dueño (`jsanchezch`). Las demás cuentas las crea un Admin o Ayudante desde el panel (usuario, nombre y contraseña). Sin cuenta no se entra.
+Entrar es con usuario y contraseña. Jorge Sanchez queda como dueño (`jsanchezch`). Las demás cuentas las crea un Admin o Ayudante desde el panel (usuario, nombre y contraseña). Sin cuenta no se entra. Cinco intentos fallidos bloquean ese usuario 15 minutos.
+
+Ninguna contraseña vive en el código. La del dueño (que el panel no cambia) o la de una base nueva se pone directo en la base; pide la contraseña sin mostrarla:
+
+```bash
+npm run db:set-password -- jsanchezch        # sqlite local
+npm run db:set-password -- jsanchezch --d1   # producción
+```
 
 El workflow de Pages construye con `VITE_SONGBOOK_API=https://songbook.jorsanchezch.workers.dev`, así el sitio publicado llama a D1. GitHub Pages sigue sirviendo solo el frontend.
 
@@ -75,13 +82,35 @@ Una canción puede tener varios enlaces YouTube en `sources`. El marcado `select
 
 Sin clave el endpoint sigue existiendo: usa búsqueda pública best-effort (sin duración ISO fiable) y documenta el aviso en la respuesta. En local: `YOUTUBE_API_KEY=… npm run media:backfill`.
 
+#### Pasar los medios de los archivos a una base existente
+
+Sembrar solo agrega canciones nuevas, así que un YouTube, BPM o duración que se agrega después a un archivo del catálogo no llega solo a la base. `media:sync` copia esos campos sin tocar el resto de cada cifra, y cada cambio revisa la revisión que leyó para no pisar una edición:
+
+```bash
+npm run media:sync -- --dry-run          # sqlite local, solo muestra
+npm run media:sync                       # sqlite local
+npm run media:sync -- --d1               # escribe data/media-sync-d1.sql para revisar
+npm run media:sync -- --d1 --apply       # lo aplica en producción
+```
+
+### Reproducción en vivo
+
+El botón ▶ abajo a la derecha avanza solo por las partes; elegir una parte a mano lo para. El aro del botón se llena hacia la próxima parte y el pie dice cuánto falta. Con el ratón, los ajustes se abren al pasar sobre el botón; en el teléfono, con el chip de ajustes.
+
+- **Ritmo:** *Duración* reparte la duración (o las partes medidas) entre líneas y repeticiones; *Pulso* usa el BPM fijo.
+- **Esta canción:** *Entrada* es lo que suena antes de la primera parte; *Marcar partes* reproduce el audio y se toca al empezar cada parte (`M`, `→` o el pedal) para guardar lo que dura cada una. Se guarda por video o MP3 en `songs.playback`.
+- **Teclas:** `P` reproduce o para · `⇧←` `⇧→` «estamos aquí» · `−` `+` mueven la entrada ¼ s.
+
+**Saltos por pantalla** (en Controles) parte las partes largas en saltos del alto de la pantalla para las flechas y el pedal, sin cambiar cómo se ve la cifra.
+
 ### Audio MP3 (R2, no D1)
 
 D1/SQLite solo guarda `audio_url` (texto). Los bytes van a Cloudflare R2 o, en local, a `data/audio/` (gitignored).
 
-1. `npx wrangler r2 bucket create songbook-audio`
-2. Descomenta `[[r2_buckets]]` / `AUDIO_BUCKET` en `wrangler.toml` y `npx wrangler deploy`.
-3. Sube desde el editor (*Subir MP3*) o `POST /api/audio` (multipart `file`). La API responde `audio_url` tipo `/api/audio/songs/…/….mp3`; `GET` lo sirve desde R2 (público, para `<audio>`).
+1. Activa R2 en la cuenta: dashboard de Cloudflare → R2 (pide un método de pago aunque el plan gratis alcanza). Sin esto `wrangler` responde *Please enable R2*.
+2. `npx wrangler r2 bucket create songbook-audio`
+3. Descomenta `[[r2_buckets]]` / `AUDIO_BUCKET` en `wrangler.toml` y `npx wrangler deploy`.
+4. Sube desde el editor (*Subir MP3*) o `POST /api/audio` (multipart `file`). La API responde `audio_url` tipo `/api/audio/songs/…/….mp3`; `GET` lo sirve desde R2 (público, para `<audio>`).
 
 ### YouTube → MP3
 

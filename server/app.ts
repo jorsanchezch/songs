@@ -28,6 +28,8 @@ import {
 export type ApiEnv = MediaBackfillEnv & {
   /** Node/sqlite only — enables Admin Extraer MP3 via yt-dlp. Never set on the Worker. */
   ALLOW_YT_EXTRACT?: boolean
+  /** Tests: never search YouTube when a song is created or looked up. */
+  OFFLINE?: boolean
 }
 
 type Role = 'owner' | 'admin' | 'viewer'
@@ -260,7 +262,7 @@ async function getSong(sql: Sql, user: User, id: string, url: URL): Promise<Resp
 const LOOKUP_BUDGET_MS = 8000
 
 async function lookupMedia(title: string, artist: string, env: ApiEnv): Promise<YoutubeHit | null> {
-  if (!title.trim()) return null
+  if (!title.trim() || env.OFFLINE) return null
   let timer: ReturnType<typeof setTimeout> | undefined
   const timeout = new Promise<null>((resolve) => {
     timer = setTimeout(() => resolve(null), LOOKUP_BUDGET_MS)

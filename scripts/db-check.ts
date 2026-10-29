@@ -23,6 +23,8 @@ async function call(sql: Sql, token: string, method: string, pathname: string, b
       headers,
       body: body === undefined ? undefined : JSON.stringify(body),
     }),
+    // Song creation would otherwise search YouTube over the network on every run.
+    { OFFLINE: true },
   )
   const text = await response.text()
   const data = text ? (JSON.parse(text) as Record<string, unknown>) : {}
