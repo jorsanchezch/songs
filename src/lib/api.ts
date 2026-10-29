@@ -233,11 +233,42 @@ export async function uploadAudioFile(file: File, songId?: string): Promise<{ au
   return { audioUrl: data.audioUrl, key: data.key }
 }
 
+export type SongMediaPatch = {
+  durationMs?: number | null
+  bpm?: number | null
+  audioUrl?: string | null
+  selectYoutubeUrl?: string | null
+  instrument?: InstrumentId
+}
+
 export function patchSongMedia(
   id: string,
-  body: { durationMs?: number | null; bpm?: number | null; audioUrl?: string | null; instrument?: InstrumentId },
+  body: SongMediaPatch,
 ): Promise<{ song: ApiSong; parts: Record<string, PartText> }> {
   return request(`/api/songs/${encodeURIComponent(id)}/media`, { method: 'PUT', body })
+}
+
+export type YoutubeInfo = {
+  videoId: string
+  url: string
+  title: string
+  durationMs: number | null
+  bpm: number | null
+  via: string
+  apiKeyPresent: boolean
+  canExtract: boolean
+}
+
+export function fetchYoutubeInfo(url: string): Promise<YoutubeInfo> {
+  const query = new URLSearchParams({ url })
+  return request(`/api/youtube/info?${query}`)
+}
+
+export function extractYoutubeAudio(
+  youtubeUrl: string,
+  songId?: string,
+): Promise<{ audioUrl: string; key: string; blocked?: boolean; error?: string }> {
+  return request('/api/audio/extract', { method: 'POST', body: { youtubeUrl, songId } })
 }
 
 export function createPerson(body: { name: string; role: Role; password?: string }): Promise<AdminOverview> {

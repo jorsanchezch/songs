@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type MutableRefObject, type ReactNode } from 'react'
 import { Flag, Loader2, Minus, Play, Plus, SlidersHorizontal, Square, X } from 'lucide-react'
 import { Kbd } from '@/components/KeyHint'
+import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useFrameTime, type Playback } from '@/hooks/usePlayback'
 import {
@@ -13,6 +14,7 @@ import {
   SPEED_MIN,
   SPEED_STEP,
   type Cue,
+  type MediaOption,
   type PlaybackAudio,
   type PlaybackSettings,
   type SongMediaSources,
@@ -75,6 +77,9 @@ export function PlaybackDock({
   escapeRef,
   canEditDuration,
   onDurationChange,
+  onPickSource,
+  onMakeSelected,
+  makingSelected,
 }: {
   playback: Playback
   settings: PlaybackSettings
@@ -95,6 +100,11 @@ export function PlaybackDock({
   canEditDuration?: boolean
   /** Sets the song length (ms); saved to the song when the reader can edit it. */
   onDurationChange?: (durationMs: number | null) => void
+  /** Session pick of which YouTube drives audio when there are several. */
+  onPickSource?: (url: string) => void
+  /** Persist the active pick as the song's principal YouTube. */
+  onMakeSelected?: (url: string) => void
+  makingSelected?: boolean
 }) {
   // Hover opens the panel for a mouse after a pause; the chip pins it for touch and keyboard.
   const [hovered, setHovered] = useState(false)
@@ -183,6 +193,9 @@ export function PlaybackDock({
           marks={marks}
           canEditDuration={canEditDuration}
           onDurationChange={onDurationChange}
+          onPickSource={onPickSource}
+          onMakeSelected={onMakeSelected}
+          makingSelected={makingSelected}
         />
       )}
 
@@ -303,6 +316,9 @@ function SettingsPanel({
   marks,
   canEditDuration,
   onDurationChange,
+  onPickSource,
+  onMakeSelected,
+  makingSelected,
 }: {
   panelRef: MutableRefObject<HTMLDivElement | null>
   playback: Playback
@@ -318,6 +334,9 @@ function SettingsPanel({
   marks: Marks
   canEditDuration?: boolean
   onDurationChange?: (durationMs: number | null) => void
+  onPickSource?: (url: string) => void
+  onMakeSelected?: (url: string) => void
+  makingSelected?: boolean
 }) {
   const [durationDraft, setDurationDraft] = useState(() => formatDurationMmSs(media.durationMs))
   useEffect(() => setDurationDraft(formatDurationMmSs(media.durationMs)), [media.durationMs])
@@ -383,6 +402,46 @@ function SettingsPanel({
         />
       </Field>
       {missing && <Note>{missing}</Note>}
+      {media.options.length > 1 && onPickSource ? (
+        <Field label="Fuente">
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              aria-label="Video que manda en la reproducción"
+              className="h-8 min-w-0 flex-1 rounded-md border bg-background px-2 text-sm"
+              value={media.activeKey ?? ''}
+              onChange={(event) => {
+                const option = media.options.find((item) => item.key === event.target.value)
+                if (option) onPickSource(option.url)
+              }}
+            >
+              {media.options.map((option, index) => (
+                <option key={option.key} value={option.key}>
+                  {optionLabel(option, index)}
+                  {option.selected ? ' · principal' : ''}
+                  {option.audioUrl ? ' · MP3' : ''}
+                </option>
+              ))}
+            </select>
+            {onMakeSelected &&
+            media.options.some((item) => item.key === media.activeKey && !item.selected) ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={makingSelected}
+                title="Guarda este video como el principal de la canción."
+                onClick={() => {
+                  const active = media.options.find((item) => item.key === media.activeKey)
+                  if (active) onMakeSelected(active.url)
+                }}
+              >
+                {makingSelected ? <Loader2 className="animate-spin" /> : null}
+                Principal
+              </Button>
+            ) : null}
+          </div>
+        </Field>
+      ) : null}
 
       <Field label="Ritmo">
         <Segmented
@@ -653,6 +712,12 @@ function basisText(timeline: Timeline): string {
   if (timeline.basis === 'duration') return timeline.bpm ? `${total} · ${timeline.bpm} BPM` : total
   if (timeline.basis === 'bpm') return `≈ ${total} · ${timeline.bpm} BPM`
   return `≈ ${total}`
+}
+
+function optionLabel(option: MediaOption, index: number): string {
+  const name = option.label.trim()
+  if (!name || /^youtube$/i.test(name)) return `YouTube ${index + 1}`
+  return `${index + 1}. ${name}`
 }
 
 function Field({ label, title, children }: { label: string; title?: string; children: ReactNode }) {

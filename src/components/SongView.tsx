@@ -181,19 +181,29 @@ export function SongView() {
   }
   // Local override so Jorge can tweak duration while playing before/while it persists.
   const [durationOverride, setDurationOverride] = useState<number | null | undefined>(undefined)
+  /** Session pick among multiple YouTubes; principal still owns saved media. */
+  const [mediaPick, setMediaPick] = useState<string | null>(null)
+  const [makingSelected, setMakingSelected] = useState(false)
   useEffect(() => {
     setDurationOverride(undefined)
+    setMediaPick(null)
   }, [songId])
   // Media lives on the song row; a part chart may not carry it. Audio is optional for duration mode.
   const media = useMemo(() => {
     const stored = chart?.durationMs ?? guitar?.durationMs
-    return songMediaSources({
-      sources: chart?.sources?.length ? chart.sources : (guitar?.sources ?? []),
-      audioUrl: chart?.audioUrl || guitar?.audioUrl,
-      bpm: chart?.bpm ?? guitar?.bpm,
-      durationMs: durationOverride !== undefined ? durationOverride : stored,
-    })
-  }, [chart, durationOverride, guitar])
+    return songMediaSources(
+      {
+        sources: chart?.sources?.length ? chart.sources : (guitar?.sources ?? []),
+        audioUrl: chart?.audioUrl || guitar?.audioUrl,
+        bpm: chart?.bpm ?? guitar?.bpm,
+        durationMs: durationOverride !== undefined ? durationOverride : stored,
+      },
+      mediaPick,
+    )
+  }, [chart, durationOverride, guitar, mediaPick])
+  const pickedSelected = Boolean(
+    media.options.find((item) => item.key === media.activeKey)?.selected ?? media.options.length <= 1,
+  )
   const playbackAudio = effectiveAudio(playbackSettings.audio, media)
   const { pace, useBpm } = playbackSettings
   // Calibration lives on the song row, so every instrument shares it.
@@ -1594,13 +1604,36 @@ export function SongView() {
           }}
           canEditDuration={Boolean(song?.editable)}
           onDurationChange={
-            song?.editable
+            song?.editable && pickedSelected
               ? (durationMs) => {
                   setDurationOverride(durationMs)
                   void patchMedia(song.id, { durationMs }, instrument).catch((error) => console.error(error))
                 }
               : (durationMs) => setDurationOverride(durationMs)
           }
+          onPickSource={
+            media.options.length > 1
+              ? (url) => {
+                  setMediaPick(url)
+                  setDurationOverride(undefined)
+                }
+              : undefined
+          }
+          onMakeSelected={
+            song?.editable && media.options.length > 1
+              ? (url) => {
+                  setMakingSelected(true)
+                  void patchMedia(song.id, { selectYoutubeUrl: url }, instrument)
+                    .then(() => {
+                      setMediaPick(null)
+                      setDurationOverride(undefined)
+                    })
+                    .catch((error) => console.error(error))
+                    .finally(() => setMakingSelected(false))
+                }
+              : undefined
+          }
+          makingSelected={makingSelected}
         />
       )}
     </div>

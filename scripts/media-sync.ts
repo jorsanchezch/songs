@@ -45,6 +45,7 @@ function fileYoutube(text: string): string | null {
   return (labelled ?? text).match(YOUTUBE)?.[0] ?? null
 }
 
+<<<<<<< HEAD
 function plan(charts: CatalogFile[], songs: SongRow[], parts: PartRow[]): Update[] {
   const updates: Update[] = []
   for (const chart of charts) {
@@ -149,4 +150,47 @@ if (d1) {
       for (const { sql: text, params } of statements(updates, now)) await tx.run(text, params)
     })
   }
+=======
+let changed = 0
+for (const chart of await readCatalogFiles(root)) {
+  const song = await sql.get<{ id: string; catalog_source: string; bpm: number | null; duration_ms: number | null }>(
+    `SELECT id, catalog_source, bpm, duration_ms FROM songs WHERE id = ? AND origin = 'catalog'`,
+    [chart.id],
+  )
+  if (!song) continue
+  const meta = chartMeta(chart.sourceText, chart.id)
+  const youtubeUrl = fileYoutube(chart.sourceText)
+  const patch = (text: string) =>
+    applyChartMedia(text, {
+      bpm: meta.bpm ?? undefined,
+      durationMs: meta.durationMs ?? undefined,
+      // A chart that already links a video keeps it, as the backfill does.
+      addYoutubeUrl: youtubeUrl && !chartHasYoutube(text) ? youtubeUrl : undefined,
+    })
+  const parts = await sql.all<{ instrument: string; source_text: string }>(
+    `SELECT instrument, source_text FROM instrument_parts WHERE song_id = ?`,
+    [song.id],
+  )
+  const updates = parts
+    .map((part) => ({ ...part, next: patch(part.source_text) }))
+    .filter((part) => part.next !== part.source_text)
+  const catalogSource = patch(song.catalog_source)
+  const columnsMatch = song.bpm === meta.bpm && song.duration_ms === meta.durationMs
+  if (!updates.length && catalogSource === song.catalog_source && columnsMatch) continue
+  changed += 1
+  console.log(`${dryRun ? 'would update' : 'updated'} ${song.id} (${updates.length} parts)`)
+  if (dryRun) continue
+  await sql.transaction(async (tx) => {
+    for (const part of updates) {
+      await tx.run(
+        `UPDATE instrument_parts SET source_text = ?, revision = revision + 1 WHERE song_id = ? AND instrument = ?`,
+        [part.next, song.id, part.instrument],
+      )
+    }
+    await tx.run(
+      `UPDATE songs SET bpm = ?, duration_ms = ?, catalog_source = ?, updated_at = ?, revision = revision + 1 WHERE id = ?`,
+      [meta.bpm, meta.durationMs, catalogSource, new Date().toISOString(), song.id],
+    )
+  })
+>>>>>>> 2bb9188 (Allow several YouTube links per song with one principal.)
 }

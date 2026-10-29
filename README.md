@@ -59,6 +59,15 @@ El workflow de Pages construye con `VITE_SONGBOOK_API=https://songbook.jorsanche
 
 La reproducción lee `bpm`, `duration_ms`, `audio_url` y la fuente YouTube del **texto del chart** (`parseChart` / `materialize`), no solo de las columnas D1. El relleno escribe ambos. El modo **Duración** usa `duration_ms` y **no necesita** YouTube ni MP3.
 
+#### Varios videos por canción
+
+Una canción puede tener varios enlaces YouTube en `sources`. El marcado `selected` (o el primero, si solo hay uno) es el **principal**: su duración, BPM y MP3 viven en los campos de arriba del chart. Los demás guardan `audio_url` / `duration_ms` / `bpm` en la misma línea del source. En el editor puedes agregar, quitar y elegir el principal; en Reproducción → **Fuente** eliges cuál manda el audio de la sesión, y **Principal** lo guarda en la canción.
+
+- `GET /api/youtube/info?url=` — título, duración y BPM de un enlace.
+- `POST /api/audio/extract` — `{ youtubeUrl, songId? }` extrae MP3 del enlace (Node + `ALLOW_YT_EXTRACT`; el Worker responde 501).
+- `PUT /api/songs/:id/media` acepta `selectYoutubeUrl` para cambiar el principal.
+- El relleno (*Completar lote*) usa `addYoutubeUrl`: **no borra** otros videos; solo marca selected si era el primero.
+
 1. Crea una clave gratuita de [YouTube Data API v3](https://developers.google.com/youtube/v3/getting-started).
 2. En el Worker: `npx wrangler secret put YOUTUBE_API_KEY`.
 3. Despliega el Worker (`npx wrangler deploy`).

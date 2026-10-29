@@ -6,7 +6,7 @@ import {
   MAX_AUDIO_BYTES,
   putAudioObject,
 } from './audioStorage.ts'
-import { applyChartMedia, chartHasYoutube } from './chartMedia.ts'
+import { applyChartMedia, chartHasYoutube, copyChartMedia } from './chartMedia.ts'
 import { findPublicChart } from './chartSearch.ts'
 import { DEFAULT_INSTRUMENT, INSTRUMENTS, isInstrument, type InstrumentId } from './instruments.ts'
 import { shareLyrics } from './lyrics.ts'
@@ -14,13 +14,15 @@ import { mediaBackfillStatus, runMediaBackfill, type MediaBackfillEnv } from './
 import { chartMeta } from './meta.ts'
 import { hashPassword, verifyPassword } from './password.ts'
 import { songPlayback } from './playback.ts'
-import { findYoutubeMedia, type YoutubeHit } from './youtubeMedia.ts'
+import { enrichYoutubeVideo, findYoutubeMedia, youtubeVideoIdFromUrl, type YoutubeHit } from './youtubeMedia.ts'
 import { OWNER_ID } from './schema.ts'
 import type { Sql } from './sql.ts'
 import {
   extractAudioBlockedReport,
+  extractYoutubeLinkAudio,
   runYoutubeAudioExtract,
   songsMissingAudio,
+  ytDlpAvailable,
 } from './youtubeExtract.ts'
 
 export type ApiEnv = MediaBackfillEnv & {
@@ -87,9 +89,13 @@ export async function handleApi(sql: Sql, request: Request, env: ApiEnv = {}): P
     if (pathname === '/api/users' && request.method === 'GET') return listUsers(sql)
     if (pathname === '/api/search-charts' && request.method === 'GET') return searchCharts(url)
     if (pathname === '/api/audio' && request.method === 'POST') return uploadAudio(sql, user, request, env)
+    if (pathname === '/api/audio/extract' && request.method === 'POST') {
+      return extractLinkAudio(sql, user, request, env)
+    }
     if (pathname === '/api/songs' && request.method === 'GET') return listSongs(sql, user, url)
     if (pathname === '/api/songs' && request.method === 'POST') return createSong(sql, user, request, env)
     if (pathname === '/api/media/lookup' && request.method === 'GET') return mediaLookup(user, url, env)
+    if (pathname === '/api/youtube/info' && request.method === 'GET') return youtubeInfo(user, url, env)
     if (pathname === '/api/catalog' && request.method === 'POST') return upsertCatalog(sql, user, request)
     if (pathname === '/api/songs/reveal' && request.method === 'POST') return revealSongs(sql, user)
     if (pathname === '/api/setlists' && request.method === 'GET') return listSetlists(sql)
@@ -246,7 +252,7 @@ async function withFoundMedia(sourceText: string, id: string, env: ApiEnv): Prom
   const hit = await lookupMedia(meta.title, meta.artist, env)
   if (!hit) return sourceText
   return applyChartMedia(sourceText, {
-    youtubeUrl: hit.url,
+    addYoutubeUrl: hit.url,
     durationMs: meta.durationMs ?? hit.durationMs ?? undefined,
     bpm: meta.bpm ?? hit.bpm ?? undefined,
   })
@@ -358,7 +364,8 @@ async function updateSong(sql: Sql, user: User, id: string, request: Request): P
     }
     for (const part of parts) {
       if (part.instrument === instrument) continue
-      const nextText = writeAll ? sourceText : shareLyrics(part.source_text, sourceText)
+      const shared = writeAll ? sourceText : shareLyrics(part.source_text, sourceText)
+      const nextText = writeAll ? shared : copyChartMedia(shared, sourceText)
       if (!writeAll && nextText === part.source_text) continue
       const saved = await tx.run(
         `UPDATE instrument_parts SET source_text = ?, revision = revision + 1 WHERE song_id = ? AND instrument = ? AND revision = ?`,
@@ -1361,11 +1368,80 @@ async function uploadAudio(sql: Sql, user: User, request: Request, env: ApiEnv):
   return json({ audioUrl: stored.audioUrl, key: stored.key })
 }
 
+async function youtubeInfo(user: User, url: URL, env: ApiEnv): Promise<Response> {
+  if (user.role === 'viewer') return json({ error: 'Solo quien edita canciones consulta YouTube.' }, 403)
+  const link = url.searchParams.get('url')?.trim() ?? ''
+  const videoId = youtubeVideoIdFromUrl(link)
+  if (!videoId) return json({ error: 'No es un enlace de YouTube válido.' }, 400)
+  const hit = (await enrichYoutubeVideo(videoId, env)) ?? {
+    videoId,
+    url: `https://www.youtube.com/watch?v=${videoId}`,
+    title: '',
+    durationMs: null,
+    bpm: null,
+    via: 'chart' as const,
+  }
+  return json({
+    videoId: hit.videoId,
+    url: hit.url,
+    title: hit.title,
+    durationMs: hit.durationMs,
+    bpm: hit.bpm,
+    via: hit.via,
+    apiKeyPresent: Boolean(env.YOUTUBE_API_KEY?.trim()),
+    canExtract: Boolean(env.ALLOW_YT_EXTRACT),
+  })
+}
+
+async function extractLinkAudio(sql: Sql, user: User, request: Request, env: ApiEnv): Promise<Response> {
+  const body = await readJson<{ youtubeUrl?: string; songId?: string }>(request)
+  const youtubeUrl = body.youtubeUrl?.trim() ?? ''
+  if (!youtubeVideoIdFromUrl(youtubeUrl)) {
+    return json({ error: 'No es un enlace de YouTube válido.' }, 400)
+  }
+  const songIdRaw = body.songId?.trim() ?? ''
+  if (songIdRaw) {
+    if (!ID_OK.test(songIdRaw)) return json({ error: 'Ese identificador no sirve.' }, 400)
+    const row = await oneSong(sql, songIdRaw, 'guitar')
+    if (!row || !canSee(user, row)) return json({ error: 'No está esta canción.' }, 404)
+    if (!canEdit(user, row)) return json({ error: 'No puedes cambiar el audio de esta canción.' }, 403)
+  }
+  if (!env.ALLOW_YT_EXTRACT) {
+    return json(
+      {
+        blocked: true,
+        error:
+          'Bloqueado: no hay yt-dlp en este servidor. Corre la extracción en Node con ALLOW_YT_EXTRACT o sube el MP3.',
+      },
+      501,
+    )
+  }
+  if (!audioStoreReady(env)) {
+    return json(
+      {
+        error:
+          'No hay almacén de audio. En Cloudflare enlaza R2 (AUDIO_BUCKET). En local usa data/audio.',
+      },
+      503,
+    )
+  }
+  try {
+    if (!(await ytDlpAvailable())) {
+      return json({ blocked: true, error: 'yt-dlp no está instalado en este servidor.' }, 501)
+    }
+    const stored = await extractYoutubeLinkAudio(env, youtubeUrl, songIdRaw || undefined)
+    return json({ audioUrl: stored.audioUrl, key: stored.key })
+  } catch (error) {
+    return json({ error: error instanceof Error ? error.message : 'No pude extraer el audio.' }, 502)
+  }
+}
+
 async function patchSongMedia(sql: Sql, user: User, id: string, request: Request): Promise<Response> {
   const body = await readJson<{
     durationMs?: number | null
     bpm?: number | null
     audioUrl?: string | null
+    selectYoutubeUrl?: string | null
     instrument?: string
   }>(request)
   const instrument = body.instrument && isInstrument(body.instrument) ? body.instrument : DEFAULT_INSTRUMENT
@@ -1386,8 +1462,14 @@ async function patchSongMedia(sql: Sql, user: User, id: string, request: Request
     durationMs: body.durationMs !== undefined ? body.durationMs : undefined,
     bpm: body.bpm !== undefined ? body.bpm : undefined,
     audioUrl: body.audioUrl !== undefined ? body.audioUrl : undefined,
+    selectYoutubeUrl: body.selectYoutubeUrl !== undefined ? body.selectYoutubeUrl : undefined,
   }
-  if (patch.durationMs === undefined && patch.bpm === undefined && patch.audioUrl === undefined) {
+  if (
+    patch.durationMs === undefined &&
+    patch.bpm === undefined &&
+    patch.audioUrl === undefined &&
+    patch.selectYoutubeUrl === undefined
+  ) {
     return json({ error: 'Nada que actualizar.' }, 400)
   }
   const parts = await sql.all<{ instrument: string; source_text: string }>(

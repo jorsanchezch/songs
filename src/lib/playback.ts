@@ -1,5 +1,7 @@
 import type { DisplayBlock } from '@/lib/display'
+import { isYoutubeEntry, selectedYoutubeIndex } from '@/lib/sourceEntry'
 import { findYoutubeSource, resolveAudioUrl } from '@/lib/songMedia'
+import type { SongSource } from '@/lib/types'
 import type { ChartLine, PlaybackTrack, Song, SongPlayback } from '@/lib/types'
 
 function apiRoot(): string {
@@ -380,22 +382,95 @@ export function youtubeVideoId(url: string): string | null {
   }
 }
 
+export type MediaOption = {
+  key: string
+  label: string
+  url: string
+  youtubeId: string | null
+  audioUrl: string | null
+  bpm: number | null
+  durationMs: number | null
+  selected: boolean
+}
+
 export type SongMediaSources = {
   youtubeId: string | null
   audioUrl: string | null
   bpm: number | null
   durationMs: number | null
+  options: MediaOption[]
+  /** Active option key (selected or picked). */
+  activeKey: string | null
 }
 
-export function songMediaSources(song: Pick<Song, 'sources' | 'audioUrl' | 'bpm' | 'durationMs'>): SongMediaSources {
-  const youtube = findYoutubeSource(song.sources ?? [])
-  const raw = song.audioUrl?.trim() || ''
-  const audioUrl = raw ? resolveAudioUrl(raw, apiRoot()) : null
+function optionFor(
+  entry: SongSource,
+  index: number,
+  selectedIndex: number,
+  top: { audioUrl: string; bpm: number | null; durationMs: number | null },
+): MediaOption {
+  const selected = index === selectedIndex
+  const id = youtubeVideoId(entry.url)
+  const ownAudio = selected ? top.audioUrl : entry.audioUrl?.trim() || ''
+  const bpm = selected ? top.bpm : entry.bpm ?? top.bpm
+  const durationMs = selected ? top.durationMs : entry.durationMs ?? top.durationMs
   return {
-    youtubeId: youtube ? youtubeVideoId(youtube.url) : null,
-    audioUrl,
+    key: id || entry.url,
+    label: entry.label.trim() || `YouTube ${index + 1}`,
+    url: entry.url,
+    youtubeId: id,
+    audioUrl: ownAudio ? resolveAudioUrl(ownAudio, apiRoot()) : null,
+    bpm: bpm && bpm > 0 ? bpm : null,
+    durationMs: durationMs && durationMs > 0 ? durationMs : null,
+    selected,
+  }
+}
+
+export function songMediaSources(
+  song: Pick<Song, 'sources' | 'audioUrl' | 'bpm' | 'durationMs'>,
+  pickUrl?: string | null,
+): SongMediaSources {
+  const sources = song.sources ?? []
+  const selectedIndex = selectedYoutubeIndex(sources)
+  const top = {
+    audioUrl: song.audioUrl?.trim() || '',
     bpm: song.bpm && song.bpm > 0 ? song.bpm : null,
     durationMs: song.durationMs && song.durationMs > 0 ? song.durationMs : null,
+  }
+  const options = sources
+    .map((entry, index) =>
+      isYoutubeEntry(entry) ? optionFor(entry, index, selectedIndex, top) : null,
+    )
+    .filter((item): item is MediaOption => Boolean(item))
+
+  let active = options.find((item) => item.selected) ?? options[0] ?? null
+  if (pickUrl?.trim()) {
+    const picked = options.find(
+      (item) => item.url === pickUrl || item.youtubeId === youtubeVideoId(pickUrl),
+    )
+    if (picked) active = picked
+  }
+
+  if (active) {
+    return {
+      youtubeId: active.youtubeId,
+      audioUrl: active.audioUrl,
+      bpm: active.bpm,
+      durationMs: active.durationMs,
+      options,
+      activeKey: active.key,
+    }
+  }
+
+  const youtube = findYoutubeSource(sources)
+  const raw = top.audioUrl
+  return {
+    youtubeId: youtube ? youtubeVideoId(youtube.url) : null,
+    audioUrl: raw ? resolveAudioUrl(raw, apiRoot()) : null,
+    bpm: top.bpm,
+    durationMs: top.durationMs,
+    options,
+    activeKey: null,
   }
 }
 

@@ -1,3 +1,4 @@
+import { normalizeSourceMedia, parseSourceText, youtubeVideoId } from '@/lib/sourceEntry'
 import type {
   ChordMark,
   NoteType,
@@ -8,6 +9,8 @@ import type {
   SongVersion,
 } from '@/lib/types'
 import { NOTE_TYPES } from '@/lib/types'
+
+export { defaultSourceLabel } from '@/lib/sourceEntry'
 
 const TAG_LABEL: Record<string, string> = {
   intro: 'Intro',
@@ -309,12 +312,18 @@ function finishSong(
     .flatMap((section) => section.lines.map((line) => line.lyric ?? ''))
     .join('\n')
     .replace(/_+/g, ' ')
-  const sources = mergeSources(sourceEntries, meta.source ?? '')
+  const merged = mergeSources(sourceEntries, meta.source ?? '')
+  const normalized = normalizeSourceMedia(merged, {
+    bpm: optionalMetaInt(meta.bpm),
+    durationMs: optionalMetaInt(meta.duration_ms),
+    audioUrl: (meta.audio_url ?? '').trim(),
+  })
+  const sources: SongSource[] = normalized.entries.map((entry) => {
+    const videoId = youtubeVideoId(entry.url) ?? undefined
+    return videoId ? { ...entry, videoId } : { ...entry }
+  })
   const key = (meta.key ?? '').trim()
   const originalKey = (meta.original_key ?? '').trim()
-  const bpm = optionalMetaInt(meta.bpm)
-  const durationMs = optionalMetaInt(meta.duration_ms)
-  const audioUrl = (meta.audio_url ?? '').trim()
   return {
     id: filePath.replace(/\.(song\.md|chopro|cho)$/i, ''),
     title,
@@ -324,9 +333,9 @@ function finishSong(
     originalKey: originalKey && originalKey !== key ? originalKey : undefined,
     source: sources[0]?.url ?? '',
     sources,
-    bpm,
-    durationMs,
-    audioUrl,
+    bpm: normalized.top.bpm,
+    durationMs: normalized.top.durationMs,
+    audioUrl: normalized.top.audioUrl,
     sections,
     versions,
     lyricsText,
@@ -393,16 +402,7 @@ function frontMatter(text: string): {
 }
 
 function parseSourceEntry(raw: string): SongSource | null {
-  const text = unquote(raw.trim())
-  if (!text) return null
-  const split = text.match(/^(https?:\/\/\S+)\s*\|\s*(.+)$/i) || text.match(/^(\S+)\s*\|\s*(.+)$/)
-  if (split) {
-    return { url: (split[1] ?? '').trim(), label: (split[2] ?? '').trim() }
-  }
-  if (/^https?:\/\//i.test(text) || text.includes('.')) {
-    return { url: text, label: defaultSourceLabel(text) }
-  }
-  return null
+  return parseSourceText(raw)
 }
 
 function mergeSources(entries: SongSource[], legacy: string): SongSource[] {
@@ -416,12 +416,6 @@ function mergeSources(entries: SongSource[], legacy: string): SongSource[] {
   for (const entry of entries) add(entry)
   add(parseSourceEntry(legacy))
   return out
-}
-
-export function defaultSourceLabel(url: string): string {
-  if (/youtu(\.be|be\.com)/i.test(url)) return 'YouTube'
-  if (/\.pdf($|\?)/i.test(url)) return 'Cifra PDF'
-  return 'Fuente'
 }
 
 function unquote(value: string): string {

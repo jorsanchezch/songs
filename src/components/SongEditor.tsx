@@ -19,10 +19,9 @@ import { InstrumentSwitch } from '@/components/InstrumentSwitch'
 import { Kbd, ShortcutLegend } from '@/components/KeyHint'
 import { NOTE_OPTIONS } from '@/components/NoteIcon'
 import { SongMediaInfoBanner } from '@/components/SongMediaInfoBanner'
-import { AudioUploadField, BpmField, FieldBlock, YoutubeField } from '@/components/SongMediaFields'
+import { SongMediaEditor } from '@/components/SongMediaEditor'
 import { Button } from '@/components/ui/button'
 import { Combobox } from '@/components/ui/combobox'
-import { DurationInput } from '@/components/ui/duration-input'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { Stepper } from '@/components/ui/stepper'
@@ -47,8 +46,7 @@ import {
   usedSectionIds,
 } from '@/lib/draftSong'
 import { parseKey, transposeKeyName } from '@/lib/chords'
-import { lookupSongMedia } from '@/lib/api'
-import { SOURCE_LABELS, guessSourceLabel, withYoutubeUrl, youtubeUrl } from '@/lib/songMedia'
+import { SOURCE_LABELS, guessSourceLabel, isYoutubeEntry } from '@/lib/songMedia'
 import { NOTE_LABEL, NOTE_TYPES, type Song, type SongNote, type SongSection } from '@/lib/types'
 
 export function SongEditor() {
@@ -66,7 +64,7 @@ export function SongEditor() {
   const [status, setStatus] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
-  const [lookup, setLookup] = useState({ busy: false, text: '' })
+  const [lookupText, setLookupText] = useState('')
   const help = useEditorHelp()
   const hydrated = useRef('')
   const artists = useMemo(
@@ -121,26 +119,6 @@ export function SongEditor() {
     }
   }
 
-  const searchMedia = () => {
-    setLookup({ busy: true, text: '' })
-    void lookupSongMedia(draft.title.trim(), draft.artist.trim()).then(
-      ({ media }) => {
-        if (!media) {
-          setLookup({ busy: false, text: 'Sin resultado.' })
-          return
-        }
-        setDraft((current) => ({
-          ...withYoutube(current, media.youtubeUrl),
-          durationMs: current.durationMs ?? media.durationMs,
-          bpm: current.bpm ?? media.bpm,
-        }))
-        setLookup({ busy: false, text: media.videoTitle ? `Encontrado: ${media.videoTitle}` : 'Encontrado.' })
-      },
-      (reason) =>
-        setLookup({ busy: false, text: reason instanceof Error ? reason.message : 'No se pudo buscar.' }),
-    )
-  }
-
   const setSourceLabel = (index: number, label: string) =>
     setDraft((current) => {
       const sources = (current.sources.length ? current.sources : [{ url: current.source, label: '' }]).map(
@@ -148,6 +126,10 @@ export function SongEditor() {
       )
       return { ...current, sources, source: sources[0]?.url ?? '' }
     })
+
+  const referenceRows = (draft.sources.length ? draft.sources : [{ url: draft.source, label: '' }])
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => !isYoutubeEntry(item))
 
   const [saving, setSaving] = useState(false)
   const save = () => {
@@ -303,34 +285,17 @@ export function SongEditor() {
                   }
                 />
               </div>
-              <YoutubeField
-                value={youtubeUrl(draft.sources)}
-                onChange={(url) => {
-                  setLookup((current) => (current.busy ? current : { busy: false, text: '' }))
-                  setDraft((current) => withYoutube(current, url))
-                }}
-                onSearch={searchMedia}
-                searching={lookup.busy}
-                canSearch={Boolean(draft.title.trim())}
-                status={lookup.text}
-              />
-              <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-3">
-                <BpmField value={draft.bpm ?? null}onChange={(bpm) => setDraft((current) => ({ ...current, bpm }))} />
-                <FieldBlock label="Duración (m:ss)" htmlFor="editor-duration">
-                  <DurationInput
-                    id="editor-duration"
-                    aria-label="Duración en minutos y segundos"
-                    value={draft.durationMs}
-                    onChange={(durationMs) => setDraft((current) => ({ ...current, durationMs }))}
-                    title="Duración total (m:ss o segundos). Sirve para el modo Duración sin necesidad de audio."
-                  />
-                </FieldBlock>
-              </div>
-              <AudioUploadField
+              <SongMediaEditor
                 songId={songId}
-                audioUrl={draft.audioUrl ?? ''}
-                onAudioUrl={(audioUrl) => setDraft((current) => ({ ...current, audioUrl }))}
+                draft={draft}
+                onChange={setDraft}
+                onSearchStatus={setLookupText}
               />
+              {lookupText ? (
+                <p className="sm:col-span-2 text-xs text-muted-foreground" aria-live="polite">
+                  {lookupText}
+                </p>
+              ) : null}
               <div className="sm:col-span-2 flex flex-col gap-2">
                 <div className="flex items-center justify-between gap-2">
                   <p className="text-sm font-medium">Referencias y tutoriales</p>
@@ -338,7 +303,7 @@ export function SongEditor() {
                     type="button"
                     size="sm"
                     variant="outline"
-                    title="Agrega otro enlace."
+                    title="Agrega otro enlace (cifra, letra…). YouTube va arriba."
                     onClick={() =>
                       setDraft((current) => ({
                         ...current,
@@ -349,8 +314,8 @@ export function SongEditor() {
                     <Plus /> Enlace
                   </Button>
                 </div>
-                {(draft.sources.length ? draft.sources : [{ url: draft.source, label: '' }]).map(
-                  (item, index) => (
+                <p className="text-xs text-muted-foreground">Cifras, letras y tutoriales. Los videos de YouTube se editan arriba.</p>
+                {referenceRows.map(({ item, index }) => (
                     <div key={`source-${index}`} className="grid gap-2 sm:grid-cols-[1fr_12rem_auto]">
                       <Input
                         value={item.url}
@@ -382,9 +347,9 @@ export function SongEditor() {
                       <Combobox
                         value={item.label}
                         onChange={(label) => setSourceLabel(index, label)}
-                        suggestions={[guessSourceLabel(item.url), ...SOURCE_LABELS]}
-                        placeholder={guessSourceLabel(item.url) || 'YouTube, cifra…'}
-                        title="Nombre corto del enlace, como YouTube o Cifra."
+                        suggestions={[guessSourceLabel(item.url), ...SOURCE_LABELS.filter((label) => label !== 'YouTube')]}
+                        placeholder={guessSourceLabel(item.url) || 'Cifra, letra…'}
+                        title="Nombre corto del enlace, como Cifra o Letra."
                         aria-label={`Etiqueta de referencia ${index + 1}`}
                       />
                       <Button
@@ -410,8 +375,7 @@ export function SongEditor() {
                         <Trash2 />
                       </Button>
                     </div>
-                  ),
-                )}
+                  ))}
               </div>
             </section>
 
@@ -1045,14 +1009,6 @@ function KeyStepper({
       </div>
     </div>
   )
-}
-
-function withYoutube(song: Song, url: string): Song {
-  const sources = withYoutubeUrl(
-    song.sources.length ? song.sources : song.source ? [{ url: song.source, label: '' }] : [],
-    url,
-  )
-  return { ...song, sources, source: sources[0]?.url ?? '' }
 }
 
 function songFromSource(text: string, id: string): Song {

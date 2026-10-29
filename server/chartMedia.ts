@@ -1,16 +1,58 @@
 /** Read and write YouTube / bpm / duration / audio into chart text (YAML or ChordPro). */
 
+import {
+  YOUTUBE_LABEL,
+  addYoutubeSource,
+  findSourceIndex,
+  formatSourceText,
+  isYoutubeEntry,
+  normalizeSourceMedia,
+  parseSourceText,
+  selectYoutubeSource,
+  selectedYoutubeIndex,
+  serializeSources,
+  type SourceEntry,
+  type TopMedia,
+} from '../src/lib/sourceEntry.ts'
+
 export type ChartMediaPatch = {
+  /** @deprecated Prefer addYoutubeUrl — kept for older callers; behaves as upsert/replace-first. */
   youtubeUrl?: string | null
+  /** Additive: append if new video id; never wipes other sources. */
+  addYoutubeUrl?: string | null
+  /** Make this URL the selected/primary YouTube (moves top media). */
+  selectYoutubeUrl?: string | null
+  /** Replace the full sources list (e.g. copyChartMedia). */
+  replaceSources?: SourceEntry[] | null
   bpm?: number | null
   durationMs?: number | null
   audioUrl?: string | null
 }
 
-const YOUTUBE_LABEL = 'YouTube'
-
 export function chartHasYoutube(text: string): boolean {
   return /youtu\.?be/i.test(text)
+}
+
+export function selectedYoutubeUrl(text: string): string | null {
+  const { entries } = readChartSources(text)
+  const index = selectedYoutubeIndex(entries)
+  return index >= 0 ? entries[index]!.url : null
+}
+
+export function chartYoutubeUrls(text: string): string[] {
+  const { entries } = readChartSources(text)
+  return entries.filter((entry) => isYoutubeEntry(entry)).map((entry) => entry.url)
+}
+
+/** Copy sources + top media from `fromText` onto `targetText` (lyrics/structure kept). */
+export function copyChartMedia(targetText: string, fromText: string): string {
+  const from = readChartSources(fromText)
+  return applyChartMedia(targetText, {
+    replaceSources: from.entries,
+    bpm: from.top.bpm,
+    durationMs: from.top.durationMs,
+    audioUrl: from.top.audioUrl || null,
+  })
 }
 
 export function applyChartMedia(text: string, patch: ChartMediaPatch): string {
@@ -25,24 +67,13 @@ function patchMarkdown(text: string, patch: ChartMediaPatch): string {
   const body = text.slice(match[0].length)
   const front = match[1] ?? ''
   const fields = parseFrontFields(front)
-  if (patch.bpm !== undefined) {
-    if (patch.bpm == null) delete fields.scalars.bpm
-    else fields.scalars.bpm = String(Math.round(patch.bpm))
+  if (!fields.sources.length && fields.scalars.source?.trim()) {
+    fields.sources = [{ url: fields.scalars.source.trim(), label: 'Fuente' }]
   }
-  if (patch.durationMs !== undefined) {
-    if (patch.durationMs == null) delete fields.scalars.duration_ms
-    else fields.scalars.duration_ms = String(Math.round(patch.durationMs))
-  }
-  if (patch.audioUrl !== undefined) {
-    if (!patch.audioUrl?.trim()) delete fields.scalars.audio_url
-    else fields.scalars.audio_url = patch.audioUrl.trim()
-  }
-  if (patch.youtubeUrl !== undefined) {
-    if (!fields.sources.length && fields.scalars.source?.trim()) {
-      fields.sources = [{ url: fields.scalars.source.trim(), label: 'Fuente' }]
-    }
-    fields.sources = upsertYoutubeSource(fields.sources, patch.youtubeUrl)
-  }
+  const applied = applyPatchToSources(fields.sources, readTop(fields.scalars), patch)
+  fields.sources = applied.entries
+  writeTop(fields.scalars, applied.top, patch)
+
   if (!fields.scalars.source && fields.sources[0]) {
     fields.scalars.source = fields.sources[0].url
   }
@@ -61,8 +92,8 @@ function patchMarkdown(text: string, patch: ChartMediaPatch): string {
   }
   if (fields.sources.length) {
     lines.push('sources:')
-    for (const item of fields.sources) {
-      lines.push(`  - ${item.url}${item.label ? ` | ${item.label}` : ''}`)
+    for (const line of serializeSources(fields.sources)) {
+      lines.push(`  - ${line}`)
     }
   }
   return `---\n${lines.join('\n')}\n---${match[2] ?? '\n'}${body}`
@@ -99,41 +130,163 @@ function patchChordPro(text: string, patch: ChartMediaPatch): string {
     else insertMeta(nextMeta, line, name)
   }
 
-  if (patch.bpm !== undefined) {
-    setDirective('bpm', patch.bpm == null ? null : String(Math.round(patch.bpm)))
+  const sourcePattern = /^\{source:\s*([^}]*)\}\s*$/i
+  const sourceIndexes: number[] = []
+  const entries: SourceEntry[] = []
+  for (let index = 0; index < nextMeta.length; index += 1) {
+    const match = (nextMeta[index] ?? '').trim().match(sourcePattern)
+    if (!match) continue
+    const parsed = parseSourceText(match[1] ?? '')
+    if (!parsed) continue
+    sourceIndexes.push(index)
+    entries.push(parsed)
   }
-  if (patch.durationMs !== undefined) {
-    setDirective('duration_ms', patch.durationMs == null ? null : String(Math.round(patch.durationMs)))
+
+  const scalars: Record<string, string> = {}
+  for (const line of nextMeta) {
+    const match = (line ?? '').trim().match(/^\{([A-Za-z_]+):\s*([^}]*)\}\s*$/)
+    if (!match?.[1]) continue
+    const name = match[1].toLowerCase()
+    if (name === 'source') continue
+    scalars[name] = (match[2] ?? '').trim()
   }
-  if (patch.audioUrl !== undefined) {
-    setDirective('audio_url', patch.audioUrl?.trim() ? patch.audioUrl.trim() : null)
+
+  const applied = applyPatchToSources(entries, readTop(scalars), patch)
+  writeTop(scalars, applied.top, patch)
+
+  if (patch.bpm !== undefined || patch.durationMs !== undefined || patch.audioUrl !== undefined || patch.replaceSources || patch.addYoutubeUrl !== undefined || patch.selectYoutubeUrl !== undefined || patch.youtubeUrl !== undefined) {
+    setDirective('bpm', scalars.bpm?.trim() ? scalars.bpm : null)
+    setDirective('duration_ms', scalars.duration_ms?.trim() ? scalars.duration_ms : null)
+    setDirective('audio_url', scalars.audio_url?.trim() ? scalars.audio_url : null)
   }
-  if (patch.youtubeUrl !== undefined) {
-    const youtubePattern = /\{source:\s*([^}]*)\}/i
-    const youtubeIndexes: number[] = []
-    for (let index = 0; index < nextMeta.length; index += 1) {
-      const match = (nextMeta[index] ?? '').trim().match(youtubePattern)
-      if (!match) continue
-      const raw = (match[1] ?? '').trim()
-      if (/youtu\.?be/i.test(raw) || /\|\s*youtube\s*$/i.test(raw)) youtubeIndexes.push(index)
-    }
-    const url = patch.youtubeUrl?.trim() ?? ''
-    if (!url) {
-      for (const index of youtubeIndexes.reverse()) nextMeta.splice(index, 1)
-    } else {
-      const line = `{source: ${url} | ${YOUTUBE_LABEL}}`
-      if (youtubeIndexes.length) {
-        nextMeta[youtubeIndexes[0]!] = line
-        for (const index of youtubeIndexes.slice(1).reverse()) nextMeta.splice(index, 1)
-      } else {
-        insertMeta(nextMeta, line, 'source')
+
+  if (
+    patch.youtubeUrl !== undefined ||
+    patch.addYoutubeUrl !== undefined ||
+    patch.selectYoutubeUrl !== undefined ||
+    patch.replaceSources !== undefined
+  ) {
+    for (const index of [...sourceIndexes].reverse()) nextMeta.splice(index, 1)
+    const serialized = serializeSources(applied.entries)
+    let insertAt = nextMeta.length
+    for (let index = nextMeta.length - 1; index >= 0; index -= 1) {
+      const match = (nextMeta[index] ?? '').trim().match(/^\{([A-Za-z_]+):/)
+      if (!match?.[1]) continue
+      const name = match[1].toLowerCase()
+      if (['title', 'artist', 'composer', 'key', 'original_key', 'source', 'bpm', 'duration_ms', 'audio_url'].includes(name)) {
+        insertAt = index + 1
+        break
       }
+    }
+    for (let offset = 0; offset < serialized.length; offset += 1) {
+      nextMeta.splice(insertAt + offset, 0, `{source: ${serialized[offset]}}`)
     }
   }
 
   while (nextMeta.length && !(nextMeta[nextMeta.length - 1] ?? '').trim()) nextMeta.pop()
   const spacer = rest.length && (rest[0] ?? '').trim() ? [''] : []
   return [...nextMeta, ...spacer, ...rest].join('\n')
+}
+
+function applyPatchToSources(
+  sources: SourceEntry[],
+  top: TopMedia,
+  patch: ChartMediaPatch,
+): { entries: SourceEntry[]; top: TopMedia } {
+  let entries = sources.map((entry) => ({ ...entry }))
+  let nextTop = { ...top }
+
+  if (patch.replaceSources) {
+    entries = patch.replaceSources.map((entry) => ({ ...entry }))
+  }
+
+  // Legacy upsert: replace first YouTube or remove all YouTube when null.
+  if (patch.youtubeUrl !== undefined && patch.addYoutubeUrl === undefined && patch.replaceSources === undefined) {
+    const trimmed = patch.youtubeUrl?.trim() ?? ''
+    if (!trimmed) {
+      entries = entries.filter((entry) => !isYoutubeEntry(entry))
+      nextTop = { bpm: nextTop.bpm, durationMs: nextTop.durationMs, audioUrl: nextTop.audioUrl }
+    } else {
+      const index = entries.findIndex((entry) => isYoutubeEntry(entry))
+      const next = { url: trimmed, label: YOUTUBE_LABEL }
+      if (index >= 0) entries = entries.map((entry, entryIndex) => (entryIndex === index ? { ...entry, ...next } : entry))
+      else entries = [...entries, next]
+    }
+  }
+
+  if (patch.addYoutubeUrl !== undefined && patch.addYoutubeUrl?.trim()) {
+    const added = addYoutubeSource(entries, nextTop, patch.addYoutubeUrl)
+    entries = added.entries
+    nextTop = added.top
+  }
+
+  if (patch.selectYoutubeUrl?.trim()) {
+    const index = findSourceIndex(entries, patch.selectYoutubeUrl)
+    if (index >= 0) {
+      const selected = selectYoutubeSource(entries, nextTop, index)
+      entries = selected.entries
+      nextTop = selected.top
+    }
+  }
+
+  if (patch.bpm !== undefined) nextTop.bpm = patch.bpm
+  if (patch.durationMs !== undefined) nextTop.durationMs = patch.durationMs
+  if (patch.audioUrl !== undefined) nextTop.audioUrl = patch.audioUrl?.trim() ?? ''
+
+  return normalizeSourceMedia(entries, nextTop)
+}
+
+function readTop(scalars: Record<string, string>): TopMedia {
+  return {
+    bpm: optionalInt(scalars.bpm),
+    durationMs: optionalInt(scalars.duration_ms),
+    audioUrl: (scalars.audio_url ?? '').trim(),
+  }
+}
+
+function writeTop(scalars: Record<string, string>, top: TopMedia, patch: ChartMediaPatch) {
+  const touchBpm = patch.bpm !== undefined || patch.selectYoutubeUrl !== undefined || patch.replaceSources !== undefined
+  const touchDuration =
+    patch.durationMs !== undefined || patch.selectYoutubeUrl !== undefined || patch.replaceSources !== undefined
+  const touchAudio =
+    patch.audioUrl !== undefined || patch.selectYoutubeUrl !== undefined || patch.replaceSources !== undefined
+
+  if (touchBpm) {
+    if (top.bpm == null || !(top.bpm > 0)) delete scalars.bpm
+    else scalars.bpm = String(Math.round(top.bpm))
+  }
+  if (touchDuration) {
+    if (top.durationMs == null || !(top.durationMs > 0)) delete scalars.duration_ms
+    else scalars.duration_ms = String(Math.round(top.durationMs))
+  }
+  if (touchAudio) {
+    if (!top.audioUrl.trim()) delete scalars.audio_url
+    else scalars.audio_url = top.audioUrl.trim()
+  }
+}
+
+function readChartSources(text: string): { entries: SourceEntry[]; top: TopMedia } {
+  const normalized = text.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n')
+  if (normalized.trimStart().startsWith('---')) {
+    const match = normalized.match(/^---\n([\s\S]*?)\n---/)
+    if (!match) return { entries: [], top: { bpm: null, durationMs: null, audioUrl: '' } }
+    const fields = parseFrontFields(match[1] ?? '')
+    return normalizeSourceMedia(fields.sources, readTop(fields.scalars))
+  }
+  const entries: SourceEntry[] = []
+  const scalars: Record<string, string> = {}
+  for (const line of normalized.split('\n')) {
+    const trimmed = line.trim()
+    const source = trimmed.match(/^\{source:\s*([^}]*)\}\s*$/i)
+    if (source) {
+      const parsed = parseSourceText(source[1] ?? '')
+      if (parsed) entries.push(parsed)
+      continue
+    }
+    const meta = trimmed.match(/^\{([A-Za-z_]+):\s*([^}]*)\}\s*$/)
+    if (meta?.[1]) scalars[meta[1].toLowerCase()] = (meta[2] ?? '').trim()
+  }
+  return normalizeSourceMedia(entries, readTop(scalars))
 }
 
 function insertMeta(meta: string[], line: string, name: string) {
@@ -154,12 +307,12 @@ function insertMeta(meta: string[], line: string, name: string) {
 
 type FrontFields = {
   scalars: Record<string, string>
-  sources: { url: string; label: string }[]
+  sources: SourceEntry[]
 }
 
 function parseFrontFields(front: string): FrontFields {
   const scalars: Record<string, string> = {}
-  const sources: { url: string; label: string }[] = []
+  const sources: SourceEntry[] = []
   let inSources = false
   for (const line of front.split('\n')) {
     if (/^sources:\s*$/i.test(line.trim())) {
@@ -169,7 +322,7 @@ function parseFrontFields(front: string): FrontFields {
     if (inSources) {
       const item = line.match(/^\s*-\s+(.+)$/)
       if (item) {
-        const parsed = parseSource(item[1] ?? '')
+        const parsed = parseSourceText(item[1] ?? '')
         if (parsed) sources.push(parsed)
         continue
       }
@@ -183,30 +336,12 @@ function parseFrontFields(front: string): FrontFields {
   return { scalars, sources }
 }
 
-function upsertYoutubeSource(
-  sources: { url: string; label: string }[],
-  youtubeUrl: string | null | undefined,
-): { url: string; label: string }[] {
-  const trimmed = youtubeUrl?.trim() ?? ''
-  const index = sources.findIndex(
-    (item) => item.label.trim().toLowerCase() === 'youtube' || /youtu\.?be/i.test(item.url),
-  )
-  if (!trimmed) {
-    if (index < 0) return sources
-    return sources.filter((_, entryIndex) => entryIndex !== index)
-  }
-  const next = { url: trimmed, label: YOUTUBE_LABEL }
-  if (index >= 0) return sources.map((item, entryIndex) => (entryIndex === index ? next : item))
-  return [...sources, next]
-}
-
-function parseSource(raw: string): { url: string; label: string } | null {
-  const text = unquote(raw)
-  if (!text) return null
-  const [urlPart, ...labelParts] = text.split('|')
-  const url = (urlPart ?? '').trim()
-  if (!url) return null
-  return { url, label: labelParts.join('|').trim() }
+function optionalInt(raw: string | undefined): number | null {
+  const trimmed = (raw ?? '').trim()
+  if (!trimmed) return null
+  const value = Number(trimmed)
+  if (!Number.isFinite(value) || value < 0) return null
+  return Math.round(value)
 }
 
 function unquote(value: string): string {
@@ -226,3 +361,6 @@ function yaml(value: string): string {
   }
   return value
 }
+
+// Re-export for callers that format a single line.
+export { formatSourceText, YOUTUBE_LABEL }

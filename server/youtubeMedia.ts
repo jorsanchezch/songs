@@ -6,7 +6,7 @@ export type YoutubeHit = {
   title: string
   durationMs: number | null
   bpm: number | null
-  via: 'youtube_api' | 'public_search' | 'chart'
+  via: 'youtube_api' | 'public_search' | 'public_watch' | 'chart'
 }
 
 export type YoutubeLookupEnv = {
@@ -89,6 +89,8 @@ export async function enrichYoutubeVideo(
   if (!/^[\w-]{11}$/.test(id)) return null
   const key = env.YOUTUBE_API_KEY?.trim()
   if (!key) {
+    const scraped = await scrapeYoutubeWatch(id).catch(() => null)
+    if (scraped) return scraped
     return {
       videoId: id,
       url: youtubeWatchUrl(id),
@@ -253,6 +255,57 @@ async function searchYoutubePublic(title: string, artist: string): Promise<Youtu
     durationMs: null,
     bpm: null,
     via: 'public_search',
+  }
+}
+
+/** Best-effort watch-page scrape when no Data API key (title/length from og tags / ytInitialPlayerResponse). */
+export async function scrapeYoutubeWatch(videoId: string): Promise<YoutubeHit | null> {
+  const id = videoId.trim()
+  if (!/^[\w-]{11}$/.test(id)) return null
+  const agent = AGENTS[publicSearchCount % AGENTS.length]!
+  publicSearchCount += 1
+  let response: Response
+  try {
+    response = await fetch(youtubeWatchUrl(id), {
+      redirect: 'follow',
+      signal: AbortSignal.timeout(12000),
+      headers: {
+        accept: 'text/html,application/xhtml+xml',
+        'accept-language': 'es,en;q=0.8',
+        'user-agent': agent,
+      },
+    })
+  } catch {
+    return null
+  }
+  if (!response.ok) return null
+  const html = await response.text()
+  const title =
+    html.match(/<meta\s+property="og:title"\s+content="([^"]+)"/i)?.[1] ||
+    html.match(/"title":"([^"]{1,200})"/)?.[1] ||
+    ''
+  let durationMs: number | null = null
+  const lengthMatch = html.match(/"lengthSeconds":"(\d+)"/)
+  if (lengthMatch?.[1]) {
+    const value = Number(lengthMatch[1])
+    if (value > 0) durationMs = value * 1000
+  }
+  if (durationMs == null) {
+    const iso = html.match(/itemprop="duration"[^>]*content="(PT[^"]+)"/i)?.[1]
+    if (iso) durationMs = parseIsoDurationMs(iso)
+  }
+  const decodedTitle = title
+    .replace(/\\u0026/g, '&')
+    .replace(/&#39;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, '&')
+  return {
+    videoId: id,
+    url: youtubeWatchUrl(id),
+    title: decodedTitle,
+    durationMs,
+    bpm: bpmFromText(decodedTitle),
+    via: 'public_watch',
   }
 }
 
