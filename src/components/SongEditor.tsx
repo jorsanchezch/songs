@@ -12,7 +12,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import { ChartPreview } from '@/components/ChartPreview'
-import { ControlHint } from '@/components/ControlHint'
+import { ControlHint, type ControlHintSection } from '@/components/ControlHint'
 import { InstrumentSwitch } from '@/components/InstrumentSwitch'
 import { Kbd, ShortcutLegend } from '@/components/KeyHint'
 import { SongMediaInfoBanner } from '@/components/SongMediaInfoBanner'
@@ -48,8 +48,32 @@ import {
 } from '@/lib/songMedia'
 import { NOTE_LABEL, NOTE_TYPES, type NoteType, type Song, type SongNote, type SongSection } from '@/lib/types'
 
-const PARTES_HINT =
-  'Nombre y ×: cuántas veces se toca. Subir, bajar, plegar, incluir en la versión, duplicar o quitar. Id sirve para repetir la parte. Igual que muestra la letra de otra parte. + Línea agrega una línea y + Acorde lo pone en el cursor de la letra. Las marcas (entrada, cómo, repite, arreglo o nota) van en la parte, en la línea o sobre un acorde. El número junto al acorde es la columna: el carácter de la letra donde cae. 0 es el inicio de la línea.'
+const PARTES_SECTIONS: ControlHintSection[] = [
+  {
+    title: 'Parte',
+    body: 'Nombre y ×: cuántas veces se toca. Subir, bajar, plegar, incluir en la versión, duplicar o quitar.',
+  },
+  {
+    title: 'Id e Igual que',
+    body: 'Id identifica la parte para repetirla en una versión. Igual que muestra la letra de otra parte en lugar de escribirla de nuevo.',
+  },
+  {
+    title: 'Líneas y acordes',
+    body: '+ Línea agrega una línea. + Acorde lo pone donde está el cursor de la letra.',
+  },
+  {
+    title: 'Marcas',
+    body: 'Entrada, cómo, repite, arreglo o nota: van en la parte, en la línea o sobre un acorde.',
+  },
+  {
+    title: 'Columna',
+    body: 'El número junto al acorde es la columna: el carácter de la letra donde cae. 0 es el inicio de la línea.',
+  },
+  {
+    title: 'Meta',
+    body: 'Arriba del editor: YouTube, BPM, duración y audio MP3. Sirven para reproducir y para saltos a tiempo.',
+  },
+]
 
 export function SongEditor() {
   const { songId = '' } = useParams()
@@ -424,7 +448,7 @@ export function SongEditor() {
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="inline-flex items-center gap-1">
                 <h2 className="text-sm font-semibold tracking-wide text-muted-foreground uppercase">Partes</h2>
-                <ControlHint text={PARTES_HINT} wide />
+                <ControlHint sections={PARTES_SECTIONS} wide />
               </div>
               <Button
                 size="sm"

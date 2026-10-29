@@ -2,6 +2,11 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
+export type ControlHintSection = {
+  title: string
+  body: string
+}
+
 /** Which option is active when a control cycles through several. */
 export function OptionDots({ count, index }: { count: number; index: number }) {
   if (count < 2) return null
@@ -17,11 +22,28 @@ export function OptionDots({ count, index }: { count: number; index: number }) {
   )
 }
 
+function hintSummary(text: string | undefined, sections: ControlHintSection[] | undefined) {
+  if (text?.trim()) return text
+  if (!sections?.length) return ''
+  return sections.map((section) => `${section.title}: ${section.body}`).join(' ')
+}
+
 /** Small “i”. Hover uses the native title; a tap opens the same text. */
-export function ControlHint({ text, wide = false }: { text: string; wide?: boolean }) {
+export function ControlHint({
+  text,
+  sections,
+  wide = false,
+}: {
+  text?: string
+  sections?: ControlHintSection[]
+  wide?: boolean
+}) {
   const buttonRef = useRef<HTMLButtonElement>(null)
   const [open, setOpen] = useState(false)
   const [place, setPlace] = useState<{ top: number; left: number } | null>(null)
+  const summary = hintSummary(text, sections)
+  const sectioned = Boolean(sections?.length)
+  const panelWidth = sectioned ? 384 : wide ? 320 : 224
 
   useEffect(() => {
     if (!open) return
@@ -45,15 +67,15 @@ export function ControlHint({ text, wide = false }: { text: string; wide?: boole
         ref={buttonRef}
         type="button"
         className="inline-flex size-4 shrink-0 items-center justify-center rounded-full border text-[10px] leading-none font-sans font-semibold text-muted-foreground hover:bg-accent hover:text-foreground"
-        title={text}
-        aria-label={text}
+        title={summary}
+        aria-label={summary}
         aria-expanded={open}
         onClick={() => {
           const rect = buttonRef.current?.getBoundingClientRect()
           if (rect) {
             setPlace({
               top: rect.bottom + 4,
-              left: Math.max(8, Math.min(rect.left, window.innerWidth - 232)),
+              left: Math.max(8, Math.min(rect.left, window.innerWidth - panelWidth - 8)),
             })
           }
           setOpen((value) => !value)
@@ -66,11 +88,22 @@ export function ControlHint({ text, wide = false }: { text: string; wide?: boole
           role="tooltip"
           style={{ top: place.top, left: place.left }}
           className={cn(
-            'fixed z-50 rounded-md border bg-popover px-2 py-1.5 text-left font-sans text-xs font-normal tracking-normal text-popover-foreground normal-case shadow-md',
-            wide ? 'w-80 max-w-[calc(100vw-1rem)]' : 'w-56',
+            'fixed z-50 rounded-md border bg-popover px-2.5 py-2 text-left font-sans text-xs font-normal tracking-normal text-popover-foreground normal-case shadow-md',
+            sectioned ? 'w-96 max-w-[calc(100vw-1rem)]' : wide ? 'w-80 max-w-[calc(100vw-1rem)]' : 'w-56',
           )}
         >
-          {text}
+          {sectioned ? (
+            <span className="flex flex-col gap-2.5">
+              {sections!.map((section) => (
+                <span key={section.title} className="block">
+                  <span className="block font-semibold text-foreground">{section.title}</span>
+                  <span className="mt-0.5 block text-muted-foreground">{section.body}</span>
+                </span>
+              ))}
+            </span>
+          ) : (
+            text
+          )}
         </span>
       )}
     </>
