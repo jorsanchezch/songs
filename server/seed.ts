@@ -28,10 +28,33 @@ export async function ensureSchema(sql: Sql): Promise<void> {
   await addColumn(sql, `ALTER TABLE songs ADD COLUMN audio_url TEXT NOT NULL DEFAULT ''`)
   await allowElectricGuitar(sql)
   await backfillElectricGuitar(sql)
+  await purgeAgnusDeiSlim(sql)
   await sql.run(
     `INSERT OR IGNORE INTO users (id, name, role) VALUES (?, ?, 'owner')`,
     [OWNER_ID, OWNER_NAME],
   )
+}
+
+/** Drop the duplicate slim chart for good (SB-24). Live Worker still soft-hides until redeployed. */
+async function purgeAgnusDeiSlim(sql: Sql): Promise<void> {
+  const key = 'purge_agnus_dei_slim'
+  const done = await sql.get<{ value: string }>(`SELECT value FROM app_meta WHERE key = ?`, [key])
+  if (done) return
+  const id = 'charts/Agnus Dei slim'
+  const now = new Date().toISOString()
+  await sql.transaction(async (tx) => {
+    await tx.run(
+      `INSERT INTO deleted_songs (id, deleted_at) VALUES (?, ?)
+       ON CONFLICT(id) DO UPDATE SET deleted_at = excluded.deleted_at`,
+      [id, now],
+    )
+    await tx.run(`DELETE FROM setlist_items WHERE song_id = ?`, [id])
+    await tx.run(`DELETE FROM songs WHERE id = ?`, [id])
+    await tx.run(
+      `INSERT INTO app_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+      [key, now],
+    )
+  })
 }
 
 async function allowElectricGuitar(sql: Sql): Promise<void> {
