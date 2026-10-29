@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowLeft } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { PasswordInput } from '@/components/ui/password-input'
 import { UserBadge } from '@/components/UserBadge'
 import { useSession, useUser } from '@/hooks/useUser'
 import { isImmutableAdmin, roleLabel } from '@/lib/access'
@@ -78,9 +78,8 @@ export function ProfileView() {
               <label className="text-sm font-medium" htmlFor="profile-password">
                 Nueva contraseña
               </label>
-              <Input
+              <PasswordInput
                 id="profile-password"
-                type="password"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
                 placeholder="Contraseña nueva"

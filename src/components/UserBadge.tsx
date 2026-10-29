@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { PasswordInput } from '@/components/ui/password-input'
 import { useSession, useUser } from '@/hooks/useUser'
 import { roleLabel } from '@/lib/access'
 
@@ -63,9 +64,8 @@ export function UserBadge() {
               aria-label="Nombre para entrar"
               autoComplete="username"
             />
-            <Input
+            <PasswordInput
               ref={passwordRef}
-              type="password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               placeholder="Contraseña, si tiene"
