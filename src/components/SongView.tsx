@@ -269,7 +269,8 @@ export function SongView() {
   const markNext = () => {
     const state = markingRef.current
     const time = playback.mediaTime()
-    if (!state || state.phase !== 'marking' || time == null) return
+    // Taps before the audio really starts would measure the loading time.
+    if (!state || state.phase !== 'marking' || time == null || playback.status !== 'playing') return
     if (state.starts.length >= blocks.length) {
       setMarking({ ...state, endMs: time })
       stopPlayback()
@@ -301,8 +302,11 @@ export function SongView() {
 
   const clearMarks = () => {
     if (!audioKind) return
+    const saved = songPlayback[audioKind]
     const next = { ...songPlayback }
-    delete next[audioKind]
+    // The intro was set on its own; only the part lengths go.
+    if (saved && track && saved.introMs) next[audioKind] = { ...saved, parts: {} }
+    else delete next[audioKind]
     storePlayback(next)
     setSession(null)
   }
@@ -461,6 +465,8 @@ export function SongView() {
   }
 
   const togglePlayback = () => {
+    // Reviewing marks: Guardar or Descartar decides first.
+    if (markingRef.current?.phase === 'review') return
     if (playback.playing) {
       stopPlayback()
       return

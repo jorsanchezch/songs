@@ -130,7 +130,8 @@ export async function findYoutubeMedia(
 ): Promise<YoutubeHit | null> {
   const key = env.YOUTUBE_API_KEY?.trim()
   if (key) {
-    const apiHit = await searchYoutubeApi(title, artist, key)
+    // Quota or key trouble falls through to the public search.
+    const apiHit = await searchYoutubeApi(title, artist, key).catch(() => null)
     if (apiHit) return apiHit
   }
   // YouTube HTML search throttles anonymous scrapers after a handful of hits.

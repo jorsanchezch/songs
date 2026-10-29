@@ -323,6 +323,11 @@ function SettingsPanel({
   useEffect(() => setDurationDraft(formatDurationMmSs(media.durationMs)), [media.durationMs])
   const commitDuration = () => {
     const next = parseDurationMmSs(durationDraft)
+    // Only an empty field clears the length; text that is not m:ss goes back.
+    if (next == null && durationDraft.trim()) {
+      setDurationDraft(formatDurationMmSs(media.durationMs))
+      return
+    }
     if (next !== (media.durationMs ?? null)) onDurationChange?.(next)
   }
   const missing =

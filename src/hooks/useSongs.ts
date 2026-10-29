@@ -259,7 +259,8 @@ export function useSongs() {
       const created = entries.find((item) => item.id === data.song.id)
       if (created) {
         for (const item of INSTRUMENTS) {
-          created.parts[item.id] = cho
+          // The server may have added the YouTube it found; keep its text.
+          created.parts[item.id] = data.song.sourceText
           created.partRevisions[item.id] = data.song.partRevision
         }
       }

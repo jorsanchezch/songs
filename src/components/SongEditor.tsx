@@ -149,8 +149,12 @@ export function SongEditor() {
       return { ...current, sources, source: sources[0]?.url ?? '' }
     })
 
+  const [saving, setSaving] = useState(false)
   const save = () => {
+    // A new song waits on the YouTube search; a second click would create a second song.
+    if (saving) return
     setError('')
+    setSaving(true)
     void (async () => {
       try {
         const id = await saveSong(songToMarkdown(draft), songId || undefined, instrument)
@@ -159,6 +163,8 @@ export function SongEditor() {
         navigate(`/c/${encodeURIComponent(id)}`)
       } catch (reason) {
         setError(reason instanceof Error ? reason.message : 'No se pudo guardar.')
+      } finally {
+        setSaving(false)
       }
     })()
   }
@@ -508,7 +514,7 @@ export function SongEditor() {
       <footer className="fixed inset-x-0 bottom-8 z-20 border-t bg-background/95 px-4 py-3 backdrop-blur">
         <div className="mx-auto flex max-w-[70.4rem] flex-wrap gap-2">
           {(!songId || song?.editable) && (
-            <Button title="Guarda la cifra en el cancionero." onClick={save}>Guardar</Button>
+            <Button title="Guarda la cifra en el cancionero." onClick={save} disabled={saving}>{saving ? 'Guardando…' : 'Guardar'}</Button>
           )}
           <Button variant="outline" title="Baja un archivo .song.md de este borrador." onClick={download}>
             Descargar .song.md

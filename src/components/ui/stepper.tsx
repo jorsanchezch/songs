@@ -56,8 +56,13 @@ export function Stepper({
       return
     }
     const parsed = Number(trimmed)
-    if (Number.isFinite(parsed)) onChange(clamp(Math.round(parsed), min, max))
-    else setText(value == null ? '' : String(value))
+    if (!Number.isFinite(parsed)) {
+      setText(value == null ? '' : String(value))
+      return
+    }
+    const next = clamp(Math.round(parsed), min, max)
+    setText(String(next))
+    onChange(next)
   }
 
   const button = cn(

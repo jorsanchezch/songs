@@ -89,7 +89,7 @@ export async function handleApi(sql: Sql, request: Request, env: ApiEnv = {}): P
     if (pathname === '/api/audio' && request.method === 'POST') return uploadAudio(sql, user, request, env)
     if (pathname === '/api/songs' && request.method === 'GET') return listSongs(sql, user, url)
     if (pathname === '/api/songs' && request.method === 'POST') return createSong(sql, user, request, env)
-    if (pathname === '/api/media/lookup' && request.method === 'GET') return mediaLookup(url, env)
+    if (pathname === '/api/media/lookup' && request.method === 'GET') return mediaLookup(user, url, env)
     if (pathname === '/api/catalog' && request.method === 'POST') return upsertCatalog(sql, user, request)
     if (pathname === '/api/songs/reveal' && request.method === 'POST') return revealSongs(sql, user)
     if (pathname === '/api/setlists' && request.method === 'GET') return listSetlists(sql)
@@ -216,11 +216,20 @@ const LOOKUP_BUDGET_MS = 8000
 
 async function lookupMedia(title: string, artist: string, env: ApiEnv): Promise<YoutubeHit | null> {
   if (!title.trim()) return null
-  const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), LOOKUP_BUDGET_MS))
-  return Promise.race([findYoutubeMedia(title, artist, env).catch(() => null), timeout])
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), LOOKUP_BUDGET_MS)
+  })
+  try {
+    return await Promise.race([findYoutubeMedia(title, artist, env).catch(() => null), timeout])
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
-async function mediaLookup(url: URL, env: ApiEnv): Promise<Response> {
+async function mediaLookup(user: User, url: URL, env: ApiEnv): Promise<Response> {
+  // Each search spends YouTube quota; only people who can add songs need it.
+  if (user.role === 'viewer') return json({ error: 'Solo quien edita canciones busca en YouTube.' }, 403)
   const title = url.searchParams.get('title')?.trim() ?? ''
   const artist = url.searchParams.get('artist')?.trim() ?? ''
   if (!title) return json({ error: 'Falta el título.' }, 400)
