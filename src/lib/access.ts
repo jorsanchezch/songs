@@ -5,16 +5,18 @@ export type Crud = 'create' | 'read' | 'update' | 'delete'
 export type Account = {
   id: string
   name: string
+  username: string
   role: Role
   hasPassword: boolean
 }
 
-/** Seeded owner. Other people sign in by name and start as viewers. */
+/** Seeded owner. Other people are created from the admin panel. */
 export const currentUser: Account = {
   id: 'jorge',
   name: 'Jorge Sanchez',
+  username: 'jsanchezch',
   role: 'owner',
-  hasPassword: false,
+  hasPassword: true,
 }
 
 const allowed: Record<Crud, readonly Role[]> = {

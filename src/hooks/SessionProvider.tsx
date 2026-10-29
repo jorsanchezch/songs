@@ -70,8 +70,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, [apply, attempt])
 
   const signIn = useCallback(
-    async (name: string, password?: string) => {
-      const next = await signInApi(name, password)
+    async (username: string, password: string) => {
+      const next = await signInApi(username, password)
       await apply(next)
       setSignedOut(false)
     },

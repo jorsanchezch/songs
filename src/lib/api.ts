@@ -70,11 +70,10 @@ export async function me(): Promise<Account> {
   return data.user
 }
 
-export async function signIn(name: string, password?: string): Promise<Account> {
-  const secret = password?.trim()
+export async function signIn(username: string, password: string): Promise<Account> {
   const data = await request<{ token: string; user: Account }>('/api/session', {
     method: 'POST',
-    body: secret ? { name, password: secret } : { name },
+    body: { username: username.trim(), password: password.trim() },
     auth: false,
   })
   localStorage.setItem(SESSION_KEY, data.token)
@@ -91,7 +90,7 @@ export async function signOut(): Promise<void> {
   }
 }
 
-export async function putPassword(password: string | null): Promise<Account> {
+export async function putPassword(password: string): Promise<Account> {
   const data = await request<{ user: Account }>('/api/profile/password', {
     method: 'PUT',
     body: { password },
@@ -132,11 +131,19 @@ export function getAdmin(): Promise<AdminOverview> {
   return request('/api/admin')
 }
 
-export function createPerson(body: { name: string; role: Role; password?: string }): Promise<AdminOverview> {
+export function createPerson(body: {
+  name: string
+  username: string
+  role: Role
+  password: string
+}): Promise<AdminOverview> {
   return request('/api/admin/users', { method: 'POST', body })
 }
 
-export function updatePerson(id: string, body: { role?: Role; password?: string | null }): Promise<AdminOverview> {
+export function updatePerson(
+  id: string,
+  body: { role?: Role; username?: string; password?: string },
+): Promise<AdminOverview> {
   return request(`/api/admin/users/${encodeURIComponent(id)}`, { method: 'PUT', body })
 }
 

@@ -9,20 +9,20 @@ export function UserBadge() {
   const user = useUser()
   const { people, signIn, signOut } = useSession()
   const [open, setOpen] = useState(false)
-  const [name, setName] = useState('')
+  const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const passwordRef = useRef<HTMLInputElement>(null)
 
-  const enter = async (next: string, secret?: string) => {
-    const trimmed = next.trim()
-    if (!trimmed) return
+  const enter = async (nextUser: string, secret: string) => {
+    const trimmed = nextUser.trim()
+    if (!trimmed || !secret.trim()) return
     setBusy(true)
     setError('')
     try {
       await signIn(trimmed, secret)
-      setName('')
+      setUsername('')
       setPassword('')
       setOpen(false)
     } catch (reason) {
@@ -47,20 +47,20 @@ export function UserBadge() {
       {open && (
         <div className="absolute right-0 z-40 mt-1 w-72 rounded-xl border bg-card p-3 text-left shadow-lg">
           <p className="mb-2 text-xs text-muted-foreground">
-            Un nombre nuevo entra como lectura, sin contraseña. Si la cuenta tiene contraseña, hay que escribirla.
+            Entra con usuario y contraseña. Un Admin crea las cuentas.
           </p>
           <form
             className="flex flex-col gap-2"
             onSubmit={(event) => {
               event.preventDefault()
-              void enter(name, password)
+              void enter(username, password)
             }}
           >
             <Input
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              placeholder="Nombre"
-              aria-label="Nombre para entrar"
+              value={username}
+              onChange={(event) => setUsername(event.target.value)}
+              placeholder="Usuario"
+              aria-label="Usuario para entrar"
               autoComplete="username"
             />
             <Input
@@ -68,11 +68,11 @@ export function UserBadge() {
               type="password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
-              placeholder="Contraseña, si tiene"
-              aria-label="Contraseña, si tiene"
+              placeholder="Contraseña"
+              aria-label="Contraseña"
               autoComplete="current-password"
             />
-            <Button type="submit" size="sm" disabled={busy || !name.trim()}>
+            <Button type="submit" size="sm" disabled={busy || !username.trim() || !password.trim()}>
               Entrar
             </Button>
           </form>
@@ -94,21 +94,17 @@ export function UserBadge() {
                     type="button"
                     className="flex w-full items-center justify-between rounded-md px-1 py-1 text-xs hover:bg-accent"
                     onClick={() => {
-                      if (person.hasPassword) {
-                        setName(person.name)
-                        setPassword('')
-                        setError('')
-                        passwordRef.current?.focus()
-                        return
-                      }
-                      void enter(person.name)
+                      setUsername(person.username)
+                      setPassword('')
+                      setError('')
+                      passwordRef.current?.focus()
                     }}
                   >
-                    <span>{person.name}</span>
-                    <span className="text-muted-foreground">
-                      {roleLabel(person.role)}
-                      {person.hasPassword ? ' · clave' : ''}
+                    <span className="truncate text-left">
+                      {person.name}
+                      <span className="text-muted-foreground"> · {person.username}</span>
                     </span>
+                    <span className="shrink-0 text-muted-foreground">{roleLabel(person.role)}</span>
                   </button>
                 </li>
               ))}

@@ -1,6 +1,7 @@
 import { INSTRUMENTS } from './instruments.ts'
 import { chartMeta } from './meta.ts'
-import { OWNER_ID, OWNER_NAME, SCHEMA } from './schema.ts'
+import { hashPassword } from './password.ts'
+import { OWNER_ID, OWNER_NAME, OWNER_PASSWORD, OWNER_USERNAME, SCHEMA } from './schema.ts'
 import type { CatalogFile } from './catalog.ts'
 import type { Sql, SqlValue } from './sql.ts'
 
@@ -23,12 +24,58 @@ export async function ensureSchema(sql: Sql): Promise<void> {
   await addColumn(sql, `ALTER TABLE songs ADD COLUMN revision INTEGER NOT NULL DEFAULT 1`)
   await addColumn(sql, `ALTER TABLE instrument_parts ADD COLUMN revision INTEGER NOT NULL DEFAULT 1`)
   await addColumn(sql, `ALTER TABLE users ADD COLUMN password_hash TEXT`)
+  await addColumn(sql, `ALTER TABLE users ADD COLUMN username TEXT`)
   await allowElectricGuitar(sql)
   await backfillElectricGuitar(sql)
+  await ensureOwnerAccount(sql)
+  await backfillUsernames(sql)
+  try {
+    await sql.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username)`)
+  } catch {
+    // Older rows may still collide briefly; create/update checks keep new usernames unique.
+  }
+}
+
+async function ensureOwnerAccount(sql: Sql): Promise<void> {
   await sql.run(
-    `INSERT OR IGNORE INTO users (id, name, role) VALUES (?, ?, 'owner')`,
-    [OWNER_ID, OWNER_NAME],
+    `INSERT OR IGNORE INTO users (id, name, username, role) VALUES (?, ?, ?, 'owner')`,
+    [OWNER_ID, OWNER_NAME, OWNER_USERNAME],
   )
+  await sql.run(`UPDATE users SET name = ?, username = ? WHERE id = ?`, [
+    OWNER_NAME,
+    OWNER_USERNAME,
+    OWNER_ID,
+  ])
+  const row = await sql.get<{ password_hash: string | null }>(
+    `SELECT password_hash FROM users WHERE id = ?`,
+    [OWNER_ID],
+  )
+  if (!row?.password_hash) {
+    await sql.run(`UPDATE users SET password_hash = ? WHERE id = ?`, [
+      await hashPassword(OWNER_PASSWORD),
+      OWNER_ID,
+    ])
+  }
+}
+
+async function backfillUsernames(sql: Sql): Promise<void> {
+  const missing = await sql.all<{ id: string }>(
+    `SELECT id FROM users WHERE username IS NULL OR TRIM(username) = ''`,
+  )
+  for (const person of missing) {
+    let username = person.id
+    let n = 2
+    while (
+      await sql.get(
+        `SELECT id FROM users WHERE username = ? COLLATE NOCASE AND id != ?`,
+        [username, person.id],
+      )
+    ) {
+      username = `${person.id}-${n}`
+      n += 1
+    }
+    await sql.run(`UPDATE users SET username = ? WHERE id = ?`, [username, person.id])
+  }
 }
 
 async function allowElectricGuitar(sql: Sql): Promise<void> {
@@ -153,7 +200,9 @@ export function quote(value: string): string {
 export function renderSeedSql(files: CatalogFile[]): string {
   const now = new Date().toISOString()
   const lines = [SCHEMA.trim(), '']
-  lines.push(`INSERT OR IGNORE INTO users (id, name, role) VALUES (${quote(OWNER_ID)}, ${quote(OWNER_NAME)}, 'owner');`)
+  lines.push(
+    `INSERT OR IGNORE INTO users (id, name, username, role) VALUES (${quote(OWNER_ID)}, ${quote(OWNER_NAME)}, ${quote(OWNER_USERNAME)}, 'owner');`,
+  )
   for (const file of files) {
     const meta = chartMeta(file.sourceText, file.id)
     lines.push(`INSERT OR IGNORE INTO songs (

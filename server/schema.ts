@@ -2,6 +2,7 @@ export const SCHEMA = `
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  username TEXT UNIQUE COLLATE NOCASE,
   role TEXT NOT NULL CHECK (role IN ('owner', 'admin', 'viewer')),
   password_hash TEXT
 );
@@ -102,3 +103,6 @@ CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 
 export const OWNER_ID = 'jorge'
 export const OWNER_NAME = 'Jorge Sanchez'
+export const OWNER_USERNAME = 'jsanchezch'
+/** Seeded once for the Admin account. The profile and admin panel cannot change it. */
+export const OWNER_PASSWORD = '1231'
