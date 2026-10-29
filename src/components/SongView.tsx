@@ -85,7 +85,19 @@ export function SongView() {
   const navigate = useNavigate()
   const user = useUser()
   const { people } = useSession()
-  const { state, reload, removeSong, restoreSong, copySong, shareSong, patchMedia, songById, ensurePart, savePlayback } = useSongs()
+  const {
+    state,
+    reload,
+    removeSong,
+    restoreSong,
+    copySong,
+    shareSong,
+    patchMedia,
+    discardDraft,
+    songById,
+    ensurePart,
+    savePlayback,
+  } = useSongs()
   const setlists = useSetlists()
   const listaId = searchParams.get('lista')
   const [settings, setSettings] = useState<ViewSettings>(() => loadSettings())
@@ -1018,6 +1030,23 @@ export function SongView() {
               <SongMark songId={song.id} />
               <h1 className="min-w-0 shrink truncate text-lg font-semibold">{song.title}</h1>
               {author && <p className="min-w-0 shrink-[2] truncate text-sm text-muted-foreground">{author}</p>}
+              {song.personal && song.draft && (
+                <span
+                  className="shrink-0 rounded-md bg-amber-500/15 px-1.5 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-300"
+                  title="Ves tu versión personal. La canción compartida no cambió."
+                >
+                  Mi versión
+                </span>
+              )}
+              {isStaff(user) && (song.draftUsers ?? 0) > 0 && (
+                <Link
+                  to={`/c/${encodeURIComponent(song.id)}/versiones`}
+                  className="shrink-0 rounded-md bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary hover:underline"
+                  title="Abre las versiones que guardó cada persona."
+                >
+                  Versiones ({song.draftUsers})
+                </Link>
+              )}
               {!headerOpen && transposer(true)}
             </div>
             {toolbarFloat}
@@ -1059,8 +1088,18 @@ export function SongView() {
               {song.artist || 'Sin artista'}
               {song.composer ? ` · ${song.composer}` : ''}
             </p>
-            {song.editable && (
-              <Button variant="outline" size="icon" asChild aria-label="Editar" title="Editar esta canción.">
+            {(song.editable || song.personal) && (
+              <Button
+                variant="outline"
+                size="icon"
+                asChild
+                aria-label={song.editable ? 'Editar' : 'Editar mi versión'}
+                title={
+                  song.editable
+                    ? 'Editar esta canción.'
+                    : 'Edita tu versión personal. La canción compartida no cambia.'
+                }
+              >
                 <Link to={`/editar/${encodeURIComponent(song.id)}?inst=${instrument}`}>
                   <Pencil />
                 </Link>
@@ -1103,6 +1142,36 @@ export function SongView() {
               <p>El catálogo en la base difiere del archivo. El archivo no se toca.</p>
               <Button size="sm" onClick={() => void restoreSong(song.id)}>
                 Restaurar archivo
+              </Button>
+            </div>
+          )}
+          {song.personal && song.draft && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">
+              <p>
+                Ves tu versión personal. Solo tú la ves; un Admin la puede revisar.
+                {song.draft.stale ? ' La canción compartida cambió después de tu versión.' : ''}
+              </p>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  if (!window.confirm('¿Descartar tu versión y volver a la canción compartida?')) return
+                  void discardDraft(song.id, instrument).catch((error) => console.error(error))
+                }}
+              >
+                Descartar mi versión
+              </Button>
+            </div>
+          )}
+          {isStaff(user) && (song.draftUsers ?? 0) > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm">
+              <p>
+                {song.draftUsers === 1
+                  ? 'Una persona guardó su propia versión.'
+                  : `${song.draftUsers} personas guardaron su propia versión.`}
+              </p>
+              <Button size="sm" variant="outline" asChild>
+                <Link to={`/c/${encodeURIComponent(song.id)}/versiones`}>Ver versiones</Link>
               </Button>
             </div>
           )}
@@ -1602,9 +1671,9 @@ export function SongView() {
             onDiscard: () => setMarking(null),
             onClear: clearMarks,
           }}
-          canEditDuration={Boolean(song?.editable)}
+          canEditDuration={Boolean(song?.editable || song?.personal)}
           onDurationChange={
-            song?.editable && pickedSelected
+            (song?.editable || song?.personal) && pickedSelected
               ? (durationMs) => {
                   setDurationOverride(durationMs)
                   void patchMedia(song.id, { durationMs }, instrument).catch((error) => console.error(error))

@@ -77,7 +77,61 @@ function patchMarkdown(text: string, patch: ChartMediaPatch): string {
   if (!fields.scalars.source && fields.sources[0]) {
     fields.scalars.source = fields.sources[0].url
   }
-  const order = ['title', 'artist', 'composer', 'key', 'original_key', 'source', 'bpm', 'duration_ms', 'audio_url']
+  return renderMarkdown(fields, match[2] ?? '\n', body)
+}
+
+const SONG_META = ['title', 'artist', 'composer', 'key', 'original_key', 'source', 'bpm', 'duration_ms', 'audio_url']
+const SONG_IDENTITY = ['title', 'artist', 'composer', 'key', 'original_key']
+const IDENTITY_LINE = new RegExp(`^\\{(${SONG_IDENTITY.join('|')}):`, 'i')
+
+/**
+ * Copy title, artist, composer, and keys from one chart onto another, across YAML and ChordPro.
+ * Media (sources, BPM, duration, audio) travels with copyChartMedia; parts and other header lines stay.
+ */
+export function shareChartMeta(targetText: string, savedText: string): string {
+  const target = targetText.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n')
+  const song = readIdentity(savedText.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n'))
+  if (!song) return targetText
+  let next: string
+  if (target.startsWith('---\n')) {
+    const into = target.match(/^---\n([\s\S]*?)\n---(\n?)/)
+    if (!into) return targetText
+    const fields = parseFrontFields(into[1] ?? '')
+    for (const key of SONG_IDENTITY) {
+      if (song[key]) fields.scalars[key] = song[key]
+      else delete fields.scalars[key]
+    }
+    next = renderMarkdown(fields, into[2] ?? '\n', target.slice(into[0].length))
+  } else {
+    const into = splitChordPro(target)
+    const identity = SONG_IDENTITY.flatMap((key) => (song[key] ? [`{${key}: ${song[key]}}`] : []))
+    const others = into.meta.filter((line) => !IDENTITY_LINE.test(line.trim()))
+    next = [...identity, ...others, ...into.rest].join('\n')
+  }
+  return next === target ? targetText : next
+}
+
+function readIdentity(text: string): Record<string, string> | null {
+  const out: Record<string, string> = {}
+  if (text.startsWith('---\n')) {
+    const match = text.match(/^---\n([\s\S]*?)\n---(\n?)/)
+    if (!match) return null
+    const { scalars } = parseFrontFields(match[1] ?? '')
+    for (const key of SONG_IDENTITY) if (scalars[key]?.trim()) out[key] = scalars[key].trim()
+    return out
+  }
+  for (const line of splitChordPro(text).meta) {
+    const match = line.trim().match(/^\{([A-Za-z_]+):\s*([^}]*)\}\s*$/)
+    const key = match?.[1]?.toLowerCase()
+    if (!key || !SONG_IDENTITY.includes(key)) continue
+    const value = unquote(match?.[2] ?? '')
+    if (value) out[key] = value
+  }
+  return out
+}
+
+function renderMarkdown(fields: FrontFields, newline: string, body: string): string {
+  const order = SONG_META
   const lines: string[] = []
   const seen = new Set<string>()
   for (const key of order) {
@@ -96,10 +150,11 @@ function patchMarkdown(text: string, patch: ChartMediaPatch): string {
       lines.push(`  - ${line}`)
     }
   }
-  return `---\n${lines.join('\n')}\n---${match[2] ?? '\n'}${body}`
+  return `---\n${lines.join('\n')}\n---${newline}${body}`
 }
 
-function patchChordPro(text: string, patch: ChartMediaPatch): string {
+/** Header directives before the first part, and everything from the first part on. */
+function splitChordPro(text: string): { meta: string[]; rest: string[] } {
   const lines = text.split('\n')
   let metaEnd = lines.length
   for (let index = 0; index < lines.length; index += 1) {
@@ -114,8 +169,11 @@ function patchChordPro(text: string, patch: ChartMediaPatch): string {
       break
     }
   }
-  const meta = lines.slice(0, metaEnd)
-  const rest = lines.slice(metaEnd)
+  return { meta: lines.slice(0, metaEnd), rest: lines.slice(metaEnd) }
+}
+
+function patchChordPro(text: string, patch: ChartMediaPatch): string {
+  const { meta, rest } = splitChordPro(text)
   const nextMeta = [...meta]
 
   const setDirective = (name: string, value: string | null) => {

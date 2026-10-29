@@ -30,9 +30,23 @@ CREATE TABLE IF NOT EXISTS songs (
   duration_ms INTEGER,
   audio_url TEXT NOT NULL DEFAULT '',
   playback TEXT NOT NULL DEFAULT '{}',
+  creator_id TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   revision INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS song_drafts (
+  song_id TEXT NOT NULL REFERENCES songs(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  instrument TEXT NOT NULL,
+  source_text TEXT NOT NULL,
+  base_text TEXT NOT NULL,
+  base_revision INTEGER NOT NULL,
+  edited INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (song_id, user_id, instrument)
 );
 
 CREATE TABLE IF NOT EXISTS instrument_parts (
@@ -102,7 +116,9 @@ CREATE TABLE IF NOT EXISTS deleted_songs (
 
 CREATE INDEX IF NOT EXISTS idx_songs_owner ON songs(owner_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_song_drafts_user ON song_drafts(user_id);
 `
 
+/** Jorge Sanchez, the seeded owner. Seed, import, backfill, and media scripts create songs as this user. */
 export const OWNER_ID = 'jorge'
 export const OWNER_NAME = 'Jorge Sanchez'

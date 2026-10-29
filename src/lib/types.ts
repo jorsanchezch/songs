@@ -71,9 +71,17 @@ export type Song = {
   overridden?: boolean
   ownerId?: string
   ownerName?: string
+  creatorId?: string
+  creatorName?: string
   shared?: boolean
   catalogId?: string | null
   editable?: boolean
+  /** Saving keeps a personal version instead of changing the shared song. */
+  personal?: boolean
+  /** This person's version of this instrument, when there is one. */
+  draft?: { updatedAt: string; stale: boolean } | null
+  /** Staff only: how many people saved their own version. */
+  draftUsers?: number
   removable?: boolean
   shares?: string[]
   instrument?: string

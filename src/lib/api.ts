@@ -32,9 +32,17 @@ export type ApiSong = {
   origin: 'catalog' | 'local' | 'copy'
   ownerId: string
   ownerName: string
+  creatorId: string
+  creatorName: string
   shared: boolean
   catalogId: string | null
   editable: boolean
+  /** Cannot change the shared song, so saving keeps a personal version. */
+  personal: boolean
+  /** This person's version for this instrument, when they saved one. */
+  draft: SongDraftInfo | null
+  /** Staff only: how many people saved their own version. */
+  draftUsers: number
   removable: boolean
   diverged: boolean
   instrument: InstrumentId
@@ -44,9 +52,35 @@ export type ApiSong = {
   partRevision: number
 }
 
+export type SongDraftInfo = {
+  updatedAt: string
+  edited: boolean
+  /** The shared song changed after this version started. */
+  stale: boolean
+}
+
+export type UserSongVersion = {
+  userId: string
+  userName: string
+  instrument: InstrumentId
+  sourceText: string
+  baseText: string
+  canonicalText: string
+  stale: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export type SongVersions = {
+  song: { id: string; title: string; revision: number; creatorId: string; creatorName: string }
+  drafts: UserSongVersion[]
+}
+
 export type PartText = {
   sourceText: string
   revision: number
+  /** True when this text is the person's own version, not the shared part. */
+  draft?: boolean
 }
 
 export type SongList = {
@@ -123,13 +157,21 @@ export type AdminInventory = {
   personalCopies: number
   sharedCopies: number
   createdSongs: number
+  userVersions: number
   setlists: number
   serviceDays: number
+}
+
+export type AdminDraftSummary = {
+  songId: string
+  title: string
+  users: { id: string; name: string; updatedAt: string }[]
 }
 
 export type AdminOverview = {
   me: Account
   users: AdminPerson[]
+  drafts: AdminDraftSummary[]
   inventory: AdminInventory
 }
 
@@ -321,6 +363,34 @@ export function saveSong(
     method: 'PUT',
     body: { sourceText, instrument, revision, partRevision },
   })
+}
+
+export function saveDraft(
+  id: string,
+  sourceText: string,
+  instrument: InstrumentId,
+): Promise<{ song: ApiSong; parts: Record<string, PartText> }> {
+  return request(`/api/songs/${encodeURIComponent(id)}/draft`, {
+    method: 'PUT',
+    body: { sourceText, instrument },
+  })
+}
+
+export function discardDraft(
+  id: string,
+  instrument: InstrumentId,
+): Promise<{ song: ApiSong; parts: Record<string, PartText> }> {
+  return request(`/api/songs/${encodeURIComponent(id)}/draft?instrument=${encodeURIComponent(instrument)}`, {
+    method: 'DELETE',
+  })
+}
+
+export function getSongVersions(id: string): Promise<SongVersions> {
+  return request(`/api/songs/${encodeURIComponent(id)}/drafts`)
+}
+
+export function removeSongVersion(id: string, userId: string): Promise<SongVersions> {
+  return request(`/api/songs/${encodeURIComponent(id)}/drafts/${encodeURIComponent(userId)}`, { method: 'DELETE' })
 }
 
 export function importLocal(body: {

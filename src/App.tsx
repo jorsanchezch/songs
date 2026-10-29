@@ -10,6 +10,7 @@ import { ServiceDaysView } from '@/components/ServiceDaysView'
 import { SetlistView } from '@/components/SetlistView'
 import { SetlistsView } from '@/components/SetlistsView'
 import { SongEditor } from '@/components/SongEditor'
+import { SongVersionsView } from '@/components/SongVersionsView'
 import { SongView } from '@/components/SongView'
 import { StudyIndex, StudyView } from '@/components/StudyView'
 
@@ -31,6 +32,7 @@ export default function App() {
         <Route path="/estudio" element={<StudyIndex />} />
         <Route path="/estudio/:instrumento" element={<StudyView />} />
         <Route path="/c/:songId" element={<SongView />} />
+        <Route path="/c/:songId/versiones" element={<SongVersionsView />} />
         <Route path="/editar/:songId" element={<SongEditor />} />
       </Routes>
       <EscapeFallback />

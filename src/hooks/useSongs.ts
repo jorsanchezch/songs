@@ -3,15 +3,19 @@ import {
   copySong as copySongApi,
   createSong,
   deleteSong,
+  discardDraft as discardDraftApi,
   getSong,
   listSongs,
   putPlayback,
   patchSongMedia as patchSongMediaApi,
   restoreSong as restoreSongApi,
   revealSongs,
+  saveDraft as saveDraftApi,
   saveSong as saveSongApi,
   shareSong as shareSongApi,
   type ApiSong,
+  type PartText,
+  type SongDraftInfo,
 } from '@/lib/api'
 import { INSTRUMENTS, isInstrument, type InstrumentId } from '@/lib/instruments'
 import { parseChart } from '@/lib/parseChart'
@@ -28,9 +32,13 @@ type Entry = {
   origin: SongOrigin
   ownerId: string
   ownerName: string
+  creatorId: string
+  creatorName: string
   shared: boolean
   catalogId: string | null
   editable: boolean
+  personal: boolean
+  draftUsers: number
   removable: boolean
   diverged: boolean
   shares: string[]
@@ -39,6 +47,7 @@ type Entry = {
   partRevisions: Partial<Record<InstrumentId, number>>
   parts: Partial<Record<InstrumentId, string>>
   playback: SongPlayback
+  drafts: Partial<Record<InstrumentId, SongDraftInfo | null>>
   missing?: boolean
 }
 
@@ -61,9 +70,13 @@ function upsert(row: ApiSong) {
       origin: row.origin,
       ownerId: row.ownerId,
       ownerName: row.ownerName,
+      creatorId: row.creatorId,
+      creatorName: row.creatorName,
       shared: row.shared,
       catalogId: row.catalogId,
       editable: row.editable,
+      personal: row.personal,
+      draftUsers: row.draftUsers,
       removable: row.removable,
       diverged: row.diverged,
       shares: row.shares ?? [],
@@ -72,15 +85,20 @@ function upsert(row: ApiSong) {
       partRevisions: {},
       parts: {},
       playback: {},
+      drafts: {},
     }
     entries.push(entry)
   }
   entry.origin = row.origin
   entry.ownerId = row.ownerId
   entry.ownerName = row.ownerName
+  entry.creatorId = row.creatorId
+  entry.creatorName = row.creatorName
   entry.shared = row.shared
   entry.catalogId = row.catalogId
   entry.editable = row.editable
+  entry.personal = row.personal
+  entry.draftUsers = row.draftUsers
   entry.removable = row.removable
   entry.diverged = row.diverged
   entry.shares = row.shares ?? []
@@ -90,6 +108,20 @@ function upsert(row: ApiSong) {
   entry.playback = row.playback ?? {}
   entry.parts[row.instrument] = row.sourceText
   entry.partRevisions[row.instrument] = row.partRevision
+  entry.drafts[row.instrument] = row.draft
+}
+
+function adoptParts(id: string, song: ApiSong, parts: Record<string, PartText> | undefined) {
+  const saved = entries.find((item) => item.id === id)
+  if (!saved || !parts) return
+  for (const [name, part] of Object.entries(parts)) {
+    if (!isInstrument(name)) continue
+    saved.parts[name] = part.sourceText
+    saved.partRevisions[name] = part.revision
+    if (name !== song.instrument) {
+      saved.drafts[name] = part.draft ? { updatedAt: song.draft?.updatedAt ?? '', edited: false, stale: false } : null
+    }
+  }
 }
 
 function materialize(entry: Entry, instrument: InstrumentId): Song | null {
@@ -126,9 +158,14 @@ function materialize(entry: Entry, instrument: InstrumentId): Song | null {
     overridden: entry.diverged,
     ownerId: entry.ownerId,
     ownerName: entry.ownerName,
+    creatorId: entry.creatorId,
+    creatorName: entry.creatorName,
     shared: entry.shared,
     catalogId: entry.catalogId,
     editable: entry.editable,
+    personal: entry.personal,
+    draft: entry.drafts[instrument] ?? null,
+    draftUsers: entry.draftUsers,
     removable: entry.removable,
     shares: entry.shares,
     hasCopy: entry.hasCopy,
@@ -226,9 +263,13 @@ export function useSongs() {
           origin: 'local',
           ownerId: '',
           ownerName: '',
+          creatorId: '',
+          creatorName: '',
           shared: false,
           catalogId: null,
           editable: false,
+          personal: false,
+          draftUsers: 0,
           removable: false,
           diverged: false,
           shares: [],
@@ -237,6 +278,7 @@ export function useSongs() {
           partRevisions: {},
           parts: {},
           playback: {},
+          drafts: {},
           missing: true,
         })
       } else if (status !== 404) {
@@ -273,18 +315,25 @@ export function useSongs() {
     if (revision == null || partRevision == null) {
       throw new Error('Recarga la canción antes de guardar.')
     }
+    if (entry?.personal) {
+      const data = await saveDraftApi(id, cho, instrument)
+      upsert(data.song)
+      adoptParts(id, data.song, data.parts)
+      emit()
+      return id
+    }
     const data = await saveSongApi(id, cho, instrument, revision, partRevision)
     upsert(data.song)
-    const saved = entries.find((item) => item.id === id)
-    if (saved && data.parts) {
-      for (const [name, part] of Object.entries(data.parts)) {
-        if (!isInstrument(name)) continue
-        saved.parts[name] = part.sourceText
-        saved.partRevisions[name] = part.revision
-      }
-    }
+    adoptParts(id, data.song, data.parts)
     emit()
     return id
+  }
+
+  const discardDraft = async (id: string, instrument: InstrumentId) => {
+    const data = await discardDraftApi(id, instrument)
+    upsert(data.song)
+    adoptParts(id, data.song, data.parts)
+    emit()
   }
 
   const removeSong = async (song: Song) => {
@@ -370,14 +419,7 @@ export function useSongs() {
   ) => {
     const data = await patchSongMediaApi(id, { ...body, instrument })
     upsert(data.song)
-    const saved = entries.find((item) => item.id === id)
-    if (saved && data.parts) {
-      for (const [name, part] of Object.entries(data.parts)) {
-        if (!isInstrument(name)) continue
-        saved.parts[name] = part.sourceText
-        saved.partRevisions[name] = part.revision
-      }
-    }
+    adoptParts(id, data.song, data.parts)
     emit()
     return data.song
   }
@@ -387,6 +429,7 @@ export function useSongs() {
     reload,
     savePlayback,
     saveSong,
+    discardDraft,
     removeSong,
     restoreSong,
     revealHidden,

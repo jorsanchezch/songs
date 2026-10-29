@@ -202,8 +202,137 @@ await checkSeedLists(files)
 await checkDayListHistory(files)
 await checkPasswords(files)
 await checkDeleteSurvivesSeed(files)
+await checkDraftsAndCreators(files)
+await checkCreatorBackfill(files)
 
 console.log(`SQL ok: ${songs.length} catalog songs, copies and instruments checked`)
+
+async function checkDraftsAndCreators(files: { id: string; sourceText: string }[]) {
+  type Dto = {
+    id: string
+    title: string
+    sourceText: string
+    creatorId: string
+    editable: boolean
+    personal: boolean
+    draft: { stale: boolean } | null
+    draftUsers: number
+    revision: number
+    partRevision: number
+    durationMs: number | null
+  }
+  const db = openSqlite(':memory:')
+  await seedCatalog(db, files)
+  const boss = await signIn(db, 'Jorge Sanchez')
+  const ana = await signIn(db, 'Ana Borrador')
+  const luis = await signIn(db, 'Luis Borrador')
+  const sample = files.find((file) => file.sourceText.includes('title'))
+  assert(sample, 'catalog file with a title')
+  const path = `/api/songs/${encodeURIComponent(sample.id)}`
+
+  const seeded = await db.get<{ n: number }>(`SELECT COUNT(*) AS n FROM songs WHERE creator_id IS NULL OR creator_id != 'jorge'`)
+  assert(Number(seeded?.n) === 0, 'seeded catalog songs belong to jorge')
+
+  const created = await call(db, ana.token, 'POST', '/api/songs', {
+    sourceText: '{title: Canción de Ana}\n{bpm: 90}\n{duration_ms: 180000}\n[G]Hola\n',
+  })
+  assert(created.status === 201, `a viewer creates a song ${created.status}`)
+  const own = created.data.song as Dto
+  assert(own.creatorId === ana.user.id && own.editable && !own.personal, 'a new song is the viewer’s own')
+  const copied = await call(db, ana.token, 'POST', `${path}/copy`)
+  assert((copied.data.song as Dto).creatorId === ana.user.id, 'a copy is created by whoever copies')
+
+  const opened = (await call(db, ana.token, 'GET', `${path}?instrument=guitar`)).data.song as Dto
+  assert(opened.creatorId === 'jorge' && !opened.editable && opened.personal && !opened.draft, 'catalog opens as personal')
+  const original = opened.sourceText
+  const edited = original.replace(/\{title:[^}]*\}|^title:.*$/m, (line) =>
+    line.startsWith('{') ? '{title: Versión de Ana}' : 'title: Versión de Ana',
+  )
+  assert(edited !== original, 'the title line changed')
+  const hard = await call(db, ana.token, 'PUT', path, {
+    sourceText: edited,
+    instrument: 'guitar',
+    revision: opened.revision,
+    partRevision: opened.partRevision,
+  })
+  assert(hard.status === 403, 'a viewer still cannot hard-save the catalog')
+  const saved = await call(db, ana.token, 'PUT', `${path}/draft`, { sourceText: edited, instrument: 'guitar' })
+  assert(saved.status === 200, `draft save ${saved.status} ${JSON.stringify(saved.data)}`)
+  const mine = saved.data.song as Dto
+  assert(mine.title === 'Versión de Ana' && mine.draft && !mine.draft.stale, 'Ana sees her version')
+
+  const canonical = (await call(db, boss.token, 'GET', `${path}?instrument=guitar`)).data.song as Dto
+  assert(canonical.sourceText === original, 'the shared song is untouched')
+  assert(canonical.draftUsers === 1 && !canonical.draft, 'admin sees one user version, not as their own')
+  const other = (await call(db, luis.token, 'GET', `${path}?instrument=guitar`)).data.song as Dto
+  assert(other.sourceText === original && !other.draft, 'another viewer sees the shared song')
+  const anaList = await call(db, ana.token, 'GET', '/api/songs?instrument=guitar')
+  const listed = (anaList.data.songs as Dto[]).find((song) => song.id === sample.id)
+  assert(listed?.title === 'Versión de Ana', 'the library shows Ana her version')
+
+  const media = await call(db, ana.token, 'PUT', `${path}/media`, { durationMs: 123_000, instrument: 'bass' })
+  assert(media.status === 200, `viewer media patch ${media.status} ${JSON.stringify(media.data)}`)
+  assert((media.data.song as Dto).durationMs === 123_000, 'the duration lands in Ana’s version')
+  const bassShared = (await call(db, boss.token, 'GET', `${path}?instrument=bass`)).data.song as Dto
+  assert(bassShared.durationMs !== 123_000, 'the shared bass part keeps its duration')
+
+  const deniedList = await call(db, ana.token, 'GET', `${path}/drafts`)
+  assert(deniedList.status === 403, 'a viewer cannot list user versions')
+  const versions = await call(db, boss.token, 'GET', `${path}/drafts`)
+  const drafts = versions.data.drafts as { userId: string; instrument: string; sourceText: string; baseText: string }[]
+  assert(versions.status === 200 && drafts.length === 2, `two edited instruments ${JSON.stringify(drafts.map((d) => d.instrument))}`)
+  const guitarDraft = drafts.find((draft) => draft.instrument === 'guitar')
+  assert(guitarDraft?.userId === ana.user.id && guitarDraft.baseText === original, 'the guitar draft keeps its base')
+  assert(
+    guitarDraft.sourceText.includes('Versión de Ana') && guitarDraft.sourceText.includes('123000'),
+    'the guitar draft keeps Ana’s title and the duration she set',
+  )
+  const overview = await call(db, boss.token, 'GET', '/api/admin')
+  const summary = overview.data.drafts as { songId: string; users: { id: string }[] }[]
+  assert(summary.some((item) => item.songId === sample.id && item.users[0]?.id === ana.user.id), 'admin overview lists the version')
+
+  const bossSave = await call(db, boss.token, 'PUT', path, {
+    sourceText: `${original.trimEnd()}\n{comment: admin}\n`,
+    instrument: 'guitar',
+    revision: canonical.revision,
+    partRevision: canonical.partRevision,
+  })
+  assert(bossSave.status === 200, 'admin still hard-saves the catalog')
+  const stale = (await call(db, ana.token, 'GET', `${path}?instrument=guitar`)).data.song as Dto
+  assert(stale.title === 'Versión de Ana' && stale.draft?.stale === true, 'Ana keeps her version and learns it is behind')
+
+  const discarded = await call(db, ana.token, 'DELETE', `${path}/draft?instrument=guitar`)
+  assert(discarded.status === 200 && !(discarded.data.song as Dto).draft, 'Ana discards her version')
+  const after = (await call(db, boss.token, 'GET', `${path}/drafts`)).data.drafts as unknown[]
+  assert(after.length === 0, 'no versions left')
+
+  const electric = (await call(db, luis.token, 'GET', `${path}?instrument=electric_guitar`)).data.song as Dto
+  const asMarkdown = `---\ntitle: Versión de Luis\nbpm: 101\n---\n\n${electric.sourceText.replace(/^---\n[\s\S]*?\n---\n?/, '').replace(/^\{(title|artist|composer|key|bpm|duration_ms|source|audio_url):[^}]*\}\s*$/gim, '')}`
+  const luisSave = await call(db, luis.token, 'PUT', `${path}/draft`, { sourceText: asMarkdown, instrument: 'electric_guitar' })
+  assert(luisSave.status === 200, `electric draft ${luisSave.status} ${JSON.stringify(luisSave.data)}`)
+  const luisList = await call(db, luis.token, 'GET', '/api/songs?instrument=guitar')
+  const luisSong = (luisList.data.songs as Dto[]).find((song) => song.id === sample.id)
+  assert(luisSong?.title === 'Versión de Luis', `the library (acoustic) shows a title edited on electric ${luisSong?.title}`)
+  assert(luisSong.draft && luisSong.sourceText.includes('101'), 'the acoustic part carries the BPM too')
+  const removed = await call(db, boss.token, 'DELETE', `${path}/drafts/${encodeURIComponent(luis.user.id)}`)
+  assert(removed.status === 200 && (removed.data.drafts as unknown[]).length === 0, 'admin discards a user version')
+}
+
+async function checkCreatorBackfill(files: { id: string; sourceText: string }[]) {
+  const db = openSqlite(':memory:')
+  await seedCatalog(db, files)
+  const ana = await signIn(db, 'Ana Antigua')
+  const made = await call(db, ana.token, 'POST', '/api/songs', { sourceText: '{title: Vieja}\n[C]Hola\n' })
+  const id = (made.data.song as { id: string }).id
+  await db.run(`UPDATE songs SET creator_id = NULL`)
+  await seedCatalog(db, files)
+  const wrong = await db.get<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM songs WHERE origin = 'catalog' AND creator_id IS NOT 'jorge'`,
+  )
+  assert(Number(wrong?.n) === 0, 'backfill gives the catalog to jorge')
+  const own = await db.get<{ creator_id: string }>(`SELECT creator_id FROM songs WHERE id = ?`, [id])
+  assert(own?.creator_id === ana.user.id, 'backfill keeps a person’s own song with them')
+}
 
 async function checkDeleteSurvivesSeed(files: { id: string; sourceText: string }[]) {
   const db = openSqlite(':memory:')

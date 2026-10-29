@@ -46,6 +46,9 @@ import {
   usedSectionIds,
 } from '@/lib/draftSong'
 import { parseKey, transposeKeyName } from '@/lib/chords'
+import { getSongVersions } from '@/lib/api'
+import { useUser } from '@/hooks/useUser'
+import { isStaff } from '@/lib/access'
 import { SOURCE_LABELS, guessSourceLabel, isYoutubeEntry } from '@/lib/songMedia'
 import { NOTE_LABEL, NOTE_TYPES, type Song, type SongNote, type SongSection } from '@/lib/types'
 
@@ -53,8 +56,10 @@ export function SongEditor() {
   const { songId = '' } = useParams()
   const [searchParams, setSearchParams] = useSearchParams()
   const navigate = useNavigate()
-  const { state, saveSong, restoreSong, copySong, songById, knowsSong, ensurePart } = useSongs()
+  const { state, saveSong, discardDraft, restoreSong, copySong, songById, knowsSong, ensurePart } = useSongs()
+  const user = useUser()
   const requested = searchParams.get('inst')
+  const versionOf = searchParams.get('version')
   const instrument: InstrumentId = isInstrument(requested) ? requested : loadSettings().instrument
   const song = state.status === 'ready' && songId ? songById(songId, instrument) : undefined
   const [draft, setDraft] = useState<Song>(blankSong)
@@ -97,6 +102,25 @@ export function SongEditor() {
     setMode('edit')
     setFolded([])
   }, [instrument, song, songId, state.status])
+
+  const adopted = useRef('')
+  useEffect(() => {
+    if (!songId || !versionOf || !song || !isStaff(user)) return
+    const key = `${songId}:${versionOf}:${instrument}`
+    if (adopted.current === key) return
+    adopted.current = key
+    void getSongVersions(songId)
+      .then((data) => {
+        const found = data.drafts.find((item) => item.userId === versionOf && item.instrument === instrument)
+        if (!found) {
+          setError('Esa persona no tiene versión en este instrumento.')
+          return
+        }
+        setDraft(songFromSource(found.sourceText, songId))
+        setStatus(`Cargaste la versión de ${found.userName}. Revisa y guarda para cambiar la canción compartida.`)
+      })
+      .catch((reason) => setError(reason instanceof Error ? reason.message : 'No pude abrir esa versión.'))
+  }, [instrument, song, songId, user, versionOf])
 
   const convert = async () => {
     setError('')
@@ -194,7 +218,7 @@ export function SongEditor() {
     )
   }
 
-  if (song && !song.editable) {
+  if (song && !song.editable && !song.personal) {
     return (
       <div className="mx-auto max-w-md px-4 py-16 text-center">
         <p className="mb-4">
@@ -251,6 +275,29 @@ export function SongEditor() {
             : 'Al guardar, los cinco instrumentos empiezan con esta cifra.'}
         </p>
         {!songId ? <SongMediaInfoBanner /> : null}
+        {song?.personal && (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">
+            <p>
+              Guardas tu versión personal: solo tú ves estos cambios y la canción compartida no cambia. Un Admin puede
+              revisar tu versión.
+              {song.draft?.stale ? ' La canción compartida cambió después de tu versión.' : ''}
+            </p>
+            {song.draft && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  if (!window.confirm('¿Descartar tu versión y volver a la canción compartida?')) return
+                  void discardDraft(song.id, instrument)
+                    .then(() => navigate(`/c/${encodeURIComponent(song.id)}`))
+                    .catch((reason) => setError(reason instanceof Error ? reason.message : 'No pude descartar.'))
+                }}
+              >
+                Descartar mi versión
+              </Button>
+            )}
+          </div>
+        )}
         {status && <p className="text-sm text-primary">{status}</p>}
         {error && <p className="text-sm text-destructive">{error}</p>}
 
@@ -479,6 +526,11 @@ export function SongEditor() {
         <div className="mx-auto flex max-w-[70.4rem] flex-wrap gap-2">
           {(!songId || song?.editable) && (
             <Button title="Guarda la cifra en el cancionero." onClick={save} disabled={saving}>{saving ? 'Guardando…' : 'Guardar'}</Button>
+          )}
+          {songId && song?.personal && (
+            <Button title="Guarda tu versión. Solo tú la ves; la canción compartida no cambia." onClick={save}>
+              Guardar mi versión
+            </Button>
           )}
           <Button variant="outline" title="Baja un archivo .song.md de este borrador." onClick={download}>
             Descargar .song.md

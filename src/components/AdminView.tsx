@@ -50,7 +50,8 @@ const ROLE_GUIDE: { role: Role; points: string[] }[] = [
     role: 'viewer',
     points: [
       'Ve el catálogo, salvo las canciones ocultas, sus canciones y las copias compartidas con todos o con esa persona.',
-      'Crea canciones propias y copias. Edita lo suyo y lo compartido. Borra sus copias y canciones propias, no el catálogo.',
+      'Crea canciones propias y copias, con YouTube, BPM, duración y MP3. Edita lo suyo y lo compartido. Borra sus copias y canciones propias, no el catálogo.',
+      'Al editar una canción del catálogo guarda su versión personal: solo esa persona la ve y la canción compartida no cambia. Un Admin o un Ayudante la revisa en Versiones de usuarios.',
       'Comparte sus propias copias, con todos o con una persona.',
       'Ve las listas y los días de servicio. No los cambia.',
       'No abre este panel. Un nombre nuevo entra así, sin contraseña, hasta que la ponga en su perfil.',
@@ -64,6 +65,7 @@ const INVENTORY: { key: keyof AdminOverview['inventory']; label: string }[] = [
   { key: 'personalCopies', label: 'Copias personales' },
   { key: 'sharedCopies', label: 'Copias compartidas' },
   { key: 'createdSongs', label: 'Canciones propias' },
+  { key: 'userVersions', label: 'Versiones de usuarios' },
   { key: 'setlists', label: 'Listas' },
   { key: 'serviceDays', label: 'Días de servicio' },
 ]
@@ -227,6 +229,8 @@ function AdminPanel() {
                 canción propia la creó esa persona: no es una copia del catálogo.
               </p>
             </section>
+
+            <UserVersions drafts={overview.drafts} />
 
             <CreatePerson
               actorRole={user.role}
@@ -412,6 +416,35 @@ function MediaBackfillPanel() {
           Extraer MP3
         </Button>
       </div>
+    </section>
+  )
+}
+
+function UserVersions({ drafts }: { drafts: AdminOverview['drafts'] }) {
+  return (
+    <section className="flex flex-col gap-3">
+      <h2 className="font-semibold">Versiones de usuarios</h2>
+      <p className="text-sm text-muted-foreground">
+        Quien no puede cambiar una canción compartida guarda su propia versión. Solo esa persona la ve. Abre una canción
+        para ver cada campo que cambió y, si quieres, llevar la versión al editor.
+      </p>
+      {!drafts.length ? (
+        <p className="text-sm">Nadie guardó una versión propia todavía.</p>
+      ) : (
+        <ul className="flex flex-col gap-2">
+          {drafts.map((item) => (
+            <li key={item.songId} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-card px-3 py-2">
+              <div className="min-w-0">
+                <p className="truncate font-medium">{item.title}</p>
+                <p className="text-sm text-muted-foreground">{item.users.map((person) => person.name).join(', ')}</p>
+              </div>
+              <Button size="sm" variant="outline" asChild>
+                <Link to={`/c/${encodeURIComponent(item.songId)}/versiones`}>Ver versiones</Link>
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
     </section>
   )
 }

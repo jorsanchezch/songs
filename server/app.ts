@@ -6,7 +6,7 @@ import {
   MAX_AUDIO_BYTES,
   putAudioObject,
 } from './audioStorage.ts'
-import { applyChartMedia, chartHasYoutube, copyChartMedia } from './chartMedia.ts'
+import { applyChartMedia, chartHasYoutube, copyChartMedia, shareChartMeta } from './chartMedia.ts'
 import { findPublicChart } from './chartSearch.ts'
 import { DEFAULT_INSTRUMENT, INSTRUMENTS, isInstrument, type InstrumentId } from './instruments.ts'
 import { shareLyrics } from './lyrics.ts'
@@ -49,6 +49,8 @@ type SongRecord = {
   origin: Origin
   catalog_id: string | null
   owner_id: string
+  creator_id: string | null
+  creator_name: string | null
   shared: number
   hidden: number
   catalog_source: string
@@ -124,10 +126,22 @@ export async function handleApi(sql: Sql, request: Request, env: ApiEnv = {}): P
       if (request.method === 'PUT') return adminUpdateUser(sql, user, id, request)
       if (request.method === 'DELETE') return adminRemoveUser(sql, user, id)
     }
-    const songPath = pathname.match(/^\/api\/songs\/([^/]+)(?:\/(copy|share|restore|media|playback))?$/)
+    const userDraftPath = pathname.match(/^\/api\/songs\/([^/]+)\/drafts\/([^/]+)$/)
+    if (userDraftPath && request.method === 'DELETE') {
+      return removeUserDraft(
+        sql,
+        user,
+        decodeURIComponent(userDraftPath[1] ?? ''),
+        decodeURIComponent(userDraftPath[2] ?? ''),
+      )
+    }
+    const songPath = pathname.match(/^\/api\/songs\/([^/]+)(?:\/(copy|share|restore|media|playback|draft|drafts))?$/)
     if (songPath) {
       const id = decodeURIComponent(songPath[1] ?? '')
       const action = songPath[2]
+      if (request.method === 'PUT' && action === 'draft') return saveDraft(sql, user, id, request)
+      if (request.method === 'DELETE' && action === 'draft') return discardDraft(sql, user, id, url)
+      if (request.method === 'GET' && action === 'drafts') return listSongDrafts(sql, user, id)
       if (request.method === 'GET' && !action) return getSong(sql, user, id, url)
       if (request.method === 'PUT' && !action) return updateSong(sql, user, id, request)
       if (request.method === 'DELETE' && !action) return removeSong(sql, user, id)
@@ -197,10 +211,17 @@ async function listSongs(sql: Sql, user: User, url: URL): Promise<Response> {
     `SELECT COUNT(*) AS n FROM songs WHERE hidden = 1 AND origin = 'catalog'`,
   )
   const copies = await copyCatalogIds(sql, user.id)
+  const drafts = await ownDrafts(sql, user.id, instrument)
+  const counts = await draftUserCounts(sql, user)
   const rows = await sql.all<SongRecord>(songSelect(`WHERE s.hidden = 0`), [instrument])
   const songs = rows
     .filter((row) => canSee(user, row))
-    .map((row) => toDto(user, row, instrument, copies.has(row.id)))
+    .map((row) =>
+      toDto(user, row, instrument, copies.has(row.id), {
+        draft: canDraft(user, row) ? drafts.get(row.id) : undefined,
+        draftUsers: counts.get(row.id),
+      }),
+    )
   return json({
     songs,
     hiddenCount: isStaff(user) ? (hidden?.n ?? 0) : 0,
@@ -213,8 +234,7 @@ async function getSong(sql: Sql, user: User, id: string, url: URL): Promise<Resp
   const instrument = instrumentFrom(url)
   const row = await oneSong(sql, id, instrument)
   if (!row || !canSee(user, row)) return json({ error: 'No está esta canción.' }, 404)
-  const copies = await copyCatalogIds(sql, user.id)
-  return json({ song: toDto(user, row, instrument, copies.has(row.id)) })
+  return json({ song: await songDto(sql, user, row, instrument) })
 }
 
 /** Media lookup never blocks saving a song for long. */
@@ -272,8 +292,8 @@ async function createSong(sql: Sql, user: User, request: Request, env: ApiEnv): 
     await tx.run(
       `INSERT INTO songs (
         id, title, artist, composer, key_name, source, lyrics_text, origin, catalog_id,
-        owner_id, shared, hidden, catalog_source, bpm, duration_ms, audio_url, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'local', NULL, ?, 0, 0, ?, ?, ?, ?, ?, ?)`,
+        owner_id, creator_id, shared, hidden, catalog_source, bpm, duration_ms, audio_url, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'local', NULL, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         meta.title,
@@ -282,6 +302,7 @@ async function createSong(sql: Sql, user: User, request: Request, env: ApiEnv): 
         meta.key,
         meta.source,
         meta.lyrics,
+        user.id,
         user.id,
         sourceText,
         meta.bpm,
@@ -399,8 +420,7 @@ async function updateSong(sql: Sql, user: User, id: string, request: Request): P
   })
   const next = await oneSong(sql, id, instrument)
   if (!next) return json({ error: 'No está esta canción.' }, 404)
-  const copies = await copyCatalogIds(sql, user.id)
-  return json({ song: toDto(user, next, instrument, copies.has(next.id)), parts: await partDump(sql, id) })
+  return json({ song: await songDto(sql, user, next, instrument), parts: await partDump(sql, id) })
 }
 
 async function removeSong(sql: Sql, user: User, id: string): Promise<Response> {
@@ -418,6 +438,7 @@ async function removeSong(sql: Sql, user: User, id: string): Promise<Response> {
     )
     await tx.run(`DELETE FROM setlist_items WHERE song_id = ?`, [id])
     await tx.run(`DELETE FROM day_list_history_items WHERE song_id = ?`, [id])
+    await tx.run(`DELETE FROM song_drafts WHERE song_id = ?`, [id])
     await tx.run(`DELETE FROM songs WHERE id = ?`, [id])
   })
   return json({ ok: true, hidden: false })
@@ -444,8 +465,8 @@ async function copySong(sql: Sql, user: User, id: string): Promise<Response> {
     await tx.run(
       `INSERT INTO songs (
         id, title, artist, composer, key_name, source, lyrics_text, origin, catalog_id,
-        owner_id, shared, hidden, catalog_source, bpm, duration_ms, audio_url, playback, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'copy', ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?)`,
+        owner_id, creator_id, shared, hidden, catalog_source, bpm, duration_ms, audio_url, playback, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'copy', ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?)`,
       [
         copyId,
         row.title,
@@ -455,6 +476,7 @@ async function copySong(sql: Sql, user: User, id: string): Promise<Response> {
         row.source,
         '',
         catalogId,
+        user.id,
         user.id,
         row.catalog_source,
         row.bpm,
@@ -498,8 +520,7 @@ async function shareSong(sql: Sql, user: User, id: string, request: Request): Pr
   }
   const next = await oneSong(sql, id, 'guitar')
   if (!next) return json({ error: 'No está esta canción.' }, 404)
-  const copies = await copyCatalogIds(sql, user.id)
-  return json({ song: toDto(user, next, 'guitar', copies.has(next.id)) })
+  return json({ song: await songDto(sql, user, next, 'guitar') })
 }
 
 async function restoreSong(sql: Sql, user: User, id: string): Promise<Response> {
@@ -534,8 +555,7 @@ async function restoreSong(sql: Sql, user: User, id: string): Promise<Response> 
   })
   const next = await oneSong(sql, id, 'guitar')
   if (!next) return json({ error: 'No está esta canción.' }, 404)
-  const copies = await copyCatalogIds(sql, user.id)
-  return json({ song: toDto(user, next, 'guitar', copies.has(next.id)) })
+  return json({ song: await songDto(sql, user, next, 'guitar') })
 }
 
 async function revealSongs(sql: Sql, user: User): Promise<Response> {
@@ -744,8 +764,8 @@ async function writeCatalogChart(sql: Sql, ownerId: string, id: string, sourceTe
     await sql.run(
       `INSERT INTO songs (
         id, title, artist, composer, key_name, source, lyrics_text, origin, catalog_id,
-        owner_id, shared, hidden, catalog_source, bpm, duration_ms, audio_url, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'catalog', NULL, ?, 0, 0, ?, ?, ?, ?, ?, ?)`,
+        owner_id, creator_id, shared, hidden, catalog_source, bpm, duration_ms, audio_url, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'catalog', NULL, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         meta.title,
@@ -754,6 +774,7 @@ async function writeCatalogChart(sql: Sql, ownerId: string, id: string, sourceTe
         meta.key,
         meta.source,
         meta.lyrics,
+        ownerId,
         ownerId,
         sourceText,
         meta.bpm,
@@ -902,8 +923,9 @@ function songSelect(where: string): string {
   return `SELECT
     s.id, s.title, s.artist, s.composer, s.key_name, s.source, s.bpm, s.duration_ms, s.audio_url, s.playback,
     s.origin, s.catalog_id,
-    s.owner_id, s.shared, s.hidden, s.catalog_source, s.revision,
+    s.owner_id, s.creator_id, s.shared, s.hidden, s.catalog_source, s.revision,
     u.name AS owner_name,
+    c.name AS creator_name,
     p.source_text,
     p.revision AS part_revision,
     (SELECT group_concat(sh.user_id) FROM song_shares sh WHERE sh.song_id = s.id) AS share_ids,
@@ -912,6 +934,7 @@ function songSelect(where: string): string {
     ) THEN 1 ELSE 0 END AS diverged
   FROM songs s
   JOIN users u ON u.id = s.owner_id
+  LEFT JOIN users c ON c.id = s.creator_id
   JOIN instrument_parts p ON p.song_id = s.id AND p.instrument = ?
   ${where}`
 }
@@ -920,26 +943,41 @@ async function oneSong(sql: Sql, id: string, instrument: InstrumentId): Promise<
   return sql.get<SongRecord>(songSelect(`WHERE s.id = ?`), [instrument, id])
 }
 
-function toDto(user: User, row: SongRecord, instrument: InstrumentId, hasCopy: boolean) {
+type DtoExtras = { draft?: DraftRow; draftUsers?: number }
+
+function toDto(user: User, row: SongRecord, instrument: InstrumentId, hasCopy: boolean, extras: DtoExtras = {}) {
   const shares = row.share_ids ? row.share_ids.split(',').filter(Boolean) : []
+  const draft = extras.draft
+  const meta = draft ? chartMeta(draft.source_text, row.id) : null
   return {
     id: row.id,
-    title: row.title,
-    artist: row.artist,
-    composer: row.composer,
-    key: row.key_name,
-    source: row.source,
-    sourceText: row.source_text,
-    bpm: row.bpm == null ? null : Number(row.bpm),
-    durationMs: row.duration_ms == null ? null : Number(row.duration_ms),
-    audioUrl: row.audio_url ?? '',
+    title: meta?.title || row.title,
+    artist: meta ? meta.artist : row.artist,
+    composer: meta ? meta.composer : row.composer,
+    key: meta?.key || row.key_name,
+    source: meta ? meta.source : row.source,
+    sourceText: draft ? draft.source_text : row.source_text,
+    bpm: meta ? meta.bpm : row.bpm == null ? null : Number(row.bpm),
+    durationMs: meta ? meta.durationMs : row.duration_ms == null ? null : Number(row.duration_ms),
+    audioUrl: meta ? meta.audioUrl : (row.audio_url ?? ''),
     playback: songPlayback(parseJson(row.playback ?? '{}')),
     origin: row.origin,
     ownerId: row.owner_id,
     ownerName: row.owner_name,
+    creatorId: creatorOf(row),
+    creatorName: row.creator_name ?? '',
     shared: row.shared === 1,
     catalogId: row.catalog_id,
     editable: canEdit(user, row),
+    personal: canDraft(user, row),
+    draft: draft
+      ? {
+          updatedAt: draft.updated_at,
+          edited: Number(draft.edited) === 1,
+          stale: Number(draft.base_revision) !== Number(row.revision),
+        }
+      : null,
+    draftUsers: isStaff(user) ? (extras.draftUsers ?? 0) : 0,
     removable: canRemove(user, row),
     diverged: row.diverged === 1,
     instrument,
@@ -948,6 +986,185 @@ function toDto(user: User, row: SongRecord, instrument: InstrumentId, hasCopy: b
     revision: Number(row.revision),
     partRevision: Number(row.part_revision),
   }
+}
+
+function creatorOf(row: SongRecord): string {
+  if (row.creator_id) return row.creator_id
+  return row.origin === 'catalog' ? OWNER_ID : row.owner_id
+}
+
+type DraftRow = {
+  song_id: string
+  user_id: string
+  instrument: string
+  source_text: string
+  base_text: string
+  base_revision: number
+  edited: number
+  created_at: string
+  updated_at: string
+}
+
+async function ownDrafts(sql: Sql, userId: string, instrument: InstrumentId, songId?: string): Promise<Map<string, DraftRow>> {
+  const rows = await sql.all<DraftRow>(
+    `SELECT * FROM song_drafts WHERE user_id = ? AND instrument = ?${songId ? ' AND song_id = ?' : ''}`,
+    songId ? [userId, instrument, songId] : [userId, instrument],
+  )
+  return new Map(rows.map((row) => [row.song_id, row]))
+}
+
+async function draftUserCounts(sql: Sql, user: User, songId?: string): Promise<Map<string, number>> {
+  if (!isStaff(user)) return new Map()
+  const rows = await sql.all<{ song_id: string; n: number }>(
+    `SELECT song_id, COUNT(DISTINCT user_id) AS n FROM song_drafts WHERE edited = 1${songId ? ' AND song_id = ?' : ''} GROUP BY song_id`,
+    songId ? [songId] : [],
+  )
+  return new Map(rows.map((row) => [row.song_id, Number(row.n)]))
+}
+
+async function songDto(sql: Sql, user: User, row: SongRecord, instrument: InstrumentId) {
+  const copies = await copyCatalogIds(sql, user.id)
+  const drafts = await ownDrafts(sql, user.id, instrument, row.id)
+  const counts = await draftUserCounts(sql, user, row.id)
+  return toDto(user, row, instrument, copies.has(row.id), {
+    draft: canDraft(user, row) ? drafts.get(row.id) : undefined,
+    draftUsers: counts.get(row.id),
+  })
+}
+
+/** Every instrument as this person sees it: their personal version where there is one, else the shared part. */
+async function effectiveParts(
+  sql: Sql,
+  user: User,
+  id: string,
+): Promise<Record<string, { sourceText: string; revision: number; draft?: boolean }>> {
+  const parts: Record<string, { sourceText: string; revision: number; draft?: boolean }> = await partDump(sql, id)
+  const drafts = await sql.all<{ instrument: string; source_text: string }>(
+    `SELECT instrument, source_text FROM song_drafts WHERE song_id = ? AND user_id = ?`,
+    [id, user.id],
+  )
+  for (const draft of drafts) {
+    const part = parts[draft.instrument]
+    if (part) parts[draft.instrument] = { ...part, sourceText: draft.source_text, draft: true }
+  }
+  return parts
+}
+
+/**
+ * Saves a personal version for someone who cannot change the shared song. The edited instrument keeps the text;
+ * the others take its lyrics and song header (title, links, BPM…), so the person sees one coherent song everywhere.
+ */
+async function writeDraft(
+  sql: Sql,
+  user: User,
+  row: SongRecord,
+  instrument: InstrumentId,
+  build: (current: string, part: string) => string,
+): Promise<void> {
+  const shared = await sql.all<{ instrument: string; source_text: string }>(
+    `SELECT instrument, source_text FROM instrument_parts WHERE song_id = ?`,
+    [row.id],
+  )
+  const existing = await sql.all<DraftRow>(`SELECT * FROM song_drafts WHERE song_id = ? AND user_id = ?`, [
+    row.id,
+    user.id,
+  ])
+  const now = new Date().toISOString()
+  await sql.transaction(async (tx) => {
+    for (const part of shared) {
+      const previous = existing.find((item) => item.instrument === part.instrument)
+      const current = previous?.source_text ?? part.source_text
+      const next = build(current, part.instrument)
+      const edited = part.instrument === instrument
+      if (next === part.source_text) {
+        if (previous) {
+          await tx.run(`DELETE FROM song_drafts WHERE song_id = ? AND user_id = ? AND instrument = ?`, [
+            row.id,
+            user.id,
+            part.instrument,
+          ])
+        }
+        continue
+      }
+      if (!edited && next === current) continue
+      await tx.run(
+        `INSERT INTO song_drafts (song_id, user_id, instrument, source_text, base_text, base_revision, edited, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(song_id, user_id, instrument) DO UPDATE SET
+           source_text = excluded.source_text,
+           edited = MAX(song_drafts.edited, excluded.edited),
+           updated_at = excluded.updated_at`,
+        [row.id, user.id, part.instrument, next, part.source_text, Number(row.revision), edited ? 1 : 0, now, now],
+      )
+    }
+  })
+}
+
+async function saveDraft(sql: Sql, user: User, id: string, request: Request): Promise<Response> {
+  const body = await readJson<{ sourceText?: string; instrument?: string }>(request)
+  const sourceText = body.sourceText ?? ''
+  if (!sourceText.trim()) return json({ error: 'La canción está vacía.' }, 400)
+  const instrument = body.instrument && isInstrument(body.instrument) ? body.instrument : DEFAULT_INSTRUMENT
+  const row = await oneSong(sql, id, instrument)
+  if (!row || !canSee(user, row)) return json({ error: 'No está esta canción.' }, 404)
+  if (!canDraft(user, row)) return json({ error: 'Esta canción la guardas directo, sin versión personal.' }, 400)
+  await writeDraft(sql, user, row, instrument, (current, part) =>
+    part === instrument
+      ? sourceText
+      : copyChartMedia(shareChartMeta(shareLyrics(current, sourceText), sourceText), sourceText),
+  )
+  return json({ song: await songDto(sql, user, row, instrument), parts: await effectiveParts(sql, user, id) })
+}
+
+async function discardDraft(sql: Sql, user: User, id: string, url: URL): Promise<Response> {
+  const instrument = instrumentFrom(url)
+  const row = await oneSong(sql, id, instrument)
+  if (!row || !canSee(user, row)) return json({ error: 'No está esta canción.' }, 404)
+  await sql.run(`DELETE FROM song_drafts WHERE song_id = ? AND user_id = ?`, [id, user.id])
+  return json({ song: await songDto(sql, user, row, instrument), parts: await partDump(sql, id) })
+}
+
+async function listSongDrafts(sql: Sql, user: User, id: string): Promise<Response> {
+  const denied = staffOnly(user)
+  if (denied) return denied
+  const row = await oneSong(sql, id, DEFAULT_INSTRUMENT)
+  if (!row) return json({ error: 'No está esta canción.' }, 404)
+  const drafts = await sql.all<DraftRow & { user_name: string; canonical_text: string }>(
+    `SELECT d.*, u.name AS user_name, p.source_text AS canonical_text
+     FROM song_drafts d
+     JOIN users u ON u.id = d.user_id
+     JOIN instrument_parts p ON p.song_id = d.song_id AND p.instrument = d.instrument
+     WHERE d.song_id = ? AND d.edited = 1
+     ORDER BY d.updated_at DESC`,
+    [id],
+  )
+  return json({
+    song: {
+      id: row.id,
+      title: row.title,
+      revision: Number(row.revision),
+      creatorId: creatorOf(row),
+      creatorName: row.creator_name ?? '',
+    },
+    drafts: drafts.map((draft) => ({
+      userId: draft.user_id,
+      userName: draft.user_name,
+      instrument: draft.instrument,
+      sourceText: draft.source_text,
+      baseText: draft.base_text,
+      canonicalText: draft.canonical_text,
+      stale: Number(draft.base_revision) !== Number(row.revision),
+      createdAt: draft.created_at,
+      updatedAt: draft.updated_at,
+    })),
+  })
+}
+
+async function removeUserDraft(sql: Sql, user: User, id: string, userId: string): Promise<Response> {
+  const denied = staffOnly(user)
+  if (denied) return denied
+  await sql.run(`DELETE FROM song_drafts WHERE song_id = ? AND user_id = ?`, [id, userId])
+  return listSongDrafts(sql, user, id)
 }
 
 function canSee(user: User, row: SongRecord): boolean {
@@ -967,6 +1184,11 @@ function canEdit(user: User, row: SongRecord): boolean {
   if (row.shared === 1) return true
   const shares = row.share_ids ? row.share_ids.split(',') : []
   return shares.includes(user.id)
+}
+
+/** Someone who sees a song but cannot change it saves a personal version instead. */
+function canDraft(user: User, row: SongRecord): boolean {
+  return canSee(user, row) && !canEdit(user, row)
 }
 
 function canRemove(user: User, row: SongRecord): boolean {
@@ -1083,7 +1305,26 @@ async function adminOverview(sql: Sql, actor: User): Promise<Response> {
     count(sql, `SELECT COUNT(*) AS n FROM setlists`),
     count(sql, `SELECT COUNT(*) AS n FROM service_days`),
   ])
+  const draftRows = await sql.all<{ song_id: string; title: string; user_id: string; user_name: string; updated_at: string }>(
+    `SELECT d.song_id, s.title, d.user_id, u.name AS user_name, MAX(d.updated_at) AS updated_at
+     FROM song_drafts d
+     JOIN songs s ON s.id = d.song_id
+     JOIN users u ON u.id = d.user_id
+     WHERE d.edited = 1
+     GROUP BY d.song_id, d.user_id
+     ORDER BY s.title COLLATE NOCASE, u.name COLLATE NOCASE`,
+  )
+  const drafts: { songId: string; title: string; users: { id: string; name: string; updatedAt: string }[] }[] = []
+  for (const draft of draftRows) {
+    let entry = drafts.find((item) => item.songId === draft.song_id)
+    if (!entry) {
+      entry = { songId: draft.song_id, title: draft.title, users: [] }
+      drafts.push(entry)
+    }
+    entry.users.push({ id: draft.user_id, name: draft.user_name, updatedAt: draft.updated_at })
+  }
   return json({
+    drafts,
     me: publicUser(me),
     users: people.map((person) => {
       const owned = songs.filter((song) => song.owner_id === person.id)
@@ -1099,7 +1340,16 @@ async function adminOverview(sql: Sql, actor: User): Promise<Response> {
         catalogCount: owned.filter((song) => song.origin === 'catalog').length,
       }
     }),
-    inventory: { users, catalogSongs, personalCopies, sharedCopies, createdSongs, setlists, serviceDays },
+    inventory: {
+      users,
+      catalogSongs,
+      personalCopies,
+      sharedCopies,
+      createdSongs,
+      userVersions: draftRows.length,
+      setlists,
+      serviceDays,
+    },
   })
 }
 
@@ -1200,6 +1450,8 @@ async function adminRemoveUser(sql: Sql, actor: User, id: string): Promise<Respo
       [id],
     )
     await tx.run(`UPDATE songs SET owner_id = ?, updated_at = ? WHERE owner_id = ?`, [keeper.id, now, id])
+    await tx.run(`UPDATE songs SET creator_id = ? WHERE creator_id = ?`, [keeper.id, id])
+    await tx.run(`DELETE FROM song_drafts WHERE user_id = ?`, [id])
     await tx.run(`DELETE FROM users WHERE id = ?`, [id])
   })
   return adminOverview(sql, actor)
@@ -1356,7 +1608,6 @@ async function uploadAudio(sql: Sql, user: User, request: Request, env: ApiEnv):
   if (songIdRaw) {
     const row = await oneSong(sql, songIdRaw, 'guitar')
     if (!row || !canSee(user, row)) return json({ error: 'No está esta canción.' }, 404)
-    if (!canEdit(user, row)) return json({ error: 'No puedes cambiar el audio de esta canción.' }, 403)
   }
   if (file.size > MAX_AUDIO_BYTES) {
     return json({ error: `El MP3 supera ${Math.round(MAX_AUDIO_BYTES / (1024 * 1024))} MB.` }, 413)
@@ -1447,17 +1698,6 @@ async function patchSongMedia(sql: Sql, user: User, id: string, request: Request
   const instrument = body.instrument && isInstrument(body.instrument) ? body.instrument : DEFAULT_INSTRUMENT
   const row = await oneSong(sql, id, instrument)
   if (!row || !canSee(user, row)) return json({ error: 'No está esta canción.' }, 404)
-  if (!canEdit(user, row)) {
-    return json(
-      {
-        error:
-          row.origin === 'catalog'
-            ? 'El catálogo solo lo cambia el dueño o un admin. Crea tu copia.'
-            : 'Esta copia no es tuya.',
-      },
-      403,
-    )
-  }
   const patch = {
     durationMs: body.durationMs !== undefined ? body.durationMs : undefined,
     bpm: body.bpm !== undefined ? body.bpm : undefined,
@@ -1472,6 +1712,11 @@ async function patchSongMedia(sql: Sql, user: User, id: string, request: Request
   ) {
     return json({ error: 'Nada que actualizar.' }, 400)
   }
+  if (canDraft(user, row)) {
+    await writeDraft(sql, user, row, instrument, (current) => applyChartMedia(current, patch))
+    return json({ song: await songDto(sql, user, row, instrument), parts: await effectiveParts(sql, user, id) })
+  }
+  if (!canEdit(user, row)) return json({ error: 'Esta copia no es tuya.' }, 403)
   const parts = await sql.all<{ instrument: string; source_text: string }>(
     `SELECT instrument, source_text FROM instrument_parts WHERE song_id = ?`,
     [id],
@@ -1511,8 +1756,7 @@ async function patchSongMedia(sql: Sql, user: User, id: string, request: Request
   })
   const next = await oneSong(sql, id, instrument)
   if (!next) return json({ error: 'No está esta canción.' }, 404)
-  const copies = await copyCatalogIds(sql, user.id)
-  return json({ song: toDto(user, next, instrument, copies.has(next.id)), parts: await partDump(sql, id) })
+  return json({ song: await songDto(sql, user, next, instrument), parts: await partDump(sql, id) })
 }
 
 function json(data: unknown, status = 200): Response {

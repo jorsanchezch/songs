@@ -14,6 +14,7 @@ import {
 import { diagramFor, shapesFor } from '../src/lib/guitar.ts'
 import { chartToCho, chartToSongMd, isBlockedPage, isPlainChordLine, songToMarkdown, wrapPlainChordLine } from '../src/lib/importChart.ts'
 import { shareLyrics } from '../server/lyrics.ts'
+import { copyChartMedia, shareChartMeta } from '../server/chartMedia.ts'
 import {
   closeRotatedDayList,
   dayListIsDue,
@@ -24,6 +25,7 @@ import {
 } from '../src/lib/setlists.ts'
 import { can, currentUser, roleLabel } from '../src/lib/access.ts'
 import { parseChart } from '../src/lib/parseChart.ts'
+import { lineDiff, songFieldChanges } from '../src/lib/songVersionDiff.ts'
 import {
   buildTimeline,
   cueIndexAt,
@@ -799,6 +801,28 @@ assert(pattern.alternatives.every((item) => item.key !== 'C'), 'another song in 
   const cleaned = songPlayback({ youtube: { src: 'x', introMs: -5.4, parts: { verso: 9000, 'bad key': 1, coro: 'x' } }, speed: 1 })
   assert(JSON.stringify(cleaned) === '{"youtube":{"src":"x","introMs":-5,"parts":{"verso":9000}}}', `server cleans playback ${JSON.stringify(cleaned)}`)
   assert(JSON.stringify(songPlayback('junk')) === '{}' && songPlayback({ speed: 3 }).speed === 2, 'junk and speed bounds')
+}
+
+{
+  const base = '{title: Base}\n{key: G}\n{bpm: 72}\n{start_of_verse: Verso}\n[G]Hola [C]mundo\n{end_of_verse}\n'
+  const mine = '{title: Mía}\n{key: G}\n{bpm: 80}\n{duration_ms: 200000}\n{start_of_verse: Verso}\n[G]Hola [D]mundo\n{end_of_verse}\n'
+  const changes = songFieldChanges(base, mine, 'prueba')
+  const fields = changes.map((change) => change.field)
+  assert(fields.includes('Título') && fields.includes('BPM') && fields.includes('Duración'), `diff fields ${fields}`)
+  assert(fields.includes('Parte: Verso') && !fields.includes('Tono'), `diff parts ${fields}`)
+  assert(changes.find((change) => change.field === 'Duración')?.after === '3:20', 'duration shows as m:ss')
+  assert(songFieldChanges(base, base, 'prueba').length === 0, 'same text has no changes')
+  const cho = '{title: Base}\n{artist: X}\n{key: G}\n{capo: 2}\n\n{start_of_verse: Verso}\n[G]Hola\n{end_of_verse}\n'
+  const md = '---\ntitle: Mía\nartist: Y\nkey: G\nbpm: 80\nsources:\n  - https://youtu.be/abc | YouTube\n---\n\n## Verso\n[G]Hola\n'
+  const intoCho = copyChartMedia(shareChartMeta(cho, md), md)
+  assert(intoCho.includes('{title: Mía}') && intoCho.includes('{artist: Y}') && intoCho.includes('{capo: 2}'), `meta into chordpro ${intoCho}`)
+  assert(intoCho.includes('youtu.be/abc') && intoCho.includes('80') && !intoCho.includes('{artist: X}'), `media into chordpro ${intoCho}`)
+  assert(parseChart(intoCho, 'x.cho').title === 'Mía' && intoCho.includes('[G]Hola'), 'chordpro keeps its parts')
+  const intoMd = shareChartMeta(md, cho)
+  assert(parseChart(intoMd, 'x.song.md').title === 'Base' && intoMd.includes('bpm: 80'), `identity only into markdown ${intoMd}`)
+  assert(shareChartMeta(cho, cho) === cho, 'same header leaves the text alone')
+  const rows = lineDiff('a\nb\nc', 'a\nx\nc')
+  assert(rows.map((row) => row.kind).join() === 'same,del,add,same', `line diff ${rows.map((row) => row.kind)}`)
 }
 
 console.log(`Parsed ${files.length} charts`)
