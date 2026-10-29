@@ -256,10 +256,10 @@ async function fillOne(
   }
 
   const patch = {
-    youtubeUrl: hit.url,
-    bpm: bpm ?? null,
-    durationMs: durationMs ?? null,
-    audioUrl: audioUrl || null,
+    addYoutubeUrl: hit.url,
+    bpm: bpm ?? undefined,
+    durationMs: durationMs ?? undefined,
+    audioUrl: audioUrl || undefined,
   }
 
   const parts = await sql.all<{ instrument: string; source_text: string; revision: number }>(
@@ -387,9 +387,8 @@ async function enrichBpmOne(
     }
   }
   const patch = {
-    bpm: bpm ?? (song.bpm != null ? Number(song.bpm) : null),
-    durationMs: durationMs ?? null,
-    audioUrl: song.audio_url?.trim() || null,
+    bpm: bpm ?? undefined,
+    durationMs: durationMs != null && durationMs > 0 ? durationMs : undefined,
   }
   const parts = await sql.all<{ instrument: string; source_text: string }>(
     `SELECT instrument, source_text FROM instrument_parts WHERE song_id = ?`,

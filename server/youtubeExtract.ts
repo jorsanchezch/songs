@@ -7,7 +7,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
-import { applyChartMedia, chartHasYoutube } from './chartMedia.ts'
+import { applyChartMedia, chartHasYoutube, selectedYoutubeUrl } from './chartMedia.ts'
 import { audioStoreReady, putAudioObject, type AudioStoreEnv } from './audioStorage.ts'
 import { chartMeta } from './meta.ts'
 import type { Sql } from './sql.ts'
@@ -83,10 +83,24 @@ export async function songsMissingAudio(sql: Sql): Promise<SongRow[]> {
 }
 
 export function youtubeUrlFromChart(text: string): string | null {
+  const selected = selectedYoutubeUrl(text)
+  if (selected) return selected
   const md = text.match(/https?:\/\/(?:www\.|m\.|music\.)?(?:youtube\.com\/[^\s"'|]+|youtu\.be\/[^\s"'|]+)/i)
   if (md?.[0]) return md[0].replace(/[),.;]+$/, '')
   const cho = text.match(/\{(?:source|meta):\s*(https?:\/\/[^\s}]*youtu[^\s}]*)\}/i)
   return cho?.[1]?.trim() ?? null
+}
+
+/** Extract one YouTube link to MP3 bytes and store under songs/{songId|tmp}/…. */
+export async function extractYoutubeLinkAudio(
+  env: AudioStoreEnv,
+  youtubeUrl: string,
+  songId?: string,
+): Promise<{ audioUrl: string; key: string }> {
+  const bytes = await downloadYoutubeMp3(youtubeUrl)
+  const folder = songId?.trim() || 'tmp'
+  const key = `songs/${folder}/${Date.now()}.mp3`
+  return putAudioObject(env, key, bytes, 'audio/mpeg')
 }
 
 export async function extractAudioBlockedReport(

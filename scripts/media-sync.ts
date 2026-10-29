@@ -57,8 +57,8 @@ function plan(charts: CatalogFile[], songs: SongRow[], parts: PartRow[]): Update
       applyChartMedia(text, {
         bpm: meta.bpm ?? undefined,
         durationMs: meta.durationMs ?? undefined,
-        // A chart that already links a video keeps it, as the backfill does.
-        youtubeUrl: youtubeUrl && !chartHasYoutube(text) ? youtubeUrl : undefined,
+        // A chart that already links a video keeps it; add never wipes other sources.
+        addYoutubeUrl: youtubeUrl && !chartHasYoutube(text) ? youtubeUrl : undefined,
       })
     const changed = parts
       .filter((part) => part.song_id === song.id)

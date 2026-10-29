@@ -1,3 +1,5 @@
+import type { SourceEntry } from '@/lib/sourceEntry'
+
 export type NoteType = 'cue' | 'how' | 'repeat' | 'arrange' | 'free'
 
 export type Spelling = 'letters' | 'degrees' | 'both'
@@ -38,9 +40,9 @@ export type SongVersion = {
 
 export type SongOrigin = 'catalog' | 'local' | 'copy'
 
-export type SongSource = {
-  url: string
-  label: string
+export type SongSource = SourceEntry & {
+  /** Editor-only; never written to the chart. */
+  videoId?: string
 }
 
 export type Song = {

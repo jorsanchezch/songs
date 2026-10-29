@@ -1,4 +1,5 @@
 import { parseChart } from '@/lib/parseChart'
+import { serializeSources } from '@/lib/sourceEntry'
 import type { ChartLine, Song, SongNote, SongSection } from '@/lib/types'
 
 const CHORD_TOKEN =
@@ -64,10 +65,7 @@ export function songToMarkdown(song: Song): string {
     ['audio_url', audioUrl],
   ].filter(([, value]) => value.trim())
   const sourceLines = sources.length
-    ? [
-        'sources:',
-        ...sources.map((item) => `  - ${item.url}${item.label ? ` | ${item.label}` : ''}`),
-      ]
+    ? ['sources:', ...serializeSources(sources).map((line) => `  - ${line}`)]
     : []
   const front = [...fields.map(([key, value]) => `${key}: ${yaml(value)}`), ...sourceLines].join('\n')
   const body = song.sections.map(sectionToMarkdown).filter(Boolean).join('\n\n')

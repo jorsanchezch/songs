@@ -206,6 +206,129 @@ assert(mdParsed.durationMs === 90_000 && mdParsed.audioUrl.includes('cdn.example
 assert(mdParsed.sources.some((item) => item.label === 'YouTube'), 'patched md youtube source')
 assert(mdParsed.source.includes('example.com/cifra'), 'keeps chord source as primary')
 
+const {
+  parseSourceText,
+  formatSourceText,
+  selectYoutubeSource,
+  addYoutubeSource,
+  removeSourceEntry,
+  serializeSources,
+  selectedYoutubeIndex,
+} = await import('../src/lib/sourceEntry.ts')
+const { songMediaSources } = await import('../src/lib/playback.ts')
+const attr = parseSourceText(
+  'https://youtu.be/bbbbbbbbbbb | En vivo | selected audio_url=%2Fapi%2Faudio%2Fx.mp3 duration_ms=200000 bpm=70',
+)
+assert(attr?.selected && attr.bpm === 70 && attr.durationMs === 200_000, 'parses source attrs')
+assert(
+  formatSourceText(
+    { url: 'https://youtu.be/bbbbbbbbbbb', label: 'En vivo', selected: true, audioUrl: '/api/audio/x.mp3', durationMs: 200_000, bpm: 70 },
+    { withSelected: true, withMedia: true },
+  ).includes('selected') && formatSourceText(
+    { url: 'https://youtu.be/bbbbbbbbbbb', label: 'En vivo', selected: true, audioUrl: '/api/audio/x.mp3', durationMs: 200_000, bpm: 70 },
+    { withSelected: true, withMedia: true },
+  ).includes('duration_ms=200000'),
+  'formats source attrs',
+)
+const multiMd = `---
+title: Multi
+artist: Demo
+bpm: 72
+duration_ms: 245000
+audio_url: /api/audio/songs/x/1.mp3
+sources:
+  - https://www.youtube.com/watch?v=aaaaaaaaaaa | YouTube | selected
+  - https://youtu.be/bbbbbbbbbbb | En vivo | audio_url=%2Fapi%2Faudio%2Fsongs%2Fx%2F2.mp3 duration_ms=200000 bpm=70
+  - https://www.cifraclub.com/demo/
+---
+
+## Verse {#v}
+[C]hola
+`
+const multiSong = parseChart(multiMd, 'multi.song.md')
+assert(multiSong.sources.filter((item) => /youtu/.test(item.url)).length === 2, 'keeps two youtube sources')
+assert(multiSong.bpm === 72 && multiSong.durationMs === 245_000, 'selected media stays on top fields')
+assert(multiSong.audioUrl.includes('/api/audio/songs/x/1.mp3'), 'selected mp3 on top')
+assert(multiSong.sources.some((item) => item.selected && item.url.includes('aaaaaaaaaaa')), 'marks selected youtube')
+assert(
+  multiSong.sources.some((item) => item.url.includes('bbbbbbbbbbb') && item.durationMs === 200_000 && item.bpm === 70),
+  'non-selected keeps line media',
+)
+const roundTrip = songToMarkdown(multiSong)
+assert(roundTrip.includes('selected'), 'round-trip writes selected when multiple youtube')
+assert(!/aaaaaaaaaaa[^\n]*duration_ms=/.test(roundTrip), 'selected line has no media attrs')
+assert(/bbbbbbbbbbb[^\n]*duration_ms=200000/.test(roundTrip), 'other youtube keeps duration_ms')
+
+const swapped = selectYoutubeSource(
+  multiSong.sources,
+  { bpm: multiSong.bpm ?? null, durationMs: multiSong.durationMs ?? null, audioUrl: multiSong.audioUrl ?? '' },
+  multiSong.sources.findIndex((item) => item.url.includes('bbbbbbbbbbb')),
+)
+assert(swapped.top.audioUrl.includes('/api/audio/songs/x/2.mp3'), 'select promotes other mp3')
+assert(swapped.top.bpm === 70 && swapped.top.durationMs === 200_000, 'select promotes line media')
+assert(
+  swapped.entries.some((item) => item.url.includes('aaaaaaaaaaa') && item.durationMs === 245_000),
+  'old selection keeps previous top media on its line',
+)
+const withBare = addYoutubeSource(swapped.entries, swapped.top, 'https://www.youtube.com/watch?v=eeeeeeeeeee')
+const bareSelect = selectYoutubeSource(
+  withBare.entries,
+  withBare.top,
+  withBare.entries.findIndex((item) => item.url.includes('eeeeeeeeeee')),
+)
+assert(bareSelect.top.audioUrl === '' && bareSelect.needsDuration, 'bare select clears mp3 and needs duration')
+assert(bareSelect.top.durationMs === 200_000, 'duration falls back to previous top while looking up')
+
+const removed = removeSourceEntry(multiSong.sources, {
+  bpm: multiSong.bpm ?? null,
+  durationMs: multiSong.durationMs ?? null,
+  audioUrl: multiSong.audioUrl ?? '',
+}, selectedYoutubeIndex(multiSong.sources))
+assert(removed.entries.some((item) => item.url.includes('bbbbbbbbbbb')), 'remove keeps other youtube')
+assert(removed.top.audioUrl.includes('/2.mp3'), 'remove reselects next youtube media')
+
+const added = addYoutubeSource(multiSong.sources, {
+  bpm: multiSong.bpm ?? null,
+  durationMs: multiSong.durationMs ?? null,
+  audioUrl: multiSong.audioUrl ?? '',
+}, 'https://www.youtube.com/watch?v=ccccccccccc')
+assert(added.entries.filter((item) => /youtu/.test(item.url)).length === 3, 'addYoutube appends')
+assert(added.entries.find((item) => item.selected)?.url.includes('aaaaaaaaaaa'), 'add does not steal selection')
+const again = addYoutubeSource(added.entries, added.top, 'https://youtu.be/aaaaaaaaaaa')
+assert(again.added === false, 'addYoutube dedupes by video id')
+
+const mediaOpts = songMediaSources(multiSong, 'https://youtu.be/bbbbbbbbbbb')
+assert(mediaOpts.options.length === 2, 'playback lists youtube options')
+assert(mediaOpts.youtubeId === 'bbbbbbbbbbb', 'pick drives youtube id')
+assert(mediaOpts.audioUrl?.includes('/2.mp3'), 'pick drives mp3')
+
+const serverAdd = applyChartMedia(multiMd, { addYoutubeUrl: 'https://www.youtube.com/watch?v=ddddddddddd' })
+const serverAddSong = parseChart(serverAdd, 'multi.song.md')
+assert(serverAddSong.sources.filter((item) => /youtu/.test(item.url)).length === 3, 'server addYoutubeUrl keeps others')
+assert(serverAddSong.sources.find((item) => item.selected)?.url.includes('aaaaaaaaaaa'), 'server add keeps selected')
+const serverSelect = applyChartMedia(multiMd, { selectYoutubeUrl: 'https://youtu.be/bbbbbbbbbbb' })
+const serverSelectSong = parseChart(serverSelect, 'multi.song.md')
+assert(serverSelectSong.audioUrl.includes('/2.mp3'), 'server selectYoutubeUrl swaps audio')
+assert(serverSelectSong.bpm === 70, 'server selectYoutubeUrl swaps bpm')
+
+const choMulti = applyChartMedia(
+  `{title: Multi}
+{artist: Demo}
+{bpm: 72}
+{duration_ms: 245000}
+{source: https://www.youtube.com/watch?v=aaaaaaaaaaa | YouTube}
+{source: https://youtu.be/bbbbbbbbbbb | En vivo}
+
+{start_of_verse}
+[C]hola
+{end_of_verse}
+`,
+  { selectYoutubeUrl: 'https://youtu.be/bbbbbbbbbbb', bpm: 70, durationMs: 200_000 },
+)
+assert(choMulti.includes('selected'), 'cho multi writes selected')
+assert(choMulti.includes('{bpm: 70}'), 'cho select updates bpm')
+void serializeSources
+
 const prefixCredit = foldComposerIntoArtist({ ...keySample, artist: 'Marcela Gándara', composer: 'Marcela Gándara / Vino Nuevo' })
 assert(prefixCredit.artist === 'Marcela Gándara / Vino Nuevo' && prefixCredit.composer === '', 'composer that extends the artist replaces it')
 const joinedCredit = foldComposerIntoArtist({ ...keySample, artist: 'Marcos Brunet', composer: 'Abbie Gamboa' })

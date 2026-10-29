@@ -360,7 +360,12 @@ export function useSongs() {
 
   const patchMedia = async (
     id: string,
-    body: { durationMs?: number | null; bpm?: number | null; audioUrl?: string | null },
+    body: {
+      durationMs?: number | null
+      bpm?: number | null
+      audioUrl?: string | null
+      selectYoutubeUrl?: string | null
+    },
     instrument: InstrumentId,
   ) => {
     const data = await patchSongMediaApi(id, { ...body, instrument })
