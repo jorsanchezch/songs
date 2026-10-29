@@ -103,7 +103,7 @@ function parseChordPro(text: string, filePath: string): Song {
         pending.push(notes(classifyComment(value, false), value))
         continue
       }
-      if (['title', 'artist', 'composer', 'key'].includes(name)) {
+      if (['title', 'artist', 'composer', 'key', 'bpm', 'duration_ms', 'audio_url', 'original_key'].includes(name)) {
         meta[name] = value
       }
       if (name === 'source' && value) {
@@ -312,6 +312,9 @@ function finishSong(
   const sources = mergeSources(sourceEntries, meta.source ?? '')
   const key = (meta.key ?? '').trim()
   const originalKey = (meta.original_key ?? '').trim()
+  const bpm = optionalMetaInt(meta.bpm)
+  const durationMs = optionalMetaInt(meta.duration_ms)
+  const audioUrl = (meta.audio_url ?? '').trim()
   return {
     id: filePath.replace(/\.(song\.md|chopro|cho)$/i, ''),
     title,
@@ -321,10 +324,21 @@ function finishSong(
     originalKey: originalKey && originalKey !== key ? originalKey : undefined,
     source: sources[0]?.url ?? '',
     sources,
+    bpm,
+    durationMs,
+    audioUrl,
     sections,
     versions,
     lyricsText,
   }
+}
+
+function optionalMetaInt(raw: string | undefined): number | null {
+  const trimmed = (raw ?? '').trim()
+  if (!trimmed) return null
+  const value = Number(trimmed)
+  if (!Number.isFinite(value) || value < 0) return null
+  return Math.round(value)
 }
 
 function attachPending(section: SongSection | null, pending: SongNote[]) {

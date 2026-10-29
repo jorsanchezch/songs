@@ -48,6 +48,10 @@ export function songToMarkdown(song: Song): string {
       ? [{ url: song.source.trim(), label: 'Fuente' }]
       : []
   const originalKey = song.originalKey?.trim() ?? ''
+  const bpm = song.bpm != null && Number.isFinite(song.bpm) ? String(Math.round(song.bpm)) : ''
+  const durationMs =
+    song.durationMs != null && Number.isFinite(song.durationMs) ? String(Math.round(song.durationMs)) : ''
+  const audioUrl = song.audioUrl?.trim() ?? ''
   const fields = [
     ['title', song.title],
     ['artist', song.artist],
@@ -55,6 +59,9 @@ export function songToMarkdown(song: Song): string {
     ['key', song.key],
     ['original_key', originalKey && originalKey !== song.key.trim() ? originalKey : ''],
     ['source', sources[0]?.url ?? ''],
+    ['bpm', bpm],
+    ['duration_ms', durationMs],
+    ['audio_url', audioUrl],
   ].filter(([, value]) => value.trim())
   const sourceLines = sources.length
     ? [

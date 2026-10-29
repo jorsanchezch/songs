@@ -53,6 +53,12 @@ export type Song = {
   originalKey?: string
   source: string
   sources: SongSource[]
+  /** Beats per minute when known. */
+  bpm?: number | null
+  /** Full-song length in milliseconds when known. */
+  durationMs?: number | null
+  /** Optional MP3 (or other audio) URL for playback. */
+  audioUrl?: string
   sections: SongSection[]
   versions: SongVersion[]
   lyricsText: string

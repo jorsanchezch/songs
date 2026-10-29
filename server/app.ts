@@ -18,6 +18,9 @@ type SongRecord = {
   composer: string
   key_name: string
   source: string
+  bpm: number | null
+  duration_ms: number | null
+  audio_url: string
   origin: Origin
   catalog_id: string | null
   owner_id: string
@@ -177,9 +180,24 @@ async function createSong(sql: Sql, user: User, request: Request): Promise<Respo
     await tx.run(
       `INSERT INTO songs (
         id, title, artist, composer, key_name, source, lyrics_text, origin, catalog_id,
-        owner_id, shared, hidden, catalog_source, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'local', NULL, ?, 0, 0, ?, ?, ?)`,
-      [id, meta.title, meta.artist, meta.composer, meta.key, meta.source, meta.lyrics, user.id, sourceText, now, now],
+        owner_id, shared, hidden, catalog_source, bpm, duration_ms, audio_url, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'local', NULL, ?, 0, 0, ?, ?, ?, ?, ?, ?)`,
+      [
+        id,
+        meta.title,
+        meta.artist,
+        meta.composer,
+        meta.key,
+        meta.source,
+        meta.lyrics,
+        user.id,
+        sourceText,
+        meta.bpm,
+        meta.durationMs,
+        meta.audioUrl,
+        now,
+        now,
+      ],
     )
     for (const instrument of INSTRUMENTS) {
       await tx.run(
@@ -268,8 +286,21 @@ async function updateSong(sql: Sql, user: User, id: string, request: Request): P
     )
     if (savedPart.changes !== 1) throw new RevisionConflict()
     const savedSong = await tx.run(
-      `UPDATE songs SET title = ?, artist = ?, composer = ?, key_name = ?, source = ?, lyrics_text = ?, updated_at = ?, revision = revision + 1 WHERE id = ? AND revision = ?`,
-      [meta.title, meta.artist, meta.composer, key, meta.source, meta.lyrics, now, id, body.revision],
+      `UPDATE songs SET title = ?, artist = ?, composer = ?, key_name = ?, source = ?, lyrics_text = ?, bpm = ?, duration_ms = ?, audio_url = ?, updated_at = ?, revision = revision + 1 WHERE id = ? AND revision = ?`,
+      [
+        meta.title,
+        meta.artist,
+        meta.composer,
+        key,
+        meta.source,
+        meta.lyrics,
+        meta.bpm,
+        meta.durationMs,
+        meta.audioUrl,
+        now,
+        id,
+        body.revision,
+      ],
     )
     if (savedSong.changes !== 1) throw new RevisionConflict()
   })
@@ -306,8 +337,8 @@ async function copySong(sql: Sql, user: User, id: string): Promise<Response> {
     await tx.run(
       `INSERT INTO songs (
         id, title, artist, composer, key_name, source, lyrics_text, origin, catalog_id,
-        owner_id, shared, hidden, catalog_source, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'copy', ?, ?, 0, 0, ?, ?, ?)`,
+        owner_id, shared, hidden, catalog_source, bpm, duration_ms, audio_url, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'copy', ?, ?, 0, 0, ?, ?, ?, ?, ?, ?)`,
       [
         copyId,
         row.title,
@@ -319,6 +350,9 @@ async function copySong(sql: Sql, user: User, id: string): Promise<Response> {
         catalogId,
         user.id,
         row.catalog_source,
+        row.bpm,
+        row.duration_ms,
+        row.audio_url ?? '',
         now,
         now,
       ],
@@ -374,8 +408,20 @@ async function restoreSong(sql: Sql, user: User, id: string): Promise<Response> 
       id,
     ])
     await tx.run(
-      `UPDATE songs SET title = ?, artist = ?, composer = ?, key_name = ?, source = ?, lyrics_text = ?, updated_at = ?, revision = revision + 1 WHERE id = ?`,
-      [meta.title, meta.artist, meta.composer, meta.key, meta.source, meta.lyrics, now, id],
+      `UPDATE songs SET title = ?, artist = ?, composer = ?, key_name = ?, source = ?, lyrics_text = ?, bpm = ?, duration_ms = ?, audio_url = ?, updated_at = ?, revision = revision + 1 WHERE id = ?`,
+      [
+        meta.title,
+        meta.artist,
+        meta.composer,
+        meta.key,
+        meta.source,
+        meta.lyrics,
+        meta.bpm,
+        meta.durationMs,
+        meta.audioUrl,
+        now,
+        id,
+      ],
     )
   })
   const next = await oneSong(sql, id, 'guitar')
@@ -590,14 +636,41 @@ async function writeCatalogChart(sql: Sql, ownerId: string, id: string, sourceTe
     await sql.run(
       `INSERT INTO songs (
         id, title, artist, composer, key_name, source, lyrics_text, origin, catalog_id,
-        owner_id, shared, hidden, catalog_source, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'catalog', NULL, ?, 0, 0, ?, ?, ?)`,
-      [id, meta.title, meta.artist, meta.composer, meta.key, meta.source, meta.lyrics, ownerId, sourceText, now, now],
+        owner_id, shared, hidden, catalog_source, bpm, duration_ms, audio_url, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'catalog', NULL, ?, 0, 0, ?, ?, ?, ?, ?, ?)`,
+      [
+        id,
+        meta.title,
+        meta.artist,
+        meta.composer,
+        meta.key,
+        meta.source,
+        meta.lyrics,
+        ownerId,
+        sourceText,
+        meta.bpm,
+        meta.durationMs,
+        meta.audioUrl,
+        now,
+        now,
+      ],
     )
   } else if (existing.origin === 'catalog') {
     await sql.run(
-      `UPDATE songs SET title = ?, artist = ?, composer = ?, key_name = ?, source = ?, lyrics_text = ?, hidden = 0, updated_at = ?, revision = revision + 1 WHERE id = ?`,
-      [meta.title, meta.artist, meta.composer, meta.key, meta.source, meta.lyrics, now, id],
+      `UPDATE songs SET title = ?, artist = ?, composer = ?, key_name = ?, source = ?, lyrics_text = ?, bpm = ?, duration_ms = ?, audio_url = ?, hidden = 0, updated_at = ?, revision = revision + 1 WHERE id = ?`,
+      [
+        meta.title,
+        meta.artist,
+        meta.composer,
+        meta.key,
+        meta.source,
+        meta.lyrics,
+        meta.bpm,
+        meta.durationMs,
+        meta.audioUrl,
+        now,
+        id,
+      ],
     )
   } else {
     return
@@ -719,7 +792,8 @@ async function partDump(sql: Sql, id: string): Promise<Record<string, { sourceTe
 
 function songSelect(where: string): string {
   return `SELECT
-    s.id, s.title, s.artist, s.composer, s.key_name, s.source, s.origin, s.catalog_id,
+    s.id, s.title, s.artist, s.composer, s.key_name, s.source, s.bpm, s.duration_ms, s.audio_url,
+    s.origin, s.catalog_id,
     s.owner_id, s.shared, s.hidden, s.catalog_source, s.revision,
     u.name AS owner_name,
     p.source_text,
@@ -748,6 +822,9 @@ function toDto(user: User, row: SongRecord, instrument: InstrumentId, hasCopy: b
     key: row.key_name,
     source: row.source,
     sourceText: row.source_text,
+    bpm: row.bpm == null ? null : Number(row.bpm),
+    durationMs: row.duration_ms == null ? null : Number(row.duration_ms),
+    audioUrl: row.audio_url ?? '',
     origin: row.origin,
     ownerId: row.owner_id,
     ownerName: row.owner_name,

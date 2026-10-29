@@ -15,6 +15,7 @@ import { ChartPreview } from '@/components/ChartPreview'
 import { ControlHint } from '@/components/ControlHint'
 import { InstrumentSwitch } from '@/components/InstrumentSwitch'
 import { Kbd, ShortcutLegend } from '@/components/KeyHint'
+import { SongMediaInfoBanner } from '@/components/SongMediaInfoBanner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { UserBadge } from '@/components/UserBadge'
@@ -38,6 +39,13 @@ import {
   usedSectionIds,
 } from '@/lib/draftSong'
 import { parseKey, transposeKeyName } from '@/lib/chords'
+import {
+  durationMsFromSeconds,
+  durationSecondsFromMs,
+  parseOptionalInt,
+  withYoutubeUrl,
+  youtubeUrl,
+} from '@/lib/songMedia'
 import { NOTE_LABEL, NOTE_TYPES, type NoteType, type Song, type SongNote, type SongSection } from '@/lib/types'
 
 const PARTES_HINT =
@@ -217,6 +225,7 @@ export function SongEditor() {
             ? 'La letra se copia a los otros instrumentos. Los acordes y las notas de ejecución se quedan en este.'
             : 'Al guardar, los cinco instrumentos empiezan con esta cifra.'}
         </p>
+        {!songId ? <SongMediaInfoBanner /> : null}
         {status && <p className="text-sm text-primary">{status}</p>}
         {error && <p className="text-sm text-destructive">{error}</p>}
 
@@ -249,6 +258,62 @@ export function SongEditor() {
                   }
                 />
               </div>
+              <Field label="YouTube">
+                <Input
+                  aria-label="YouTube"
+                  value={youtubeUrl(draft.sources)}
+                  onChange={(event) => {
+                    const url = event.target.value
+                    setDraft((current) => {
+                      const sources = withYoutubeUrl(
+                        current.sources.length ? current.sources : current.source ? [{ url: current.source, label: '' }] : [],
+                        url,
+                      )
+                      return { ...current, sources, source: sources[0]?.url ?? '' }
+                    })
+                  }}
+                  placeholder="https://www.youtube.com/watch?v=…"
+                  inputMode="url"
+                  title="Vídeo de YouTube. Se guarda en sources con etiqueta YouTube."
+                />
+              </Field>
+              <Field label="BPM">
+                <Input
+                  aria-label="BPM"
+                  value={draft.bpm == null ? '' : String(draft.bpm)}
+                  onChange={(event) =>
+                    setDraft((current) => ({ ...current, bpm: parseOptionalInt(event.target.value) }))
+                  }
+                  placeholder="72"
+                  inputMode="numeric"
+                  title="Pulsaciones por minuto."
+                />
+              </Field>
+              <Field label="Duración (s)">
+                <Input
+                  aria-label="Duración en segundos"
+                  value={durationSecondsFromMs(draft.durationMs)}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      durationMs: durationMsFromSeconds(event.target.value),
+                    }))
+                  }
+                  placeholder="240"
+                  inputMode="numeric"
+                  title="Duración total de la canción en segundos."
+                />
+              </Field>
+              <Field label="Audio (MP3)" className="sm:col-span-2">
+                <Input
+                  aria-label="URL de audio MP3"
+                  value={draft.audioUrl ?? ''}
+                  onChange={(event) => setDraft((current) => ({ ...current, audioUrl: event.target.value }))}
+                  placeholder="https://…/cancion.mp3"
+                  inputMode="url"
+                  title="Enlace a un MP3 u otro audio para reproducir."
+                />
+              </Field>
               <div className="sm:col-span-2 flex flex-col gap-2">
                 <div className="flex items-center justify-between gap-2">
                   <p className="text-sm font-medium">Referencias y tutoriales</p>
@@ -288,7 +353,7 @@ export function SongEditor() {
                             }
                           })
                         }}
-                        placeholder="https://youtube.com/... o cifra"
+                        placeholder="https://cifraclub.com/... o tutorial"
                         inputMode="url"
                         title="Dirección del tutorial o de la cifra."
                         aria-label={`URL de referencia ${index + 1}`}
@@ -307,8 +372,8 @@ export function SongEditor() {
                             return { ...current, sources, source: sources[0]?.url ?? '' }
                           })
                         }}
-                        placeholder="Tutorial, cifra…"
-                        title="Nombre corto del enlace, como Tutorial o Cifra."
+                        placeholder="YouTube, cifra…"
+                        title="Nombre corto del enlace, como YouTube o Cifra."
                         aria-label={`Etiqueta de referencia ${index + 1}`}
                       />
                       <Button

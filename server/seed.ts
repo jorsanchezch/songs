@@ -23,6 +23,9 @@ export async function ensureSchema(sql: Sql): Promise<void> {
   await addColumn(sql, `ALTER TABLE songs ADD COLUMN revision INTEGER NOT NULL DEFAULT 1`)
   await addColumn(sql, `ALTER TABLE instrument_parts ADD COLUMN revision INTEGER NOT NULL DEFAULT 1`)
   await addColumn(sql, `ALTER TABLE users ADD COLUMN password_hash TEXT`)
+  await addColumn(sql, `ALTER TABLE songs ADD COLUMN bpm INTEGER`)
+  await addColumn(sql, `ALTER TABLE songs ADD COLUMN duration_ms INTEGER`)
+  await addColumn(sql, `ALTER TABLE songs ADD COLUMN audio_url TEXT NOT NULL DEFAULT ''`)
   await allowElectricGuitar(sql)
   await backfillElectricGuitar(sql)
   await sql.run(

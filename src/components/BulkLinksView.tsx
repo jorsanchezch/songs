@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { BulkAddLayout, StatusBadge } from '@/components/BulkAddLayout'
+import { SongMediaInfoBanner } from '@/components/SongMediaInfoBanner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useSongs } from '@/hooks/useSongs'
@@ -134,6 +135,7 @@ export function BulkLinksView() {
       title="Varios enlaces"
       lede="Un enlace, un nombre, o un nombre con su enlace. Solo se importan los enlaces, uno por uno."
     >
+      <SongMediaInfoBanner />
       <p className="text-sm text-muted-foreground">
         Si ya está en el catálogo, no creo otra. Si es nueva, queda como tuya, no como cambio del catálogo.{' '}
         <Link to="/agregar/sugerencias" className="underline-offset-2 hover:underline">

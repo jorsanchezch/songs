@@ -26,6 +26,9 @@ CREATE TABLE IF NOT EXISTS songs (
   shared INTEGER NOT NULL DEFAULT 0,
   hidden INTEGER NOT NULL DEFAULT 0,
   catalog_source TEXT NOT NULL DEFAULT '',
+  bpm INTEGER,
+  duration_ms INTEGER,
+  audio_url TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   revision INTEGER NOT NULL DEFAULT 1

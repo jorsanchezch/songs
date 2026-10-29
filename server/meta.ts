@@ -5,6 +5,9 @@ export type ChartMeta = {
   key: string
   source: string
   lyrics: string
+  bpm: number | null
+  durationMs: number | null
+  audioUrl: string
 }
 
 export function chartMeta(text: string, fileId: string): ChartMeta {
@@ -21,6 +24,9 @@ export function chartMeta(text: string, fileId: string): ChartMeta {
     key: clean(meta.key),
     source: clean(meta.source),
     lyrics,
+    bpm: optionalInt(meta.bpm),
+    durationMs: optionalInt(meta.duration_ms),
+    audioUrl: clean(meta.audio_url),
   }
 }
 
@@ -57,7 +63,7 @@ function frontMatter(body: string): Record<string, string> {
 function chordProMeta(body: string): Record<string, string> {
   const meta: Record<string, string> = {}
   for (const line of body.split('\n')) {
-    const match = line.trim().match(/^\{(title|artist|composer|key|source):\s*([^}]*)\}/i)
+    const match = line.trim().match(/^\{(title|artist|composer|key|source|bpm|duration_ms|audio_url):\s*([^}]*)\}/i)
     if (!match?.[1]) continue
     const key = match[1].toLowerCase()
     const value = match[2] ?? ''
@@ -105,4 +111,12 @@ function clean(value: string | undefined): string {
     return trimmed.slice(1, -1)
   }
   return trimmed
+}
+
+function optionalInt(raw: string | undefined): number | null {
+  const trimmed = clean(raw)
+  if (!trimmed) return null
+  const value = Number(trimmed)
+  if (!Number.isFinite(value) || value < 0) return null
+  return Math.round(value)
 }

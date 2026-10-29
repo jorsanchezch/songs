@@ -24,6 +24,9 @@ export type ApiSong = {
   key: string
   source: string
   sourceText: string
+  bpm: number | null
+  durationMs: number | null
+  audioUrl: string
   origin: 'catalog' | 'local' | 'copy'
   ownerId: string
   ownerName: string

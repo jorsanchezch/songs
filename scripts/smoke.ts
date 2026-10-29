@@ -104,6 +104,26 @@ assert(songToMarkdown(markedKey).includes('original_key: G'), 'writes original_k
 const roundKey = parseChart(songToMarkdown(markedKey), 'prueba.song.md')
 assert(roundKey.key === 'C' && roundKey.originalKey === 'G', 'reads original_key')
 assert(!songToMarkdown(applyOriginalKey(markedKey, 'C')).includes('original_key'), 'drops original_key when it matches')
+const mediaSong = {
+  ...keySample,
+  bpm: 72,
+  durationMs: 245000,
+  audioUrl: 'https://example.com/cancion.mp3',
+  sources: [{ url: 'https://www.youtube.com/watch?v=abc123', label: 'YouTube' }],
+  source: 'https://www.youtube.com/watch?v=abc123',
+}
+const mediaMd = songToMarkdown(mediaSong)
+assert(mediaMd.includes('bpm: 72'), 'writes bpm')
+assert(mediaMd.includes('duration_ms: 245000'), 'writes duration_ms')
+assert(mediaMd.includes('audio_url:') && mediaMd.includes('example.com/cancion.mp3'), 'writes audio_url')
+assert(mediaMd.includes('YouTube'), 'writes YouTube source label')
+const roundMedia = parseChart(mediaMd, 'media.song.md')
+assert(roundMedia.bpm === 72 && roundMedia.durationMs === 245000, 'reads bpm and duration_ms')
+assert(roundMedia.audioUrl === 'https://example.com/cancion.mp3', 'reads audio_url')
+assert(
+  roundMedia.sources.some((item) => item.label === 'YouTube' && item.url.includes('youtube.com')),
+  'reads YouTube source',
+)
 const prefixCredit = foldComposerIntoArtist({ ...keySample, artist: 'Marcela Gándara', composer: 'Marcela Gándara / Vino Nuevo' })
 assert(prefixCredit.artist === 'Marcela Gándara / Vino Nuevo' && prefixCredit.composer === '', 'composer that extends the artist replaces it')
 const joinedCredit = foldComposerIntoArtist({ ...keySample, artist: 'Marcos Brunet', composer: 'Abbie Gamboa' })
