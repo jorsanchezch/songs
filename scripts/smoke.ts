@@ -812,6 +812,10 @@ assert(pattern.alternatives.every((item) => item.key !== 'C'), 'another song in 
   assert(fields.includes('Parte: Verso') && !fields.includes('Tono'), `diff parts ${fields}`)
   assert(changes.find((change) => change.field === 'Duración')?.after === '3:20', 'duration shows as m:ss')
   assert(songFieldChanges(base, base, 'prueba').length === 0, 'same text has no changes')
+  const credited = '{title: Base}\n{artist: Hillsong}\n{composer: Brooke}\n{bpm: 72}\n{start_of_verse: Verso}\n[G]Hola\n{end_of_verse}\n'
+  const folded = '{title: Base}\n{artist: Hillsong · Brooke}\n{bpm: 80}\n{start_of_verse: Verso}\n[G]Hola\n{end_of_verse}\n'
+  const onlyBpm = songFieldChanges(credited, folded, 'prueba').map((change) => change.field)
+  assert(onlyBpm.join() === 'BPM', `the editor's credit fold is not a change ${onlyBpm}`)
   const cho = '{title: Base}\n{artist: X}\n{key: G}\n{capo: 2}\n\n{start_of_verse: Verso}\n[G]Hola\n{end_of_verse}\n'
   const md = '---\ntitle: Mía\nartist: Y\nkey: G\nbpm: 80\nsources:\n  - https://youtu.be/abc | YouTube\n---\n\n## Verso\n[G]Hola\n'
   const intoCho = copyChartMedia(shareChartMeta(cho, md), md)

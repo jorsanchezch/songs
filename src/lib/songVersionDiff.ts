@@ -1,3 +1,4 @@
+import { foldComposerIntoArtist } from '@/lib/draftSong'
 import { parseChart } from '@/lib/parseChart'
 import { formatDurationMmSs, isYoutubeUrl } from '@/lib/songMedia'
 import { NOTE_LABEL, type ChartLine, type Song, type SongNote, type SongSection } from '@/lib/types'
@@ -84,9 +85,10 @@ export function lineDiff(before: string, after: string): LineDiff[] {
   return out
 }
 
+/** The editor folds the composer into the artist on every save; compare after that fold so it is not a change. */
 function parse(text: string, id: string): Song | null {
   try {
-    return parseChart(text, `${id}.${text.trimStart().startsWith('---') ? 'song.md' : 'cho'}`)
+    return foldComposerIntoArtist(parseChart(text, `${id}.${text.trimStart().startsWith('---') ? 'song.md' : 'cho'}`))
   } catch {
     return null
   }

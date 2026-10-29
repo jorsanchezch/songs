@@ -100,8 +100,8 @@ export async function handleApi(sql: Sql, request: Request, env: ApiEnv = {}): P
     }
     if (pathname === '/api/songs' && request.method === 'GET') return listSongs(sql, user, url)
     if (pathname === '/api/songs' && request.method === 'POST') return createSong(sql, user, request, env)
-    if (pathname === '/api/media/lookup' && request.method === 'GET') return mediaLookup(user, url, env)
-    if (pathname === '/api/youtube/info' && request.method === 'GET') return youtubeInfo(user, url, env)
+    if (pathname === '/api/media/lookup' && request.method === 'GET') return mediaLookup(url, env)
+    if (pathname === '/api/youtube/info' && request.method === 'GET') return youtubeInfo(url, env)
     if (pathname === '/api/catalog' && request.method === 'POST') return upsertCatalog(sql, user, request)
     if (pathname === '/api/songs/reveal' && request.method === 'POST') return revealSongs(sql, user)
     if (pathname === '/api/setlists' && request.method === 'GET') return listSetlists(sql)
@@ -274,9 +274,7 @@ async function lookupMedia(title: string, artist: string, env: ApiEnv): Promise<
   }
 }
 
-async function mediaLookup(user: User, url: URL, env: ApiEnv): Promise<Response> {
-  // Each search spends YouTube quota; only people who can add songs need it.
-  if (user.role === 'viewer') return json({ error: 'Solo quien edita canciones busca en YouTube.' }, 403)
+async function mediaLookup(url: URL, env: ApiEnv): Promise<Response> {
   const title = url.searchParams.get('title')?.trim() ?? ''
   const artist = url.searchParams.get('artist')?.trim() ?? ''
   if (!title) return json({ error: 'Falta el título.' }, 400)
@@ -1691,8 +1689,7 @@ async function uploadAudio(sql: Sql, user: User, request: Request, env: ApiEnv):
   return json({ audioUrl: stored.audioUrl, key: stored.key })
 }
 
-async function youtubeInfo(user: User, url: URL, env: ApiEnv): Promise<Response> {
-  if (user.role === 'viewer') return json({ error: 'Solo quien edita canciones consulta YouTube.' }, 403)
+async function youtubeInfo(url: URL, env: ApiEnv): Promise<Response> {
   const link = url.searchParams.get('url')?.trim() ?? ''
   const videoId = youtubeVideoIdFromUrl(link)
   if (!videoId) return json({ error: 'No es un enlace de YouTube válido.' }, 400)
