@@ -46,24 +46,10 @@ export function songbookApi(options: { mode: string; d1Url: string; rootDir: str
   }
 }
 
+/** Every /api route goes to the Songbook API, as on the Worker; a list here drifted behind new routes. */
 function isApi(url: string): boolean {
   const pathname = url.split('?')[0] ?? ''
-  return (
-    pathname === '/api/session' ||
-    pathname === '/api/users' ||
-    pathname === '/api/profile/password' ||
-    pathname === '/api/admin' ||
-    pathname.startsWith('/api/admin/') ||
-    pathname === '/api/search-charts' ||
-    pathname === '/api/audio' ||
-    pathname.startsWith('/api/audio/') ||
-    pathname === '/api/songs' ||
-    pathname.startsWith('/api/songs/') ||
-    pathname === '/api/catalog' ||
-    pathname === '/api/setlists' ||
-    pathname === '/api/import-local' ||
-    pathname === '/api/prefs'
-  )
+  return pathname === '/api' || pathname.startsWith('/api/')
 }
 
 async function answer(
