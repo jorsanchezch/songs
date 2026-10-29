@@ -109,7 +109,7 @@ D1/SQLite solo guarda `audio_url` (texto). Los bytes van a Cloudflare R2 o, en l
 
 1. Activa R2 en la cuenta: dashboard de Cloudflare → R2 (pide un método de pago aunque el plan gratis alcanza). Sin esto `wrangler` responde *Please enable R2*.
 2. `npx wrangler r2 bucket create songbook-audio`
-3. Descomenta `[[r2_buckets]]` / `AUDIO_BUCKET` en `wrangler.toml` y `npx wrangler deploy`.
+3. Enlaza `[[r2_buckets]]` / `AUDIO_BUCKET` en `wrangler.toml` (ya está) y `npx wrangler deploy`.
 4. Sube desde el editor (*Subir MP3*) o `POST /api/audio` (multipart `file`). La API responde `audio_url` tipo `/api/audio/songs/…/….mp3`; `GET` lo sirve desde R2 (público, para `<audio>`).
 
 ### YouTube → MP3
