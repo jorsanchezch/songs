@@ -1,9 +1,11 @@
 import { findPublicChart } from './chartSearch.ts'
 import { DEFAULT_INSTRUMENT, INSTRUMENTS, isInstrument, type InstrumentId } from './instruments.ts'
 import { shareLyrics } from './lyrics.ts'
+import { applyChartMedia, chartHasYoutube } from './chartMedia.ts'
 import { mediaBackfillStatus, runMediaBackfill, type MediaBackfillEnv } from './mediaBackfill.ts'
 import { chartMeta } from './meta.ts'
 import { hashPassword, verifyPassword } from './password.ts'
+import { findYoutubeMedia, type YoutubeHit } from './youtubeMedia.ts'
 import { OWNER_ID } from './schema.ts'
 import type { Sql } from './sql.ts'
 
@@ -61,7 +63,8 @@ export async function handleApi(sql: Sql, request: Request, env: ApiEnv = {}): P
     if (pathname === '/api/users' && request.method === 'GET') return listUsers(sql)
     if (pathname === '/api/search-charts' && request.method === 'GET') return searchCharts(url)
     if (pathname === '/api/songs' && request.method === 'GET') return listSongs(sql, user, url)
-    if (pathname === '/api/songs' && request.method === 'POST') return createSong(sql, user, request)
+    if (pathname === '/api/songs' && request.method === 'POST') return createSong(sql, user, request, env)
+    if (pathname === '/api/media/lookup' && request.method === 'GET') return mediaLookup(url, env)
     if (pathname === '/api/catalog' && request.method === 'POST') return upsertCatalog(sql, user, request)
     if (pathname === '/api/songs/reveal' && request.method === 'POST') return revealSongs(sql, user)
     if (pathname === '/api/setlists' && request.method === 'GET') return listSetlists(sql)
@@ -175,14 +178,46 @@ async function getSong(sql: Sql, user: User, id: string, url: URL): Promise<Resp
   return json({ song: toDto(user, row, instrument, copies.has(row.id)) })
 }
 
-async function createSong(sql: Sql, user: User, request: Request): Promise<Response> {
+/** Media lookup never blocks saving a song for long. */
+const LOOKUP_BUDGET_MS = 8000
+
+async function lookupMedia(title: string, artist: string, env: ApiEnv): Promise<YoutubeHit | null> {
+  if (!title.trim()) return null
+  const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), LOOKUP_BUDGET_MS))
+  return Promise.race([findYoutubeMedia(title, artist, env).catch(() => null), timeout])
+}
+
+async function mediaLookup(url: URL, env: ApiEnv): Promise<Response> {
+  const title = url.searchParams.get('title')?.trim() ?? ''
+  const artist = url.searchParams.get('artist')?.trim() ?? ''
+  if (!title) return json({ error: 'Falta el título.' }, 400)
+  const hit = await lookupMedia(title, artist, env)
+  return json({
+    media: hit ? { youtubeUrl: hit.url, videoTitle: hit.title, durationMs: hit.durationMs, bpm: hit.bpm } : null,
+  })
+}
+
+/** A new song without a YouTube link gets the first good match, plus its length when the chart has none. */
+async function withFoundMedia(sourceText: string, id: string, env: ApiEnv): Promise<string> {
+  if (chartHasYoutube(sourceText)) return sourceText
+  const meta = chartMeta(sourceText, id)
+  const hit = await lookupMedia(meta.title, meta.artist, env)
+  if (!hit) return sourceText
+  return applyChartMedia(sourceText, {
+    youtubeUrl: hit.url,
+    durationMs: meta.durationMs ?? hit.durationMs ?? undefined,
+    bpm: meta.bpm ?? hit.bpm ?? undefined,
+  })
+}
+
+async function createSong(sql: Sql, user: User, request: Request, env: ApiEnv): Promise<Response> {
   const body = await readJson<{ sourceText?: string; id?: string }>(request)
-  const sourceText = body.sourceText ?? ''
-  if (!sourceText.trim()) return json({ error: 'La canción está vacía.' }, 400)
+  if (!body.sourceText?.trim()) return json({ error: 'La canción está vacía.' }, 400)
   const id = body.id?.trim() || `local-${user.id}-${Date.now()}`
   if (!ID_OK.test(id)) return json({ error: 'Ese identificador no sirve.' }, 400)
   const exists = await sql.get(`SELECT id FROM songs WHERE id = ?`, [id])
   if (exists) return json({ error: 'Ya existe una canción con ese id.' }, 409)
+  const sourceText = await withFoundMedia(body.sourceText, id, env)
   const meta = chartMeta(sourceText, id)
   const now = new Date().toISOString()
   await sql.transaction(async (tx) => {

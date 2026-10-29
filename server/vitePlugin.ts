@@ -7,7 +7,7 @@ import { seedCatalog } from './seed.ts'
 import type { Sql } from './sql.ts'
 import { openSqlite } from './sqlite.ts'
 
-export function songbookApi(options: { mode: string; d1Url: string; rootDir: string }): Plugin {
+export function songbookApi(options: { mode: string; d1Url: string; rootDir: string; youtubeKey?: string }): Plugin {
   if (options.mode !== 'sqlite' && options.mode !== 'd1') {
     throw new Error(`SONGBOOK_DB debe ser sqlite o d1 (recibí ${options.mode}).`)
   }
@@ -66,7 +66,7 @@ function isApi(url: string): boolean {
 async function answer(
   req: IncomingMessage,
   res: ServerResponse,
-  options: { mode: string; d1Url: string },
+  options: { mode: string; d1Url: string; youtubeKey?: string },
   database: () => Promise<Sql>,
 ) {
   if (options.mode === 'd1') {
@@ -81,7 +81,7 @@ async function answer(
   const body = method === 'GET' || method === 'HEAD' ? undefined : await readRaw(req)
   const request = new Request(`http://127.0.0.1${req.url ?? '/'}`, { method, headers, body })
   const response = await handleApi(sql, request, {
-    YOUTUBE_API_KEY: process.env.YOUTUBE_API_KEY,
+    YOUTUBE_API_KEY: options.youtubeKey || process.env.YOUTUBE_API_KEY,
     AUDIO_BUCKET: process.env.SONGBOOK_AUDIO_BUCKET ? { configured: true } : undefined,
   })
   await writeResponse(res, response)
