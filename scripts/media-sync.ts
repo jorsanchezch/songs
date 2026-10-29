@@ -48,7 +48,8 @@ function fileYoutube(text: string): string | null {
 function plan(charts: CatalogFile[], songs: SongRow[], parts: PartRow[]): Update[] {
   const updates: Update[] = []
   for (const chart of charts) {
-    const song = songs.find((row) => row.id === chart.id)
+    // File names and stored ids may spell accents differently (é as one or two code points).
+    const song = songs.find((row) => row.id.normalize('NFC') === chart.id.normalize('NFC'))
     if (!song) continue
     const meta = chartMeta(chart.sourceText, chart.id)
     const youtubeUrl = fileYoutube(chart.sourceText)
