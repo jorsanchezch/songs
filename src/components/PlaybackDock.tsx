@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type MutableRefObject, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type KeyboardEvent, type MutableRefObject, type ReactNode } from 'react'
 import { Flag, Loader2, Minus, Play, Plus, SlidersHorizontal, Square, X } from 'lucide-react'
 import { Kbd } from '@/components/KeyHint'
 import { Button } from '@/components/ui/button'
@@ -369,6 +369,15 @@ function SettingsPanel({
   onMakeSelected?: (url: string) => void
   makingSelected?: boolean
 }) {
+  const [tab, setTab] = useState<'playback' | 'audio'>('playback')
+  const unsaved = sync.dirty || Boolean(tune?.proposal)
+  const onTabKey = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+    const next = tab === 'playback' ? 'audio' : 'playback'
+    setTab(next)
+    requestAnimationFrame(() => document.getElementById(`dock-tab-${next}`)?.focus())
+    event.preventDefault()
+  }
   const [durationDraft, setDurationDraft] = useState(() => formatDurationMmSs(media.durationMs))
   useEffect(() => setDurationDraft(formatDurationMmSs(media.durationMs)), [media.durationMs])
   const commitDuration = () => {
@@ -410,6 +419,37 @@ function SettingsPanel({
         ) : null}
       </p>
 
+      <div role="tablist" aria-label="Ajustes" className="mb-4 flex rounded-full border p-0.5" onKeyDown={onTabKey}>
+        {(
+          [
+            ['playback', 'Reproducción'],
+            ['audio', 'Audio y sincronía'],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            id={`dock-tab-${id}`}
+            aria-selected={tab === id}
+            aria-controls="dock-tabpanel"
+            tabIndex={tab === id ? 0 : -1}
+            onClick={() => setTab(id)}
+            className={cn(
+              'relative min-h-9 flex-1 rounded-full px-3 py-1.5 text-sm font-medium',
+              tab === id ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground',
+            )}
+          >
+            {label}
+            {id === 'audio' && unsaved && (
+              <span aria-label="sin guardar" className="absolute top-1 right-2.5 size-2 rounded-full bg-destructive" />
+            )}
+          </button>
+        ))}
+      </div>
+      <div role="tabpanel" id="dock-tabpanel" aria-labelledby={`dock-tab-${tab}`}>
+        {tab === 'playback' ? (
+          <>
       <Field label="Audio">
         <Segmented
           label="Audio"
@@ -544,6 +584,13 @@ function SettingsPanel({
         </Toggle>
       </Field>
 
+          </>
+        ) : (
+          <>
+            <p className="mb-3 text-sm text-muted-foreground">
+              Entrada y velocidad valen solo por ahora, hasta que las guardes en la canción. Las marcas y la alineación se
+              guardan al confirmarlas.
+            </p>
       {tune && audio === 'mp3' && <TuneSection tune={tune} playback={playback} />}
 
       <div className="mt-4 border-t pt-4">
@@ -604,6 +651,10 @@ function SettingsPanel({
           ) : (
             <Note>Solo esta vez.</Note>
           ))}
+      </div>
+
+          </>
+        )}
       </div>
 
       {playback.error && <p className="mt-2 text-sm text-destructive">{playback.error}</p>}
