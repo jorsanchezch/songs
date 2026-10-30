@@ -144,6 +144,7 @@ function renderMarkdown(fields: FrontFields, newline: string, body: string): str
     if (seen.has(key) || !String(value).trim()) continue
     lines.push(`${key}: ${yaml(String(value))}`)
   }
+  lines.push(...fields.extras)
   if (fields.sources.length) {
     lines.push('sources:')
     for (const line of serializeSources(fields.sources)) {
@@ -366,15 +367,20 @@ function insertMeta(meta: string[], line: string, name: string) {
 type FrontFields = {
   scalars: Record<string, string>
   sources: SourceEntry[]
+  /** Header lines this file does not manage (other keys, lists, `|` blocks, comments), kept as written. */
+  extras: string[]
 }
 
 function parseFrontFields(front: string): FrontFields {
   const scalars: Record<string, string> = {}
   const sources: SourceEntry[] = []
+  const extras: string[] = []
   let inSources = false
+  let inExtra = false
   for (const line of front.split('\n')) {
     if (/^sources:\s*$/i.test(line.trim())) {
       inSources = true
+      inExtra = false
       continue
     }
     if (inSources) {
@@ -387,11 +393,23 @@ function parseFrontFields(front: string): FrontFields {
       if (/^\s/.test(line) && line.trim()) continue
       inSources = false
     }
+    // Indented lines belong to the key above them (lists, `|` blocks).
+    if (inExtra && (/^\s/.test(line) || !line.trim())) {
+      extras.push(line)
+      continue
+    }
+    inExtra = false
     const match = line.match(/^([A-Za-z_]+):\s*(.*)$/)
-    if (!match?.[1]) continue
-    scalars[match[1].toLowerCase()] = unquote(match[2] ?? '')
+    if (match?.[1] && SONG_META.includes(match[1].toLowerCase())) {
+      scalars[match[1].toLowerCase()] = unquote(match[2] ?? '')
+      continue
+    }
+    if (!line.trim()) continue
+    extras.push(line)
+    inExtra = true
   }
-  return { scalars, sources }
+  while (extras.length && !extras[extras.length - 1]?.trim()) extras.pop()
+  return { scalars, sources, extras }
 }
 
 function optionalInt(raw: string | undefined): number | null {

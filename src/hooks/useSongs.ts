@@ -398,7 +398,12 @@ export function useSongs() {
     entry.playback = playback
     emit()
     try {
-      entry.playback = (await putPlayback(id, playback)).playback
+      // Send only the keys that changed (null = removed) so the server can merge with others' saves.
+      const changed: Record<string, unknown> = {}
+      for (const key of ['youtube', 'mp3', 'speed'] as const) {
+        if (JSON.stringify(before[key]) !== JSON.stringify(playback[key])) changed[key] = playback[key] ?? null
+      }
+      entry.playback = (await putPlayback(id, changed as SongPlayback)).playback
       emit()
     } catch (error) {
       entry.playback = before

@@ -839,6 +839,22 @@ async function checkPasswords(files: { id: string; sourceText: string }[]) {
     'missing youtube count drops after chart write',
   )
 
+  await call(sql, owner.token, 'PUT', `/api/songs/${encodeURIComponent(sample.id)}/playback`, {
+    playback: { youtube: { src: 'mergetest123', introMs: 100, parts: {} } },
+  })
+  const other = { mp3: { src: '/api/audio/songs/x/1.mp3', introMs: 500, parts: {} } }
+  const second = await call(sql, owner.token, 'PUT', `/api/songs/${encodeURIComponent(sample.id)}/playback`, { playback: other })
+  const both = second.data.playback as { youtube?: unknown; mp3?: unknown }
+  assert(second.status === 200 && Boolean(both.youtube) && Boolean(both.mp3), 'saving another track keeps the first')
+  const removed = await call(sql, owner.token, 'PUT', `/api/songs/${encodeURIComponent(sample.id)}/playback`, { playback: { mp3: null } })
+  const left = removed.data.playback as { youtube?: unknown; mp3?: unknown }
+  assert(Boolean(left.youtube) && !left.mp3, 'null removes only that track')
+
+  const audioAnon = await call(sql, '', 'GET', '/api/audio/songs/x/1.mp3')
+  assert(audioAnon.status === 401, `audio needs a login ${audioAnon.status}`)
+  const audioUser = await call(sql, owner.token, 'GET', '/api/audio/songs/x/1.mp3')
+  assert(audioUser.status !== 401, 'a signed-in person reaches the audio route')
+
   const playback = { youtube: { src: 'backfilltest1', introMs: 4000, parts: { verso: 20_000 } } }
   const before = await sql.get<{ revision: number }>(`SELECT revision FROM songs WHERE id = ?`, [sample.id])
   const saved = await call(sql, owner.token, 'PUT', `/api/songs/${encodeURIComponent(sample.id)}/playback`, { playback })

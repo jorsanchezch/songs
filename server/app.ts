@@ -82,15 +82,14 @@ export async function handleApi(sql: Sql, request: Request, env: ApiEnv = {}): P
   const url = new URL(request.url)
   const { pathname } = url
   try {
-    // Public audio playback — <audio> cannot send Authorization.
+    if (pathname === '/api/session' && request.method === 'POST') return sessionCreate(sql, request)
+    const user = await userFrom(sql, request)
+    if (!user) return json({ error: 'Entra con tu usuario y contraseña para usar Songbook.' }, 401)
+    // Audio needs a login like everything else; the player fetches it with the session and plays it from memory.
     const audioGet = pathname.match(/^\/api\/audio\/(.+)$/)
     if (audioGet && request.method === 'GET') {
       return serveAudio(env, decodeURIComponent(audioGet[1] ?? ''))
     }
-
-    if (pathname === '/api/session' && request.method === 'POST') return sessionCreate(sql, request)
-    const user = await userFrom(sql, request)
-    if (!user) return json({ error: 'Entra con tu usuario y contraseña para usar Songbook.' }, 401)
     if (pathname === '/api/session' && request.method === 'GET') return json({ user: publicUser(user) })
     if (pathname === '/api/session' && request.method === 'DELETE') return sessionDelete(sql, request)
     if (pathname === '/api/users' && request.method === 'GET') return listUsers(sql)
@@ -470,7 +469,15 @@ async function savePlayback(sql: Sql, user: User, id: string, request: Request):
   const row = await oneSong(sql, id, 'guitar')
   if (!row || !canSee(user, row)) return json({ error: 'No está esta canción.' }, 404)
   if (!canEdit(user, row)) return json({ error: 'Solo quien edita la canción guarda su reproducción.' }, 403)
-  const playback = songPlayback(body.playback)
+  // Only the keys sent change (null removes one), so two people saving different tracks do not erase each other.
+  const sent = body.playback && typeof body.playback === 'object' && !Array.isArray(body.playback) ? (body.playback as Record<string, unknown>) : {}
+  const merged: Record<string, unknown> = { ...songPlayback(parseJson(row.playback ?? '{}')) }
+  for (const key of ['youtube', 'mp3', 'speed']) {
+    if (!(key in sent)) continue
+    if (sent[key] == null) delete merged[key]
+    else merged[key] = sent[key]
+  }
+  const playback = songPlayback(merged)
   await sql.run(`UPDATE songs SET playback = ? WHERE id = ?`, [JSON.stringify(playback), id])
   return json({ playback })
 }

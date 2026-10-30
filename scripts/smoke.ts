@@ -800,6 +800,11 @@ assert(pattern.alternatives.every((item) => item.key !== 'C'), 'another song in 
   assert(referenceTrack({ youtube: { ...playTrack, src: 'other123456' } }, 'youtube', playMedia) === null, 'marks from another video are stale')
   const cleaned = songPlayback({ youtube: { src: 'x', introMs: -5.4, parts: { verso: 9000, 'bad key': 1, coro: 'x' } }, speed: 1 })
   assert(JSON.stringify(cleaned) === '{"youtube":{"src":"x","introMs":-5,"parts":{"verso":9000}}}', `server cleans playback ${JSON.stringify(cleaned)}`)
+  const kept = applyChartMedia('---\ntitle: X\ntime-signature: 6/8\ntags:\n  - a\nnotes: |\n  uno\nbpm: 70\n---\n\n## Verso\n[G]Hola\n', { bpm: 90 })
+  assert(kept.includes('time-signature: 6/8') && kept.includes('tags:\n  - a') && kept.includes('notes: |\n  uno') && kept.includes('bpm: 90'), 'unmanaged header fields survive a media patch')
+  const withSite = { src: 'https://songbook.example.workers.dev/api/audio/songs/x/1.mp3', introMs: 0, parts: {} }
+  const mp3Media = { youtubeId: null, audioUrl: 'http://127.0.0.1:4322/api/audio/songs/x/1.mp3', bpm: null, durationMs: null }
+  assert(referenceTrack({ mp3: withSite }, 'mp3', mp3Media) === withSite, 'mp3 marks follow the file, not the site address')
   assert(JSON.stringify(songPlayback('junk')) === '{}' && songPlayback({ speed: 3 }).speed === 2, 'junk and speed bounds')
 }
 

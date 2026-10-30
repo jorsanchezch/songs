@@ -3,7 +3,7 @@ import { Loader2, Pause, Play, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Stepper } from '@/components/ui/stepper'
-import { uploadAudioFile } from '@/lib/api'
+import { audioSource, uploadAudioFile } from '@/lib/api'
 import { songMediaSources, youtubeVideoId } from '@/lib/playback'
 import { isAudioUrl } from '@/lib/songMedia'
 import { cn } from '@/lib/utils'
@@ -169,7 +169,7 @@ function AudioPreview({ url }: { url: string }) {
     if (!audio.current) {
       const src = songMediaSources({ sources: [], audioUrl: url, bpm: null, durationMs: null }).audioUrl
       if (!src) return
-      const element = new Audio(src)
+      const element = new Audio()
       element.onplay = () => setPlaying(true)
       element.onpause = () => setPlaying(false)
       element.onerror = () => {
@@ -177,6 +177,14 @@ function AudioPreview({ url }: { url: string }) {
         setPlaying(false)
       }
       audio.current = element
+      setFailed(false)
+      void audioSource(src)
+        .then((source) => {
+          element.src = source
+          return element.play()
+        })
+        .catch(() => setFailed(true))
+      return
     }
     setFailed(false)
     void audio.current.play().catch(() => setFailed(true))

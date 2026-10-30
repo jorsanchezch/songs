@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { audioSource } from '@/lib/api'
 import {
   LEAD_MAX_MS,
   locate,
@@ -271,7 +272,17 @@ export type Playback = ReturnType<typeof usePlayback>
 function createAudioClock(url: string, events: MediaEvents): MediaClock {
   const audio = new Audio()
   audio.preload = 'metadata'
-  audio.src = url
+  // The file is fetched with the login, so the element gets its source once that arrives.
+  const ready = audioSource(url).then(
+    (source) => {
+      audio.src = source
+    },
+    (reason: unknown) => {
+      events.onError(reason instanceof Error ? reason.message : 'No se pudo cargar el MP3.')
+      throw reason
+    },
+  )
+  ready.catch(() => undefined)
   const onMeta = () => {
     if (Number.isFinite(audio.duration) && audio.duration > 0) events.onLength(audio.duration * 1000)
   }
@@ -282,6 +293,7 @@ function createAudioClock(url: string, events: MediaEvents): MediaClock {
   audio.addEventListener('error', onError)
   return {
     async play(fromMs) {
+      await ready
       if (audio.readyState < HTMLMediaElement.HAVE_METADATA) {
         await new Promise<void>((resolve, reject) => {
           audio.addEventListener('loadedmetadata', () => resolve(), { once: true })

@@ -325,6 +325,11 @@ export function formatLead(ms: number): string {
 }
 
 /** Calibration for the audio that is playing; null when it was measured on another recording. */
+/** What identifies a recording: the video id, or an MP3's path without the site address it is served from. */
+export function trackSource(src: string): string {
+  return src.replace(/^https?:\/\/[^/]+(?=\/api\/audio\/)/i, '')
+}
+
 export function trackFor(
   playback: SongPlayback | undefined,
   kind: 'youtube' | 'mp3',
@@ -332,7 +337,7 @@ export function trackFor(
 ): PlaybackTrack | null {
   const track = playback?.[kind]
   const src = kind === 'youtube' ? media.youtubeId : media.audioUrl
-  return track && src && track.src === src ? track : null
+  return track && src && trackSource(track.src) === trackSource(src) ? track : null
 }
 
 /** Silent playback borrows the lengths measured on YouTube, then on the MP3. */

@@ -61,6 +61,7 @@ import {
   NUDGE_MS,
   partKeys,
   referenceTrack,
+  trackSource,
   savePlaybackSettings,
   songMediaSources,
   startOffset,
@@ -221,7 +222,8 @@ export function SongView() {
   // Calibration lives on the song row, so every instrument shares it.
   const songPlayback: SongPlayback = (chart ?? guitar)?.playback ?? {}
   const audioKind = playbackAudio === 'off' ? null : playbackAudio
-  const audioSrc = audioKind === 'youtube' ? media.youtubeId : audioKind === 'mp3' ? media.audioUrl : null
+  const audioSrc =
+    audioKind === 'youtube' ? media.youtubeId : audioKind === 'mp3' && media.audioUrl ? trackSource(media.audioUrl) : null
   const track = referenceTrack(songPlayback, playbackAudio, media)
   const staleMarks = Boolean(audioKind && songPlayback[audioKind] && !track)
   // Lead and speed tweaks stay for this visit until someone saves them to the song.

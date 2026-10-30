@@ -43,16 +43,18 @@ const remote = d1Rows<RemoteSong>(`SELECT id, audio_url, revision FROM songs`)
 const parts = d1Rows<RemotePart>(`SELECT song_id, instrument, source_text, revision FROM instrument_parts`)
 
 const lines: string[] = []
-const uploads: { key: string; file: string }[] = []
+const uploads = new Map<string, string>()
 const skipped: string[] = []
+
+/** Production names some songs without `authored/`; the app-made Glorioso Día plays the catalog one's video. */
+const ALSO: Record<string, string[]> = { 'authored/glorioso-dia': ['local-1792164198528'] }
+const aliases = (id: string) => [nfc(id), nfc(id.replace(/^authored\//, '')), ...(ALSO[id] ?? []).map(nfc)]
+
 for (const song of mine) {
-  const target = remote.find((row) => nfc(row.id) === nfc(song.id))
-  if (!target) {
+  const names = aliases(song.id)
+  const targets = remote.filter((row) => names.includes(nfc(row.id)))
+  if (!targets.length) {
     skipped.push(`${song.id}: no está en producción`)
-    continue
-  }
-  if (target.audio_url?.trim()) {
-    skipped.push(`${song.id}: ya tiene audio`)
     continue
   }
   const key = decodeURIComponent(song.audio_url.replace(/^\/api\/audio\//, ''))
@@ -61,24 +63,30 @@ for (const song of mine) {
     skipped.push(`${song.id}: falta ${file}`)
     continue
   }
-  uploads.push({ key, file })
-  for (const part of parts.filter((item) => item.song_id === target.id)) {
+  for (const target of targets) {
+    if (target.audio_url?.trim()) {
+      skipped.push(`${target.id}: ya tiene audio`)
+      continue
+    }
+    uploads.set(key, file)
+    for (const part of parts.filter((item) => item.song_id === target.id)) {
+      lines.push(
+        `UPDATE instrument_parts SET source_text = ${quote(applyChartMedia(part.source_text, { audioUrl: song.audio_url }))}, revision = revision + 1 WHERE song_id = ${quote(target.id)} AND instrument = ${quote(part.instrument)} AND revision = ${part.revision};`,
+      )
+    }
     lines.push(
-      `UPDATE instrument_parts SET source_text = ${quote(applyChartMedia(part.source_text, { audioUrl: song.audio_url }))}, revision = revision + 1 WHERE song_id = ${quote(target.id)} AND instrument = ${quote(part.instrument)} AND revision = ${part.revision};`,
+      `UPDATE songs SET audio_url = ${quote(song.audio_url)}, updated_at = ${quote(new Date().toISOString())}, revision = revision + 1 WHERE id = ${quote(target.id)} AND revision = ${target.revision};`,
     )
   }
-  lines.push(
-    `UPDATE songs SET audio_url = ${quote(song.audio_url)}, updated_at = ${quote(new Date().toISOString())}, revision = revision + 1 WHERE id = ${quote(target.id)} AND revision = ${target.revision};`,
-  )
 }
 
-console.log(`${uploads.length} canciones por subir; ${skipped.length} omitidas`)
+console.log(`${uploads.size} archivos por subir; ${lines.filter((line) => line.startsWith('UPDATE songs')).length} canciones; ${skipped.length} omitidas`)
 for (const line of skipped) console.log(`  omitida ${line}`)
 if (!apply) process.exit(0)
 
-for (const upload of uploads) {
-  wrangler(['r2', 'object', 'put', `${BUCKET}/${upload.key}`, `--file=${upload.file}`, '--content-type=audio/mpeg', '--remote'])
-  console.log(`subido ${upload.key}`)
+for (const [key, file] of uploads) {
+  wrangler(['r2', 'object', 'put', `${BUCKET}/${key}`, `--file=${file}`, '--content-type=audio/mpeg', '--remote'])
+  console.log(`subido ${key}`)
 }
 const sqlFile = path.join(root, 'data', 'audio-to-r2.sql')
 writeFileSync(sqlFile, `${lines.join('\n')}\n`)

@@ -466,6 +466,28 @@ export function putSetlists(
   return request('/api/setlists', { method: 'PUT', body: { days, setlists, history } })
 }
 
+const audioBlobs = new Map<string, Promise<string>>()
+
+/**
+ * Audio from this app's own API needs the session, which an <audio> element cannot send,
+ * so it is fetched with the login and played from memory. Other URLs pass through.
+ */
+export function audioSource(url: string): Promise<string> {
+  const own = url.includes('/api/audio/')
+  if (!own) return Promise.resolve(url)
+  const cached = audioBlobs.get(url)
+  if (cached) return cached
+  const loading = (async () => {
+    const token = localStorage.getItem(SESSION_KEY)
+    const response = await fetch(url, { headers: token ? { authorization: `Bearer ${token}` } : {} })
+    if (!response.ok) throw new Error(response.status === 401 ? 'Entra para escuchar el audio.' : 'No se pudo cargar el MP3.')
+    return URL.createObjectURL(await response.blob())
+  })()
+  audioBlobs.set(url, loading)
+  loading.catch(() => audioBlobs.delete(url))
+  return loading
+}
+
 function apiRoot(): string {
   const value = import.meta.env?.VITE_SONGBOOK_API
   return typeof value === 'string' ? value.replace(/\/$/, '') : ''
