@@ -467,6 +467,10 @@ export function SongMediaEditor({ songId, draft, onChange, onSearchStatus }: Pro
           songId={songId}
           audioUrl={draft.audioUrl ?? ''}
           onAudioUrl={(audioUrl) => attachAudio(youtubeVideoId(selected?.url ?? ''), audioUrl)}
+          bpm={draft.bpm ?? null}
+          durationMs={draft.durationMs ?? null}
+          onBpm={(bpm) => commit({ ...latest.current, bpm })}
+          onDuration={(durationMs) => commit({ ...latest.current, durationMs })}
         />
         <div className="flex flex-wrap items-center gap-2">
           <Button

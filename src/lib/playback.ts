@@ -131,6 +131,15 @@ export function blockLines(block: DisplayBlock, blocks: DisplayBlock[]): ChartLi
   return (earlier ?? block.section).lines
 }
 
+/** What each part should weigh against the others, in bars across all its passes. */
+export function partBars(blocks: DisplayBlock[]): number[] {
+  return blocks.map((block) => {
+    const lines = blockLines(block, blocks)
+    const pass = lines.length ? lines.reduce((sum, line) => sum + lineBars(line), 0) : 2
+    return pass * Math.max(1, block.repeat)
+  })
+}
+
 /** Stable key per block for stored lengths: `verso`, then `verso~2` when the flow plays it again. */
 export function partKeys(blocks: Pick<DisplayBlock, 'id'>[]): string[] {
   const seen = new Map<string, number>()
@@ -152,9 +161,11 @@ export type TimelineInput = {
   introMs?: number
   /** Measured part lengths by part key. Used only by the duration pace. */
   parts?: Record<string, number> | null
+  /** Length of one bar in the audio. With it, lines start and end on bar lines. */
+  barMs?: number | null
 }
 
-export function buildTimeline({ blocks, settings, bpm, durationMs, mediaMs, introMs = 0, parts }: TimelineInput): Timeline {
+export function buildTimeline({ blocks, settings, bpm, durationMs, mediaMs, introMs = 0, parts, barMs }: TimelineInput): Timeline {
   const tempo = settings.useBpm && bpm && bpm > 0 ? bpm : null
   // Without a tempo every line weighs the same, as lines × repeats.
   const weigh = (line: ChartLine) => (tempo ? lineBars(line) : 1)
@@ -201,12 +212,13 @@ export function buildTimeline({ blocks, settings, bpm, durationMs, mediaMs, intr
     const passMs = total / repeat
     const lineUnitMs = passMs / pass
     let offset = 0
-    const timedLines: TimedLine[] = lines.map((line, lineIndex) => {
+    let timedLines: TimedLine[] = lines.map((line, lineIndex) => {
       const span = (weights[lineIndex] ?? 1) * lineUnitMs
       const entry = { lineIndex, start: offset, end: offset + span, chords: line.chords.length }
       offset += span
       return entry
     })
+    if (barMs && barMs > 0 && settings.pace === 'duration') timedLines = snapToBars(timedLines, passMs, barMs)
     const start = cursor
     cursor += total
     return {
@@ -230,6 +242,24 @@ export function buildTimeline({ blocks, settings, bpm, durationMs, mediaMs, intr
     weighs: tempo ? 'bars' : 'lines',
     measured: timed.filter((block) => block.measured).length,
   }
+}
+
+/**
+ * Moves each line's start and end to a whole bar of this pass, so the highlight changes on
+ * the bar line instead of between beats. A pass too short for a bar per line stays as is.
+ */
+function snapToBars(lines: TimedLine[], passMs: number, barMs: number): TimedLine[] {
+  const bars = Math.round(passMs / barMs)
+  if (lines.length < 1 || bars < lines.length || Math.abs(passMs - bars * barMs) > barMs * 0.6) return lines
+  // The part's own bar length: passMs is a whole number of bars, but maybe not exactly barMs each.
+  const unit = passMs / bars
+  const cuts: number[] = []
+  lines.forEach((line, index) => {
+    const left = lines.length - index - 1
+    const wanted = index === lines.length - 1 ? bars : Math.round((line.end / passMs) * bars)
+    cuts.push(Math.min(bars - left, Math.max((cuts[index - 1] ?? 0) + 1, wanted)))
+  })
+  return lines.map((line, index) => ({ ...line, start: (cuts[index - 1] ?? 0) * unit, end: cuts[index]! * unit }))
 }
 
 export function locate(timeline: Timeline, ms: number): PlaybackCursor | null {

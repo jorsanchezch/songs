@@ -44,6 +44,8 @@ import {
   youtubeVideoId,
 } from '../src/lib/playback.ts'
 import { songPlayback } from '../server/playback.ts'
+import { ANALYSIS_RATE, analyzeAudio, barStart, beatAt, nearestBar } from '../src/lib/audioAnalysis.ts'
+import { suggestParts } from '../src/lib/partSuggest.ts'
 import { sectionDegrees, sectionProgressions } from '../src/lib/sectionProgression.ts'
 import { diatonicChords, keyName, parseStudyKey, pianoVoicings, signature } from '../src/lib/theory.ts'
 import { distinctMarks, songIconIndex, songMarkTone, SONG_ICON_SHAPES, SONG_MARK_HUES } from '../src/lib/songMark.ts'
@@ -832,6 +834,51 @@ assert(pattern.alternatives.every((item) => item.key !== 'C'), 'another song in 
   assert(shareChartMeta(cho, cho) === cho, 'same header leaves the text alone')
   const rows = lineDiff('a\nb\nc', 'a\nx\nc')
   assert(rows.map((row) => row.kind).join() === 'same,del,add,same', `line diff ${rows.map((row) => row.kind)}`)
+}
+
+{
+  // A click track with known tempo: kick on every beat (louder on bar lines) and a hat between.
+  const bpm = 97.5
+  const first = 0.37
+  const seconds = 60
+  const samples = new Float32Array(ANALYSIS_RATE * seconds)
+  const beat = 60 / bpm
+  for (let k = 0; first + k * beat < seconds - 0.2; k += 1) {
+    const at = Math.round((first + k * beat) * ANALYSIS_RATE)
+    const strength = k % 4 === 0 ? 1 : 0.6
+    for (let i = 0; i < 2200; i += 1) samples[at + i] = (samples[at + i] ?? 0) + strength * Math.sin((2 * Math.PI * 60 * i) / ANALYSIS_RATE) * Math.exp(-i / 500)
+    const hat = at + Math.round((beat / 2) * ANALYSIS_RATE)
+    for (let i = 0; i < 400 && hat + i < samples.length; i += 1) samples[hat + i] = (samples[hat + i] ?? 0) + 0.25 * (Math.random() - 0.5) * Math.exp(-i / 90)
+  }
+  const found = await analyzeAudio(samples)
+  assert(Math.abs(found.grid.bpm - bpm) < 0.4 || Math.abs(found.grid.bpm - bpm / 2) < 0.2 || Math.abs(found.grid.bpm - bpm * 2) < 0.8, `click-track tempo ${found.grid.bpm}`)
+  assert(found.confidence > 0.6, `click track is steady ${found.confidence}`)
+  assert(Math.abs(found.durationMs - seconds * 1000) < 20, `real length ${found.durationMs}`)
+  assert(found.peaks.length === 600 && Math.max(...found.peaks) === 1, 'waveform peaks are scaled to 1')
+  // Beats the grid reports land within 15 ms of the clicks that were written.
+  const nearest = (ms: number) => Math.abs(((ms - first * 1000) / (beat * 1000) + 0.5) % 1 - 0.5) * beat * 1000
+  assert(nearest(found.grid.anchorMs) < 15, `bar line sits on a click ${nearest(found.grid.anchorMs)} ms off`)
+  const at = beatAt(found.grid, 10_000)
+  assert(at.since >= 0 && at.since < 60_000 / found.grid.bpm, 'beatAt gives the beat before a time')
+  assert(nearestBar(found.grid, barStart(found.grid, 7) + 20) === 7, 'nearestBar finds a bar line')
+  const split = suggestParts(found, [8, 8, 8])
+  assert(split && split.startsMs.length === 3 && split.startsMs.every((ms, i, all) => i === 0 || ms > all[i - 1]!), 'parts are suggested in order')
+  assert(split!.bars.every((bars) => bars >= 1), 'every part has bars')
+}
+
+{
+  // With a bar length, lines start and end on bar lines.
+  const song = parseChart('{title: B}\n{start_of_verse: Verso}\n[G]uno\n[C]dos\n[D]tres\n[G]cuatro\n{end_of_verse}\n', 'b.cho')
+  const timeline = buildTimeline({
+    blocks: blocksFor(song, null, 'full'),
+    settings: { pace: 'duration', useBpm: true },
+    bpm: 100,
+    durationMs: 40_000,
+    parts: { verso: 38_400 },
+    barMs: 2400,
+  })
+  const ends = timeline.blocks[0]!.lines.map((line) => line.end / 2400)
+  assert(ends.every((value) => Math.abs(value - Math.round(value)) < 1e-6), `lines end on bars ${ends}`)
 }
 
 console.log(`Parsed ${files.length} charts`)

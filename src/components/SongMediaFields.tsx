@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Loader2, Pause, Play, Search } from 'lucide-react'
+import { Loader2, Search } from 'lucide-react'
+import { AudioPlayer } from '@/components/AudioPlayer'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Stepper } from '@/components/ui/stepper'
-import { audioSource, uploadAudioFile } from '@/lib/api'
-import { songMediaSources, youtubeVideoId } from '@/lib/playback'
+import { uploadAudioFile } from '@/lib/api'
+import { youtubeVideoId } from '@/lib/playback'
 import { isAudioUrl } from '@/lib/songMedia'
 import { cn } from '@/lib/utils'
 
@@ -147,80 +148,30 @@ export function BpmField({ value, onChange }: { value: number | null; onChange: 
   )
 }
 
-function AudioPreview({ url }: { url: string }) {
-  const audio = useRef<HTMLAudioElement | null>(null)
-  const [playing, setPlaying] = useState(false)
-  const [failed, setFailed] = useState(false)
-
-  useEffect(() => {
-    setPlaying(false)
-    setFailed(false)
-    return () => {
-      audio.current?.pause()
-      audio.current = null
-    }
-  }, [url])
-
-  const toggle = () => {
-    if (playing) {
-      audio.current?.pause()
-      return
-    }
-    if (!audio.current) {
-      const src = songMediaSources({ sources: [], audioUrl: url, bpm: null, durationMs: null }).audioUrl
-      if (!src) return
-      const element = new Audio()
-      element.onplay = () => setPlaying(true)
-      element.onpause = () => setPlaying(false)
-      element.onerror = () => {
-        setFailed(true)
-        setPlaying(false)
-      }
-      audio.current = element
-      setFailed(false)
-      void audioSource(src)
-        .then((source) => {
-          element.src = source
-          return element.play()
-        })
-        .catch(() => setFailed(true))
-      return
-    }
-    setFailed(false)
-    void audio.current.play().catch(() => setFailed(true))
-  }
-
-  return (
-    <>
-      <Button
-        type="button"
-        size="sm"
-        variant="outline"
-        aria-pressed={playing}
-        aria-label={playing ? 'Pausar audio' : 'Escuchar audio'}
-        title={playing ? 'Pausa la prueba.' : 'Prueba el audio aquí.'}
-        onClick={toggle}
-      >
-        {playing ? <Pause /> : <Play />}
-      </Button>
-      {failed ? <span className="text-xs font-normal text-destructive">No se pudo reproducir.</span> : null}
-    </>
-  )
-}
-
 export function AudioUploadField({
   songId,
   audioUrl,
   onAudioUrl,
+  bpm = null,
+  durationMs = null,
+  onBpm,
+  onDuration,
 }: {
   songId: string
   audioUrl: string
   onAudioUrl: (url: string) => void
+  bpm?: number | null
+  durationMs?: number | null
+  onBpm?: (bpm: number) => void
+  onDuration?: (ms: number) => void
 }) {
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
   const valid = isAudioUrl(audioUrl)
+  const [pasting, setPasting] = useState(false)
+  // Files kept by the app are named by an internal path nobody needs to read or type.
+  const stored = valid && audioUrl.includes('/api/audio/') && !pasting
   const invalid = Boolean(audioUrl.trim()) && !valid
 
   const onFile = async (file: File | undefined) => {
@@ -228,8 +179,9 @@ export function AudioUploadField({
     setUploading(true)
     setUploadError('')
     try {
-      const stored = await uploadAudioFile(file, songId || undefined)
-      onAudioUrl(stored.audioUrl)
+      const uploaded = await uploadAudioFile(file, songId || undefined)
+      setPasting(false)
+      onAudioUrl(uploaded.audioUrl)
     } catch (reason) {
       setUploadError(reason instanceof Error ? reason.message : 'No pude subir el MP3.')
     } finally {
@@ -240,19 +192,30 @@ export function AudioUploadField({
 
   return (
     <FieldBlock label="Audio (MP3)" htmlFor="editor-audio" className="sm:col-span-2">
-      <div className="flex gap-2">
-        <Input
-          id="editor-audio"
-          value={audioUrl}
-          onChange={(event) => onAudioUrl(event.target.value)}
-          placeholder="/api/audio/… o https://…/cancion.mp3"
-          inputMode="url"
-          aria-invalid={invalid || undefined}
-          title="También puedes pegar una URL. Los archivos subidos quedan en R2 vía /api/audio/…"
-          className={cn(invalid && 'border-destructive')}
-        />
-        {valid ? <AudioPreview url={audioUrl} /> : null}
-      </div>
+      {stored ? (
+        <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-3 py-2 text-sm font-normal">
+          <span className="min-w-0 flex-1 truncate" title="El archivo está guardado en la nube de la app; aquí solo se guarda su ubicación interna.">
+            MP3 guardado en la app
+          </span>
+          <Button type="button" size="sm" variant="ghost" onClick={() => setPasting(true)} title="Usar un enlace externo en su lugar.">
+            Usar enlace
+          </Button>
+        </div>
+      ) : (
+        <div className="flex gap-2">
+          <Input
+            id="editor-audio"
+            value={audioUrl}
+            onChange={(event) => onAudioUrl(event.target.value)}
+            placeholder="https://…/cancion.mp3"
+            inputMode="url"
+            aria-invalid={invalid || undefined}
+            title="Pega un enlace a un MP3, o sube el archivo con el botón de abajo."
+            className={cn(invalid && 'border-destructive')}
+          />
+        </div>
+      )}
+      {valid ? <AudioPlayer url={audioUrl} bpm={bpm} durationMs={durationMs} onBpm={onBpm} onDuration={onDuration} /> : null}
       <div className="flex flex-wrap items-center gap-2 font-normal">
         <input
           ref={inputRef}
@@ -279,7 +242,7 @@ export function AudioUploadField({
           </Button>
         ) : null}
         {invalid ? (
-          <span className="text-xs text-destructive">Usa /api/audio/… o un enlace http(s).</span>
+          <span className="text-xs text-destructive">Usa un enlace http(s) a un MP3 o sube el archivo.</span>
         ) : !audioUrl ? (
           <span className="text-xs text-muted-foreground">Opcional. La reproducción por duración no lo necesita.</span>
         ) : null}

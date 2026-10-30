@@ -120,6 +120,8 @@ export type PlaybackTrack = {
   introMs: number
   /** Measured length of each part (all passes), by part key. */
   parts: Record<string, number>
+  /** Beat grid measured on an MP3: lets the player pulse and cut parts on real bar lines. */
+  grid?: { bpm: number; anchorMs: number; beatsPerBar: number }
 }
 
 export type SongPlayback = { youtube?: PlaybackTrack; mp3?: PlaybackTrack; speed?: number }

@@ -23,6 +23,10 @@ import { InstrumentCharts } from '@/components/InstrumentCharts'
 import { InstrumentSwitch } from '@/components/InstrumentSwitch'
 import { Kbd, ShortcutLegend } from '@/components/KeyHint'
 import { PlaybackDock, type Marking } from '@/components/PlaybackDock'
+import type { WaveMark } from '@/components/Waveform'
+import { useAudioAnalysis } from '@/hooks/useAudioAnalysis'
+import type { AudioAnalysis, BeatGrid } from '@/lib/audioAnalysis'
+import { suggestParts } from '@/lib/partSuggest'
 import { SpellingToggle } from '@/components/SpellingToggle'
 import { Button } from '@/components/ui/button'
 import { UserBadge } from '@/components/UserBadge'
@@ -59,6 +63,7 @@ import {
   marksToParts,
   NEAR_CUE_MS,
   NUDGE_MS,
+  partBars,
   partKeys,
   referenceTrack,
   trackSource,
@@ -79,6 +84,15 @@ import {
   usableJumpHeight,
   type ViewportNavStep,
 } from '@/lib/viewportJumps'
+
+type Proposal = {
+  grid: BeatGrid
+  introMs: number
+  parts: Record<string, number>
+  startsMs: number[]
+  bars: number[]
+  quality: number
+}
 
 export function SongView() {
   const { songId = '' } = useParams()
@@ -231,13 +245,19 @@ export function SongView() {
   const [marking, setMarking] = useState<Marking | null>(null)
   const markingRef = useRef(marking)
   markingRef.current = marking
+  // Bars cut from the audio, previewed while playing until someone saves or drops them.
+  const [proposal, setProposal] = useState<Proposal | null>(null)
+  const analysis = useAudioAnalysis(audioKind === 'mp3' ? media.audioUrl || null : null)
   useEffect(() => {
     setSession(null)
     setMarking(null)
+    setProposal(null)
   }, [songId, playbackAudio])
-  const leadMs = marking ? 0 : (session?.leadMs ?? track?.introMs ?? 0)
+  const leadMs = marking ? 0 : (session?.leadMs ?? proposal?.introMs ?? track?.introMs ?? 0)
   const playSpeed = session?.speed ?? songPlayback.speed ?? 1
-  const trackParts = marking ? null : (track?.parts ?? null)
+  const trackParts = marking ? null : (proposal?.parts ?? track?.parts ?? null)
+  const grid: BeatGrid | null = audioKind === 'mp3' && !marking ? (proposal?.grid ?? track?.grid ?? null) : null
+  const barMs = grid ? (60_000 / grid.bpm) * grid.beatsPerBar : null
   const makeTimeline = useCallback(
     (mediaMs: number | null) =>
       buildTimeline({
@@ -248,8 +268,9 @@ export function SongView() {
         mediaMs,
         introMs: leadMs,
         parts: trackParts,
+        barMs,
       }),
-    [blocks, leadMs, media.bpm, media.durationMs, pace, trackParts, useBpm],
+    [barMs, blocks, leadMs, media.bpm, media.durationMs, pace, trackParts, useBpm],
   )
   const playback = usePlayback({ makeTimeline, audio: playbackAudio, media, leadMs, speed: playSpeed })
   // Marking taps the real starts; the estimated cursor would only distract.
@@ -260,6 +281,18 @@ export function SongView() {
   const showPlayHighlights = playbackSettings.highlights
   const cues = useMemo(() => cuePoints(playback.timeline), [playback.timeline])
   const keysForParts = useMemo(() => partKeys(blocks), [blocks])
+  // Where each part starts in the audio: the proposal's, or the saved lengths added up.
+  const waveMarks = useMemo<WaveMark[]>(() => {
+    if (proposal) return proposal.startsMs.map((ms, index) => ({ ms, label: blocks[index]?.label }))
+    if (!track || audioKind !== 'mp3' || !keysForParts.every((key) => (track.parts[key] ?? 0) > 0)) return []
+    let at = track.introMs
+    return keysForParts.map((key, index) => {
+      const mark = { ms: at, label: blocks[index]?.label }
+      at += track.parts[key]!
+      return mark
+    })
+  }, [audioKind, blocks, keysForParts, proposal, track])
+  const canTune = Boolean(song?.editable || song?.personal)
   const measuredParts = track ? keysForParts.filter((key) => (track.parts[key] ?? 0) > 0).length : 0
 
   useEffect(() => {
@@ -319,7 +352,10 @@ export function SongView() {
   const saveMarks = () => {
     if (!marking || !audioKind || !audioSrc) return
     const { introMs, parts } = marksToParts(keysForParts, marking.starts, marking.endMs)
-    storePlayback({ ...songPlayback, [audioKind]: { src: audioSrc, introMs: introMs ?? 0, parts } })
+    storePlayback({
+      ...songPlayback,
+      [audioKind]: { src: audioSrc, introMs: introMs ?? 0, parts, ...(audioKind === 'mp3' && track?.grid ? { grid: track.grid } : {}) },
+    })
     setMarking(null)
     setSession(null)
   }
@@ -339,11 +375,47 @@ export function SongView() {
     if (!session) return
     const next: SongPlayback = { ...songPlayback }
     if (audioKind && audioSrc) {
-      next[audioKind] = { src: audioSrc, parts: track?.parts ?? {}, introMs: session.leadMs }
+      next[audioKind] = {
+        src: audioSrc,
+        parts: track?.parts ?? {},
+        introMs: session.leadMs,
+        ...(audioKind === 'mp3' && track?.grid ? { grid: track.grid } : {}),
+      }
     } else {
       next.speed = session.speed
     }
     storePlayback(next)
+    setSession(null)
+  }
+
+  const proposeFrom = (result: AudioAnalysis) => {
+    const fit = suggestParts(result, partBars(blocks))
+    if (!fit) {
+      setAnnounce('No pude repartir las partes en este audio.')
+      return
+    }
+    const { introMs, parts } = marksToParts(keysForParts, fit.startsMs, fit.endMs)
+    setProposal({ grid: result.grid, introMs: introMs ?? 0, parts, startsMs: fit.startsMs, bars: fit.bars, quality: fit.quality })
+    setSession(null)
+  }
+
+  const alignParts = async () => {
+    const result = analysis.result ?? (await analysis.run())
+    if (result) proposeFrom(result)
+  }
+
+  const retempo = async (bpm: number) => {
+    const result = await analysis.run({ bpm })
+    if (result && proposal) proposeFrom(result)
+  }
+
+  const saveProposal = () => {
+    if (!proposal || !audioSrc) return
+    storePlayback({
+      ...songPlayback,
+      mp3: { src: audioSrc, introMs: proposal.introMs, parts: proposal.parts, grid: proposal.grid },
+    })
+    setProposal(null)
     setSession(null)
   }
 
@@ -376,6 +448,7 @@ export function SongView() {
             mediaMs: playback.mediaMs,
             introMs: lead,
             parts: trackParts,
+            barMs,
           }),
         )[targetIndex]?.at
         if (at == null) break
@@ -1638,6 +1711,35 @@ export function SongView() {
 
       {chart && blocks.length > 0 && (
         <PlaybackDock
+          tune={
+            audioKind === 'mp3'
+              ? {
+                  analysis: analysis.result,
+                  running: analysis.running,
+                  progress: analysis.progress,
+                  error: analysis.error,
+                  grid,
+                  proposal: proposal ? { bars: proposal.bars, quality: proposal.quality } : null,
+                  marks: waveMarks,
+                  canEdit: canTune,
+                  bpm: media.bpm,
+                  durationMs: media.durationMs,
+                  onAnalyze: () => void analysis.run(),
+                  onAlign: () => void alignParts(),
+                  onSave: saveProposal,
+                  onDiscard: () => setProposal(null),
+                  onRetempo: (bpm) => void retempo(bpm),
+                  onBpm: canTune && song ? (bpm) => void patchMedia(song.id, { bpm }, instrument).catch((error) => console.error(error)) : undefined,
+                  onDuration:
+                    canTune && song
+                      ? (durationMs) => {
+                          setDurationOverride(durationMs)
+                          void patchMedia(song.id, { durationMs }, instrument).catch((error) => console.error(error))
+                        }
+                      : undefined,
+                }
+              : undefined
+          }
           playback={playback}
           settings={playbackSettings}
           onSettings={updatePlayback}

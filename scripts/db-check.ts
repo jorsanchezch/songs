@@ -863,6 +863,15 @@ async function checkPasswords(files: { id: string; sourceText: string }[]) {
   assert(kept?.revision === before?.revision, 'saving playback leaves the revision alone')
   const reread = await call(sql, owner.token, 'GET', `/api/songs/${encodeURIComponent(sample.id)}?instrument=guitar`)
   assert(JSON.stringify((reread.data.song as { playback: unknown }).playback) === JSON.stringify(playback), 'dto carries playback')
+  const withGrid = { mp3: { src: '/api/audio/songs/x/1.mp3', introMs: 1200, parts: { verso: 20_000 }, grid: { bpm: 97.504, anchorMs: 1190, beatsPerBar: 4 } } }
+  const gridSaved = await call(sql, owner.token, 'PUT', `/api/songs/${encodeURIComponent(sample.id)}/playback`, { playback: withGrid })
+  const gridBack = (gridSaved.data.playback as { mp3?: { grid?: { bpm: number; anchorMs: number; beatsPerBar: number } } }).mp3?.grid
+  assert(gridBack?.bpm === 97.5 && gridBack.anchorMs === 1190 && gridBack.beatsPerBar === 4, `beat grid is kept ${JSON.stringify(gridBack)}`)
+  const badGrid = await call(sql, owner.token, 'PUT', `/api/songs/${encodeURIComponent(sample.id)}/playback`, {
+    playback: { mp3: { ...withGrid.mp3, grid: { bpm: 5, anchorMs: 0, beatsPerBar: 7 } } },
+  })
+  assert(!(badGrid.data.playback as { mp3?: { grid?: unknown } }).mp3?.grid, 'a nonsense grid is dropped')
+  await call(sql, owner.token, 'PUT', `/api/songs/${encodeURIComponent(sample.id)}/playback`, { playback: { mp3: null } })
   const blocked = await call(sql, viewer.token, 'PUT', `/api/songs/${encodeURIComponent(sample.id)}/playback`, { playback: {} })
   assert(blocked.status === 403, `viewer cannot save catalog playback ${blocked.status}`)
 }

@@ -4,6 +4,7 @@ export type PlaybackTrack = {
   src: string
   introMs: number
   parts: Record<string, number>
+  grid?: { bpm: number; anchorMs: number; beatsPerBar: number }
 }
 
 export type SongPlayback = { youtube?: PlaybackTrack; mp3?: PlaybackTrack; speed?: number }
@@ -27,8 +28,20 @@ function track(value: unknown): PlaybackTrack | undefined {
       if (length != null && key.length <= 120 && PART_KEY.test(key)) parts[key] = length
     }
   }
-  // Negative: the recording runs ahead of the chart (no intro, or parts longer than estimated).
-  return { src, introMs: wholeIn(raw.introMs, -600_000, 600_000) ?? 0, parts }
+  const out: PlaybackTrack = {
+    src,
+    // Negative: the recording runs ahead of the chart (no intro, or parts longer than estimated).
+    introMs: wholeIn(raw.introMs, -600_000, 600_000) ?? 0,
+    parts,
+  }
+  const grid = raw.grid
+  if (grid && typeof grid === 'object' && !Array.isArray(grid)) {
+    const { bpm, anchorMs, beatsPerBar } = grid as Record<string, unknown>
+    if (typeof bpm === 'number' && Number.isFinite(bpm) && bpm >= 30 && bpm <= 300 && (beatsPerBar === 3 || beatsPerBar === 4)) {
+      out.grid = { bpm: Math.round(bpm * 100) / 100, anchorMs: wholeIn(anchorMs, -600_000, 1_800_000) ?? 0, beatsPerBar }
+    }
+  }
+  return out
 }
 
 export function songPlayback(value: unknown): SongPlayback {

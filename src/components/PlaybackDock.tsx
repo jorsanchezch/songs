@@ -22,6 +22,9 @@ import {
 } from '@/lib/playback'
 import { formatDurationMmSs, parseDurationMmSs } from '@/lib/songMedia'
 import { cn } from '@/lib/utils'
+import { AnalysisSummary } from '@/components/AnalysisSummary'
+import { Waveform, type WaveMark } from '@/components/Waveform'
+import { beatAt, type AudioAnalysis, type BeatGrid } from '@/lib/audioAnalysis'
 
 /** Calibration in progress: media times tapped at each part start, then the end. */
 export type Marking = { phase: 'marking' | 'review'; starts: number[]; endMs: number | null }
@@ -55,6 +58,29 @@ type Marks = {
   onClear: () => void
 }
 
+/** Reading the MP3: tempo, bars and part boundaries from the sound. */
+export type Tune = {
+  analysis: AudioAnalysis | null
+  running: boolean
+  progress: number
+  error: string
+  /** Bar lines to draw and pulse on: the saved grid, or the proposal's while previewing. */
+  grid: BeatGrid | null
+  /** Parts cut on bar lines, waiting to be saved. */
+  proposal: { bars: number[]; quality: number } | null
+  marks: WaveMark[]
+  canEdit: boolean
+  bpm: number | null
+  durationMs: number | null
+  onAnalyze: () => void
+  onAlign: () => void
+  onSave: () => void
+  onDiscard: () => void
+  onRetempo: (bpm: number) => void
+  onBpm?: (bpm: number) => void
+  onDuration?: (ms: number) => void
+}
+
 const OPEN_DELAY_MS = 450
 const CHIP_DELAY_MS = 100
 const CLOSE_DELAY_MS = 280
@@ -80,7 +106,9 @@ export function PlaybackDock({
   onPickSource,
   onMakeSelected,
   makingSelected,
+  tune,
 }: {
+  tune?: Tune
   playback: Playback
   settings: PlaybackSettings
   onSettings: (patch: Partial<PlaybackSettings>) => void
@@ -196,13 +224,14 @@ export function PlaybackDock({
           onPickSource={onPickSource}
           onMakeSelected={onMakeSelected}
           makingSelected={makingSelected}
+          tune={tune}
         />
       )}
 
       {showError && (
         <p
           role="alert"
-          className="flex max-w-[min(19rem,calc(100vw-1.5rem))] items-start gap-2 rounded-lg border border-destructive/40 bg-card px-3 py-2 text-xs text-destructive shadow-md"
+          className="flex max-w-[min(24rem,calc(100vw-1.5rem))] items-start gap-2 rounded-lg border border-destructive/40 bg-card px-3 py-2 text-sm text-destructive shadow-md"
         >
           <span className="flex-1">{error}</span>
           <button type="button" aria-label="Cerrar aviso" className="text-muted-foreground" onClick={() => setDismissedError(error)}>
@@ -225,8 +254,8 @@ export function PlaybackDock({
       )}
 
       <div className="flex items-center gap-2">
-        {playing && <PlaybackClock playback={playback} timeline={timeline} marking={Boolean(marking)} />}
-        <div className="relative size-16">
+        {playing && <PlaybackClock playback={playback} timeline={timeline} marking={Boolean(marking)} grid={tune?.grid ?? null} />}
+        <div className="relative size-20">
           {playing && !marking && <CueRing elapsed={playback.elapsed} cues={cues} totalMs={timeline.totalMs} />}
           <button
             type="button"
@@ -264,13 +293,13 @@ export function PlaybackDock({
             )}
           >
             {marking ? (
-              <Flag className="size-6" />
+              <Flag className="size-7" />
             ) : status === 'loading' ? (
-              <Loader2 className="size-6 animate-spin motion-reduce:animate-none" />
+              <Loader2 className="size-7 animate-spin motion-reduce:animate-none" />
             ) : playing ? (
-              <Square className="size-5 fill-current" />
+              <Square className="size-6 fill-current" />
             ) : (
-              <Play className="ml-0.5 size-6 fill-current" />
+              <Play className="ml-0.5 size-8 fill-current" />
             )}
           </button>
           {!marking && (
@@ -290,9 +319,9 @@ export function PlaybackDock({
                 if (pinned) close()
                 else setPinned(true)
               }}
-              className="absolute -top-1 -left-1 inline-flex size-6 items-center justify-center rounded-full border bg-card text-muted-foreground shadow after:absolute after:-inset-2.5 after:content-[''] hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/60 focus-visible:outline-none"
+              className="absolute -top-1 -left-1 inline-flex size-8 items-center justify-center rounded-full border bg-card text-muted-foreground shadow after:absolute after:-inset-1.5 after:content-[''] hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/60 focus-visible:outline-none"
             >
-              <SlidersHorizontal className="size-3.5" />
+              <SlidersHorizontal className="size-4" />
             </button>
           )}
         </div>
@@ -319,7 +348,9 @@ function SettingsPanel({
   onPickSource,
   onMakeSelected,
   makingSelected,
+  tune,
 }: {
+  tune?: Tune
   panelRef: MutableRefObject<HTMLDivElement | null>
   playback: Playback
   settings: PlaybackSettings
@@ -363,13 +394,13 @@ function SettingsPanel({
       ref={panelRef}
       role="dialog"
       aria-label="Ajustes de reproducción"
-      className="max-h-[calc(100svh-14rem)] w-[min(19rem,calc(100vw-1.5rem))] overflow-y-auto rounded-xl border bg-popover p-3 text-sm text-popover-foreground shadow-lg"
+      className="max-h-[calc(100svh-14rem)] w-[min(24rem,calc(100vw-1.5rem))] overflow-y-auto rounded-xl border bg-popover p-4 text-sm text-popover-foreground shadow-lg"
     >
       <div className="mb-2 flex items-baseline justify-between gap-2">
-        <p className="font-semibold">Reproducción</p>
-        <p className="text-xs text-muted-foreground tabular-nums">{basisText(timeline)}</p>
+        <p className="text-base font-semibold">Reproducción</p>
+        <p className="text-sm text-muted-foreground tabular-nums">{basisText(timeline)}</p>
       </div>
-      <p className="mb-3 text-xs leading-snug text-muted-foreground">
+      <p className="mb-4 text-sm leading-snug text-muted-foreground">
         Avanza sola por las partes de esta vista. Elegir una parte a mano la para.
         {!playback.playing && startLabel ? (
           <>
@@ -513,8 +544,10 @@ function SettingsPanel({
         </Toggle>
       </Field>
 
-      <div className="mt-3 border-t pt-3">
-        <p className="mb-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">Esta canción</p>
+      {tune && audio === 'mp3' && <TuneSection tune={tune} playback={playback} />}
+
+      <div className="mt-4 border-t pt-4">
+        <p className="mb-3 text-xs font-semibold tracking-wide text-muted-foreground uppercase">Esta canción</p>
         {audio !== 'off' ? (
           <>
             <Field label="Entrada" title="Lo que suena antes de la primera parte. − y + la ajustan ¼ s.">
@@ -564,7 +597,7 @@ function SettingsPanel({
             <button
               type="button"
               onClick={sync.onSave}
-              className="mt-1 w-full rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90"
+              className="mt-1 min-h-10 w-full rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90"
             >
               Guardar en la canción
             </button>
@@ -573,12 +606,93 @@ function SettingsPanel({
           ))}
       </div>
 
-      {playback.error && <p className="mt-2 text-xs text-destructive">{playback.error}</p>}
-      <p className="mt-2 flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground">
+      {playback.error && <p className="mt-2 text-sm text-destructive">{playback.error}</p>}
+      <p className="mt-3 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
         <Kbd>P</Kbd> reproduce o para · <Kbd>⇧←</Kbd>
         <Kbd>⇧→</Kbd> estamos aquí · <Kbd>−</Kbd>
         <Kbd>+</Kbd> entrada
       </p>
+    </div>
+  )
+}
+
+function TuneSection({ tune, playback }: { tune: Tune; playback: Playback }) {
+  const { analysis } = tune
+  const mediaTime = playback.mediaTime
+  const time = useFrameTime(() => mediaTime() ?? 0, playback.playing, 80) ?? 0
+  return (
+    <div className="mt-4 border-t pt-4">
+      <p className="mb-3 text-xs font-semibold tracking-wide text-muted-foreground uppercase">Compás y onda</p>
+      {analysis ? (
+        <div className="flex flex-col gap-3">
+          <div className="rounded-lg border bg-muted/30 p-2">
+            <Waveform
+              peaks={analysis.peaks}
+              durationMs={analysis.durationMs}
+              timeMs={time}
+              grid={tune.grid ?? analysis.grid}
+              marks={tune.marks}
+              height={72}
+            />
+            <p className="mt-1.5 flex justify-between text-xs text-muted-foreground tabular-nums">
+              <span>{formatClock(time)}</span>
+              <span>{formatClock(analysis.durationMs)}</span>
+            </p>
+          </div>
+          <AnalysisSummary
+            analysis={analysis}
+            bpm={tune.bpm}
+            durationMs={tune.durationMs}
+            onBpm={tune.canEdit ? tune.onBpm : undefined}
+            onDuration={tune.canEdit ? tune.onDuration : undefined}
+            onRetempo={tune.onRetempo}
+          />
+          {tune.proposal ? (
+            <>
+              <p className="text-sm text-muted-foreground">
+                Propuesta: {tune.proposal.bars.join(' + ')} compases
+                {tune.proposal.quality < 0.4 ? ' · los cortes no se ven claros, revisa al escuchar' : ''}. Dale a reproducir
+                para probarla.
+              </p>
+              <span className="flex flex-wrap items-center gap-2">
+                {tune.canEdit ? (
+                  <SmallButton primary onClick={tune.onSave} title="Guarda los compases, la entrada y el largo de cada parte en la canción.">
+                    Guardar alineación
+                  </SmallButton>
+                ) : (
+                  <Note>Solo esta vez.</Note>
+                )}
+                <SmallButton onClick={tune.onDiscard} title="Vuelve a lo que tenía la canción.">
+                  Descartar
+                </SmallButton>
+              </span>
+            </>
+          ) : (
+            <span className="flex flex-wrap items-center gap-2">
+              <SmallButton
+                disabled={tune.running}
+                onClick={tune.onAlign}
+                title="Corta las partes en los compases donde cambia el sonido y alinea la entrada."
+              >
+                {tune.grid ? 'Volver a alinear' : 'Alinear partes'}
+              </SmallButton>
+              {tune.grid && <span className="text-xs text-muted-foreground">Compases guardados</span>}
+            </span>
+          )}
+        </div>
+      ) : (
+        <span className="flex items-center gap-2">
+          <SmallButton
+            disabled={tune.running}
+            onClick={tune.onAnalyze}
+            title="Lee el audio: onda, BPM, compases y duración real. Se hace en tu navegador."
+          >
+            {tune.running ? `Analizando ${Math.round(tune.progress * 100)} %` : 'Analizar audio'}
+          </SmallButton>
+          <span className="text-xs text-muted-foreground">Se hace aquí, sin enviar nada.</span>
+        </span>
+      )}
+      {tune.error && <p className="mt-2 text-sm text-destructive">{tune.error}</p>}
     </div>
   )
 }
@@ -661,10 +775,21 @@ function CueRing({ elapsed, cues, totalMs }: { elapsed: () => number; cues: Cue[
   )
 }
 
-function PlaybackClock({ playback, timeline, marking }: { playback: Playback; timeline: Timeline; marking: boolean }) {
-  const [now, setNow] = useState(() => ({ second: 0, beat: false }))
+function PlaybackClock({
+  playback,
+  timeline,
+  marking,
+  grid,
+}: {
+  playback: Playback
+  timeline: Timeline
+  marking: boolean
+  grid: BeatGrid | null
+}) {
+  const [now, setNow] = useState(() => ({ second: 0, beat: false, down: false }))
   const { elapsed, mediaTime } = playback
-  const beatMs = timeline.bpm && !marking ? 60_000 / timeline.bpm : 0
+  // With a measured grid the pulse follows the audio's real beats; otherwise the song's BPM.
+  const beatMs = grid && !marking ? 60_000 / grid.bpm : timeline.bpm && !marking ? 60_000 / timeline.bpm : 0
 
   useEffect(() => {
     let frame = 0
@@ -672,17 +797,24 @@ function PlaybackClock({ playback, timeline, marking }: { playback: Playback; ti
       const t = marking ? (mediaTime() ?? elapsed()) : elapsed()
       // Count the intro down in whole seconds: −0:04, −0:03…
       const second = t < 0 ? -Math.ceil(-t / 1000) : Math.floor(t / 1000)
-      const beat = beatMs > 0 && t >= 0 && t % beatMs < Math.min(140, beatMs / 3)
-      setNow((prev) => (prev.second === second && prev.beat === beat ? prev : { second, beat }))
+      let beat = beatMs > 0 && t >= 0 && t % beatMs < Math.min(140, beatMs / 3)
+      let down = false
+      const media = grid && !marking ? mediaTime() : null
+      if (grid && media != null) {
+        const at = beatAt(grid, media)
+        beat = media >= 0 && at.since < Math.min(140, beatMs / 3)
+        down = beat && at.downbeat
+      }
+      setNow((prev) => (prev.second === second && prev.beat === beat && prev.down === down ? prev : { second, beat, down }))
       frame = requestAnimationFrame(step)
     }
     frame = requestAnimationFrame(step)
     return () => cancelAnimationFrame(frame)
-  }, [beatMs, elapsed, marking, mediaTime])
+  }, [beatMs, elapsed, grid, marking, mediaTime])
 
   return (
     <span
-      className="inline-flex h-9 items-center gap-1.5 rounded-full border bg-card px-3 text-sm font-semibold shadow-md tabular-nums"
+      className="inline-flex h-11 items-center gap-2 rounded-full border bg-card px-4 text-base font-semibold shadow-md tabular-nums"
       aria-label="Tiempo de reproducción"
       role="timer"
     >
@@ -690,7 +822,8 @@ function PlaybackClock({ playback, timeline, marking }: { playback: Playback; ti
         <span
           aria-hidden
           className={cn(
-            'size-2 rounded-full transition-colors duration-75 motion-reduce:transition-none',
+            'rounded-full transition-all duration-75 motion-reduce:transition-none',
+            now.down ? 'size-3' : 'size-2',
             now.beat ? 'bg-primary' : 'bg-muted-foreground/30',
           )}
         />
@@ -722,8 +855,8 @@ function optionLabel(option: MediaOption, index: number): string {
 
 function Field({ label, title, children }: { label: string; title?: string; children: ReactNode }) {
   return (
-    <div className="mb-2 flex items-center justify-between gap-3" title={title}>
-      <span className="text-xs font-medium text-muted-foreground">{label}</span>
+    <div className="mb-3 flex min-h-10 items-center justify-between gap-3" title={title}>
+      <span className="text-sm font-medium text-muted-foreground">{label}</span>
       {children}
     </div>
   )
@@ -731,7 +864,7 @@ function Field({ label, title, children }: { label: string; title?: string; chil
 
 function Note({ children }: { children: ReactNode }) {
   if (!children) return null
-  return <p className="-mt-1 mb-2 text-right text-[11px] text-muted-foreground">{children}</p>
+  return <p className="-mt-1 mb-3 text-right text-xs text-muted-foreground">{children}</p>
 }
 
 function SmallButton({
@@ -754,7 +887,7 @@ function SmallButton({
       disabled={disabled}
       onClick={onClick}
       className={cn(
-        'rounded-full border px-2.5 py-1 text-xs font-medium disabled:opacity-40',
+        'min-h-9 rounded-full border px-3.5 py-1.5 text-sm font-medium disabled:opacity-40',
         primary ? 'border-primary bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground',
       )}
     >
@@ -776,17 +909,17 @@ function Stepper({
   canDown: boolean
   canUp: boolean
 }) {
-  const step = 'relative inline-flex size-8 items-center justify-center rounded-full text-muted-foreground after:absolute after:-inset-1 after:content-[""] hover:text-foreground disabled:opacity-40'
+  const step = 'relative inline-flex size-10 items-center justify-center rounded-full text-muted-foreground after:absolute after:-inset-0.5 after:content-[""] hover:text-foreground disabled:opacity-40'
   return (
     <span className="inline-flex items-center rounded-full border" role="group" aria-label={label}>
       <button type="button" className={step} aria-label={`Menos ${label.toLowerCase()}`} disabled={!canDown} onClick={() => onStep(-1)}>
-        <Minus className="size-3.5" />
+        <Minus className="size-4" />
       </button>
-      <span className="min-w-14 text-center text-xs font-semibold tabular-nums" aria-live="polite">
+      <span className="min-w-16 text-center text-sm font-semibold tabular-nums" aria-live="polite">
         {value}
       </span>
       <button type="button" className={step} aria-label={`Más ${label.toLowerCase()}`} disabled={!canUp} onClick={() => onStep(1)}>
-        <Plus className="size-3.5" />
+        <Plus className="size-4" />
       </button>
     </span>
   )
@@ -813,7 +946,7 @@ function Toggle({
       title={title}
       onClick={onClick}
       className={cn(
-        'rounded-full border px-2.5 py-1 text-xs font-medium disabled:opacity-50',
+        'min-h-9 rounded-full border px-3.5 py-1.5 text-sm font-medium disabled:opacity-50',
         on ? 'border-primary bg-primary/15 text-foreground' : 'text-muted-foreground hover:text-foreground',
       )}
     >
@@ -846,7 +979,7 @@ function Segmented<T extends string>({
             title={option.title}
             onClick={() => onChange(option.value)}
             className={cn(
-              'rounded-full px-2.5 py-0.5 text-xs font-medium disabled:opacity-40',
+              'min-h-9 rounded-full px-3.5 py-1.5 text-sm font-medium disabled:opacity-40',
               on ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground',
             )}
           >
