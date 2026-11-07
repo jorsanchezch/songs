@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Check, ChevronDown, ChevronUp, GripVertical, Plus, Trash2 } from 'lucide-react'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { ArrowLeft, Check, ChevronDown, ChevronUp, GripVertical, ListMusic, Plus, Trash2 } from 'lucide-react'
 import { Kbd, ShortcutLegend } from '@/components/KeyHint'
 import { SongMark } from '@/components/SongMark'
 import { Button } from '@/components/ui/button'
@@ -23,12 +23,24 @@ import {
   setSetlistSemitones,
   songPath,
 } from '@/lib/setlists'
+import {
+  beginSpotifyLogin,
+  clearPendingPlaylist,
+  createSetlistPlaylist,
+  ensureSpotifyAccess,
+  readPendingPlaylist,
+  savePendingPlaylist,
+  spotifyConfigured,
+  type SpotifyPlaylistResult,
+  type SpotifyTrackRef,
+} from '@/lib/spotify'
 
 const page = 'mx-auto w-full max-w-[52.8rem] px-4'
 
 export function SetlistView() {
   const { setlistId = '' } = useParams()
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const user = useUser()
   const setlists = useSetlists()
   const { state } = useSongs()
@@ -38,7 +50,11 @@ export function SetlistView() {
   const [picked, setPicked] = useState<string[]>([])
   const [dragIndex, setDragIndex] = useState<number | null>(null)
   const [overIndex, setOverIndex] = useState<number | null>(null)
+  const [spotifyBusy, setSpotifyBusy] = useState(false)
+  const [spotifyError, setSpotifyError] = useState('')
+  const [spotifyResult, setSpotifyResult] = useState<SpotifyPlaylistResult | null>(null)
   const dragFrom = useRef<number | null>(null)
+  const spotifyRun = useRef(false)
 
   const matches = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase('es')
@@ -74,6 +90,78 @@ export function SetlistView() {
     return () => window.removeEventListener('keydown', onKey, true)
   }, [navigate])
 
+  useEffect(() => {
+    if (searchParams.get('spotify') !== 'ready') return
+    if (spotifyRun.current) return
+    spotifyRun.current = true
+    const next = new URLSearchParams(searchParams)
+    next.delete('spotify')
+    setSearchParams(next, { replace: true })
+    const pending = readPendingPlaylist()
+    if (!pending || pending.setlistId !== setlistId) {
+      setSpotifyError('No encontré la lista pendiente para Spotify.')
+      return
+    }
+    void finishSpotifyPlaylist(pending.name, pending.tracks)
+  }, [searchParams, setSearchParams, setlistId])
+
+  async function finishSpotifyPlaylist(name: string, tracks: SpotifyTrackRef[]) {
+    setSpotifyBusy(true)
+    setSpotifyError('')
+    setSpotifyResult(null)
+    try {
+      const result = await createSetlistPlaylist({
+        setlistId,
+        name,
+        tracks,
+      })
+      clearPendingPlaylist()
+      setSpotifyResult(result)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'No pude crear la playlist.'
+      if (message === 'SPOTIFY_LOGIN') {
+        setSpotifyError('Vuelve a conectar Spotify e inténtalo otra vez.')
+      } else {
+        setSpotifyError(message)
+      }
+    } finally {
+      setSpotifyBusy(false)
+    }
+  }
+
+  async function createOnSpotify() {
+    if (!list || !spotifyConfigured() || spotifyBusy) return
+    const tracks = list.items
+      .map((item) => songs.find((song) => song.id === item.songId))
+      .filter((song): song is NonNullable<typeof song> => Boolean(song))
+      .map((song) => ({ title: song.title, artist: song.artist }))
+    if (tracks.length === 0) {
+      setSpotifyError('Esta lista no tiene canciones que Spotify pueda buscar.')
+      return
+    }
+    const pending = { setlistId: list.id, name: list.name, tracks }
+    savePendingPlaylist(pending)
+    setSpotifyError('')
+    setSpotifyResult(null)
+    try {
+      await ensureSpotifyAccess()
+      await finishSpotifyPlaylist(pending.name, pending.tracks)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : ''
+      if (message === 'SPOTIFY_LOGIN') {
+        setSpotifyBusy(true)
+        try {
+          await beginSpotifyLogin(`/listas/${list.id}?spotify=ready`)
+        } catch (loginErr) {
+          setSpotifyBusy(false)
+          setSpotifyError(loginErr instanceof Error ? loginErr.message : 'No pude abrir Spotify.')
+        }
+        return
+      }
+      setSpotifyError(message || 'No pude crear la playlist.')
+    }
+  }
+
   if (!list) {
     return (
       <div className="mx-auto max-w-md px-4 py-16 text-center">
@@ -84,6 +172,10 @@ export function SetlistView() {
       </div>
     )
   }
+
+  const spotifyTracksReady =
+    state.status === 'ready' &&
+    list.items.some((item) => songs.some((song) => song.id === item.songId))
 
   return (
     <div className="min-h-svh pb-12">
@@ -134,6 +226,44 @@ export function SetlistView() {
           ]}
         />
         {list.evergreen && <p className="text-sm text-muted-foreground">{evergreenStatus(list)}</p>}
+        {spotifyConfigured() && (
+          <div className="flex flex-col gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={!spotifyTracksReady || spotifyBusy}
+                onClick={() => void createOnSpotify()}
+              >
+                <ListMusic />
+                {spotifyBusy ? 'Creando en Spotify…' : 'Crear playlist en Spotify'}
+              </Button>
+              {spotifyResult?.url && (
+                <a
+                  href={spotifyResult.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-sm font-medium underline-offset-2 hover:underline"
+                >
+                  Abrir playlist
+                </a>
+              )}
+            </div>
+            {spotifyError && <p className="text-sm text-destructive">{spotifyError}</p>}
+            {spotifyResult && (
+              <p className="text-sm text-muted-foreground">
+                {spotifyResult.matched === 0
+                  ? 'No encontré ninguna canción en Spotify.'
+                  : `Agregué ${spotifyResult.matched} canción${spotifyResult.matched === 1 ? '' : 'es'}.`}
+                {spotifyResult.missing.length > 0
+                  ? ` Sin coincidencia: ${spotifyResult.missing
+                      .map((track) => (track.artist ? `${track.title} (${track.artist})` : track.title))
+                      .join(', ')}.`
+                  : ''}
+              </p>
+            )}
+          </div>
+        )}
         {can(user, 'create') && (
         <div className="relative">
           <Input

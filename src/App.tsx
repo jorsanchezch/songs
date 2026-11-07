@@ -12,13 +12,24 @@ import { SetlistsView } from '@/components/SetlistsView'
 import { SongEditor } from '@/components/SongEditor'
 import { SongVersionsView } from '@/components/SongVersionsView'
 import { SongView } from '@/components/SongView'
+import { SpotifyCallback } from '@/components/SpotifyCallback'
 import { StudyIndex, StudyView } from '@/components/StudyView'
 
 export default function App() {
   const basename = import.meta.env.BASE_URL.replace(/\/$/, '')
   return (
     <BrowserRouter basename={basename}>
-      <SessionProvider>
+      <Routes>
+        <Route path="/spotify/callback" element={<SpotifyCallback />} />
+        <Route path="*" element={<SignedInApp />} />
+      </Routes>
+    </BrowserRouter>
+  )
+}
+
+function SignedInApp() {
+  return (
+    <SessionProvider>
       <Routes>
         <Route path="/" element={<LibraryView />} />
         <Route path="/admin" element={<AdminView />} />
@@ -37,8 +48,7 @@ export default function App() {
       </Routes>
       <EscapeFallback />
       <AppVersionFooter />
-      </SessionProvider>
-    </BrowserRouter>
+    </SessionProvider>
   )
 }
 

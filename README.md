@@ -21,6 +21,8 @@ Secretos del repositorio (Settings → Secrets and variables → Actions), o des
 # Account ID de la cuenta (barra lateral del dashboard), NO el database_id de D1
 printf '%s' 'TU_ACCOUNT_ID' | gh secret set CLOUDFLARE_ACCOUNT_ID -R jorsanchezch/songs
 printf '%s' 'TU_API_TOKEN' | gh secret set CLOUDFLARE_API_TOKEN -R jorsanchezch/songs
+# Opcional: playlist desde listas (Client ID público de Spotify, PKCE)
+printf '%s' 'TU_SPOTIFY_CLIENT_ID' | gh secret set VITE_SPOTIFY_CLIENT_ID -R jorsanchezch/songs
 ```
 
 `CLOUDFLARE_API_TOKEN` = token con plantilla **Edit Cloudflare Workers**. `CLOUDFLARE_ACCOUNT_ID` = Account ID (en este proyecto: `a3568bed2d3a17ee343a6714d68c15f2`). El UUID en `wrangler.toml` es solo el `database_id` de D1.
@@ -61,6 +63,17 @@ npm run db:set-password -- jsanchezch --d1   # producción
 ```
 
 El workflow de Pages construye con `VITE_SONGBOOK_API=https://songbook.jorsanchezch.workers.dev`, así el sitio publicado llama a D1. GitHub Pages sigue sirviendo solo el frontend.
+
+### Spotify (playlist desde una lista)
+
+En cada lista, **Crear playlist en Spotify** busca las canciones por título y artista, crea una playlist privada en tu cuenta y añade las coincidencias. Usa Authorization Code + PKCE en el navegador (sin secretos en el Worker).
+
+1. Crea una app en [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard).
+2. En Redirect URIs agrega exactamente:
+   - `http://127.0.0.1:4322/spotify/callback` (local)
+   - `https://jorsanchezch.github.io/songs/spotify/callback` (Pages)
+3. Copia el **Client ID** a `.env` como `VITE_SPOTIFY_CLIENT_ID=…` (local) y al secreto de Actions `VITE_SPOTIFY_CLIENT_ID` (producción). El Client ID es público; no hace falta Client Secret con PKCE.
+4. Sin Client ID el botón no aparece.
 
 ### Medios: YouTube, BPM, duración, MP3
 

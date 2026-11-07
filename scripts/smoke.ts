@@ -51,6 +51,7 @@ import { suggestParts } from '../src/lib/partSuggest.ts'
 import { sectionDegrees, sectionProgressions } from '../src/lib/sectionProgression.ts'
 import { diatonicChords, keyName, parseStudyKey, pianoVoicings, signature } from '../src/lib/theory.ts'
 import { distinctMarks, songIconIndex, songMarkTone, SONG_ICON_SHAPES, SONG_MARK_HUES } from '../src/lib/songMark.ts'
+import { pickBestTrack, spotifySearchQuery } from '../src/lib/spotify.ts'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const parentCharts = path.resolve(root, '..')
@@ -891,6 +892,23 @@ assert(pattern.alternatives.every((item) => item.key !== 'C'), 'another song in 
   })
   const ends = timeline.blocks[0]!.lines.map((line) => line.end / 2400)
   assert(ends.every((value) => Math.abs(value - Math.round(value)) < 1e-6), `lines end on bars ${ends}`)
+}
+
+{
+  assert(
+    spotifySearchQuery({ title: 'Aquí como en el cielo', artist: 'Elevation Worship' }) ===
+      'track:"Aquí como en el cielo" artist:"Elevation Worship"',
+    'spotify search quotes multi-word title and artist',
+  )
+  assert(spotifySearchQuery({ title: 'Yeshua', artist: 'Marcos Brunet' }) === 'track:Yeshua artist:"Marcos Brunet"', 'spotify search quotes artist with space')
+  const pick = pickBestTrack(
+    { title: 'Yeshua', artist: 'Marcos Brunet' },
+    [
+      { uri: 'spotify:track:wrong', name: 'Yeshuá', artists: [{ name: 'Otro' }] },
+      { uri: 'spotify:track:right', name: 'Yeshua', artists: [{ name: 'Marcos Brunet' }] },
+    ],
+  )
+  assert(pick?.uri === 'spotify:track:right', 'spotify pick prefers title+artist match')
 }
 
 console.log(`Parsed ${files.length} charts`)
