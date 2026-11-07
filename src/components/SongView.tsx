@@ -694,7 +694,7 @@ export function SongView() {
         if (!settings.viewportJumps || !steps.length) return
         let stepIndex = 0
         steps.forEach((step, position) => {
-          const top = stepTargetTop(step, id ?? step.blockId)
+          const top = stepTargetTop(step, step.blockId)
           if (top != null && top <= line) stepIndex = position
         })
         if (atBottom) stepIndex = Math.max(stepIndex, steps.findIndex((step) => step.key === stepKey))
@@ -796,11 +796,13 @@ export function SongView() {
   }, [])
 
   const stepSection = (direction: -1 | 1) => {
-    const index = Math.max(
-      0,
-      steps.findIndex((step) => step.key === activeStepKey || step.chipIds.includes(activeId ?? '')),
-    )
-    const next = steps[index + direction]
+    // Prefer the active slice key. chipIds match every slice of a part, so they only
+    // fill in when we do not yet know which slice we are on.
+    let index = steps.findIndex((step) => step.key === activeStepKey)
+    if (index < 0) {
+      index = steps.findIndex((step) => step.blockId === activeId || step.chipIds.includes(activeId ?? ''))
+    }
+    const next = steps[Math.max(0, index) + direction]
     if (next) goStep(next)
   }
 
@@ -874,8 +876,14 @@ export function SongView() {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (!event.metaKey || event.altKey || event.ctrlKey || event.shiftKey) return
-      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
       if (typing(event.target)) return
+      if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+        event.preventDefault()
+        const delta = event.key === 'ArrowUp' ? 2 : -2
+        update({ fontSize: Math.min(40, Math.max(16, settings.fontSize + delta)) })
+        return
+      }
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
       if (state.status !== 'ready') return
       const direction = event.key === 'ArrowLeft' ? -1 : 1
       const ids = listaId
@@ -889,7 +897,7 @@ export function SongView() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [listaId, navigate, setlists, songId, state])
+  }, [listaId, navigate, setlists, settings.fontSize, songId, state])
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -1264,13 +1272,25 @@ export function SongView() {
               </WithHint>
             )}
             <WithHint text="Achica la letra de la cifra.">
-              <Button variant="outline" title="Achica la letra de la cifra." onClick={() => update({ fontSize: Math.max(16, settings.fontSize - 2) })}>
+              <Button
+                variant="outline"
+                title="Achica la letra de la cifra. ⌘↓"
+                aria-keyshortcuts="Meta+ArrowDown"
+                onClick={() => update({ fontSize: Math.max(16, settings.fontSize - 2) })}
+              >
                 A−
+                <Kbd>⌘↓</Kbd>
               </Button>
             </WithHint>
             <WithHint text="Aumenta la letra de la cifra.">
-              <Button variant="outline" title="Aumenta la letra de la cifra." onClick={() => update({ fontSize: Math.min(40, settings.fontSize + 2) })}>
+              <Button
+                variant="outline"
+                title="Aumenta la letra de la cifra. ⌘↑"
+                aria-keyshortcuts="Meta+ArrowUp"
+                onClick={() => update({ fontSize: Math.min(40, settings.fontSize + 2) })}
+              >
                 A+
+                <Kbd>⌘↑</Kbd>
               </Button>
             </WithHint>
             <WithHint text="Muestra u oculta los acordes sobre la letra.">
@@ -1438,6 +1458,16 @@ export function SongView() {
                     </>
                   ),
                   label: listaId ? 'Canción en la lista' : 'Canción en la biblioteca',
+                },
+                {
+                  id: 'font',
+                  keys: (
+                    <>
+                      <Kbd>⌘↑</Kbd>
+                      <Kbd>⌘↓</Kbd>
+                    </>
+                  ),
+                  label: 'Tamaño de la letra',
                 },
                 {
                   id: 'leave',
