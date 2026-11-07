@@ -117,6 +117,28 @@ Que se haga aquí Tu voluntad
 Como en el cielo
 {end_of_bridge}
 
+{start_of_solo}
+{comment: Solo (Cifra Club). Notas como acordes de una sola nota: suben y bajan con el tono.}
+[G]                         [Bm7]                      [A]
+[B]   [F#]   [A]   [F#]   [E]{how: bend a F#}        [B]   [F#]   [C#]   [F#]   [E]{how: bend a F#}
+[Bm7]                        [F#m/A]
+[B]   [F#]   [A]   [F#]   [E]{how: bend a F#}        [F#]   [C#]   [F#]   [C#]   [F#]   [C#]   [F#]   [C#]
+[G]                         [Bm7]                      [A]
+[B]   [F#]   [A]   [F#]   [E]{how: bend a F#}        [B]   [F#]   [C#]   [F#]   [E]{how: bend a F#}
+[Bm7]                        [F#m/A]
+[B]   [F#]   [A]   [F#]   [E]{how: bend a F#}        [F#]   [C#]   [F#]   [C#]   [F#]   [C#]   [F#]   [C#]
+[G]                              [Bm7]                           [A]
+[B]  [F#]  [B]  [F#]  [A]  [F#]  [E]{how: bend a F#}           [B]  [F#]  [B]  [F#]  [C#]  [F#]  [E]{how: bend a F#}
+[Bm7]                            [F#m/A]
+[B]  [F#]  [B]  [F#]  [A]  [F#]  [E]{how: bend a F#}           [F#]  [C#]  [F#]  [C#]  [F#]  [C#]  [F#]  [C#]  [D]{how: desliza desde C#}
+[G]                    [Bm7]
+[D]  [F#]  [D]  [F#]  [F]  [C#]  [E]{how: bend a F#}   [D]  [F#]  [D]  [F#]
+[A]                    [Bm7]
+[C#]  [F#]  [E]{how: bend a F#}  [B]  [F#]  [B]  [F#]  [A]  [F#]  [E]{how: bend a F#}
+[F#m/A]
+[F#]  [C#]  [F#]  [C#]  [F#]  [C#]  [F#]  [C#]  [F#]  [C#]  [F#]  [C#]  [D]
+{end_of_solo}
+
 {start_of_verse}
 [G]   [D]   [D7M]
 Milagros pueden suceder
