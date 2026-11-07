@@ -7,6 +7,9 @@ export const VIEWPORT_JUMP_DOCK_RESERVE_PX = 92
 /** Breathing room / safe-area after header, footer, dock, and scroll margin. */
 export const VIEWPORT_JUMP_SLACK_PX = 32
 
+/** When a part is taller than the screen, jump every N chart lines. */
+export const VIEWPORT_JUMP_LINES = 4
+
 /**
  * Usable chart height for one live jump.
  * `chartGapPx` is the open strip between the sticky header bottom and the fixed footer top.
@@ -20,24 +23,22 @@ export function usableJumpHeight(
 
 /**
  * Start line indexes for scroll targets inside one part.
- * Packs consecutive lines while they fit in `usableHeight`; the last slice may be short.
- * A single oversized line still starts its own slice.
+ * If the part fits in `usableHeight`, one jump. Otherwise equal chunks of `linesPerSlice` lines
+ * (last chunk may be shorter).
  */
-export function sliceStartLines(lineHeights: number[], usableHeight: number): number[] {
+export function sliceStartLines(
+  lineHeights: number[],
+  usableHeight: number,
+  linesPerSlice = VIEWPORT_JUMP_LINES,
+): number[] {
   if (lineHeights.length === 0) return [0]
-  const heights = lineHeights.map((height) => Math.max(0, height))
-  const total = heights.reduce((sum, height) => sum + height, 0)
-  if (usableHeight <= 0 || total <= usableHeight) return [0]
+  const total = lineHeights.reduce((sum, height) => sum + Math.max(0, height), 0)
+  const size = Math.max(1, linesPerSlice)
+  if (usableHeight <= 0 || total <= usableHeight || lineHeights.length <= size) return [0]
 
   const starts = [0]
-  let filled = 0
-  for (let index = 0; index < heights.length; index++) {
-    const height = heights[index]!
-    if (filled > 0 && filled + height > usableHeight) {
-      starts.push(index)
-      filled = 0
-    }
-    filled += height
+  for (let index = size; index < lineHeights.length; index += size) {
+    starts.push(index)
   }
   return starts
 }

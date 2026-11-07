@@ -20,8 +20,8 @@ export type ViewSettings = {
   /** Guitar charts: hide a slash chord's bass and keep the chord itself. */
   slashAsDegree: boolean
   /**
-   * Live nav: split tall parts into viewport-sized jumps (chips/arrows only).
-   * Does not change fold modes or how the chart is drawn.
+   * Live nav: when a part is taller than the screen, jump every 4 lines (chips/arrows).
+   * On by default. Does not change fold modes.
    */
   viewportJumps: boolean
 }
@@ -38,7 +38,7 @@ const DEFAULTS: ViewSettings = {
   chordShapes: {},
   instrument: DEFAULT_INSTRUMENT,
   slashAsDegree: true,
-  viewportJumps: false,
+  viewportJumps: true,
 }
 
 function savedSpelling(value: unknown): Spelling {
@@ -76,7 +76,7 @@ export function loadSettings(): ViewSettings {
       fold: savedFold(parsed),
       instrument: isInstrument(parsed.instrument) ? parsed.instrument : DEFAULT_INSTRUMENT,
       slashAsDegree: parsed.slashAsDegree !== false,
-      viewportJumps: parsed.viewportJumps === true,
+      viewportJumps: parsed.viewportJumps !== false,
     }
   } catch {
     return { ...DEFAULTS, visibleNotes: [...NOTE_TYPES], semitones: {}, chordShapes: {} }

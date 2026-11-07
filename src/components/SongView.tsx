@@ -1902,7 +1902,7 @@ const SHARE_HINT =
   'Una copia personal se puede compartir con todos o con una persona para que la vean. No publica el catálogo.'
 const USER_HINT = 'Una persona que entra con su nombre. Tiene un rol: dueño, admin o lectura.'
 const VIEWPORT_JUMPS_HINT =
-  'En vivo, parte las partes largas en saltos del área visible (menos cabecera, pie, botón de reproducción y un margen). Anterior, Siguiente y las flechas avanzan esos trozos; los chips pueden verse como Verso 1a, 1b… Dentro de la cifra, una línea de puntos marca cada salto (no es un cambio de parte).'
+  'Si una parte no cabe en pantalla, la divide de 4 en 4 líneas (Verso 1a, 1b…). Anterior/Siguiente y las flechas saltan esos trozos; una línea de puntos marca el salto dentro de la cifra. No cambia el plegado.'
 
 function buildNavSteps(
   chips: ReturnType<typeof headerChips>,

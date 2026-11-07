@@ -101,7 +101,7 @@ El botón ▶ abajo a la derecha avanza solo por las partes; elegir una parte a 
 - **Esta canción:** *Entrada* es lo que suena antes de la primera parte; *Marcar partes* reproduce el audio y se toca al empezar cada parte (`M`, `→` o el pedal) para guardar lo que dura cada una. Se guarda por video o MP3 en `songs.playback`.
 - **Teclas:** `P` reproduce o para · `⇧←` `⇧→` «estamos aquí» · `−` `+` mueven la entrada ¼ s.
 
-**Saltos por pantalla** (en Controles) parte las partes largas en saltos del alto de la pantalla para las flechas y el pedal, sin cambiar cómo se ve la cifra.
+**Saltos por pantalla** (en Controles, activo por defecto) divide una parte que no cabe en pantalla de 4 en 4 líneas para las flechas y el pedal, sin cambiar el plegado de la cifra.
 
 ### Audio MP3 (R2, no D1)
 
