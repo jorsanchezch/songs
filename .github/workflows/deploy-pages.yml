@@ -30,6 +30,7 @@ jobs:
           GITHUB_PUSHED_AT: ${{ github.event.repository.pushed_at }}
           VITE_SONGBOOK_API: https://songbook.jorsanchezch.workers.dev
           VITE_SPOTIFY_CLIENT_ID: ${{ secrets.VITE_SPOTIFY_CLIENT_ID }}
+          VITE_YOUTUBE_CLIENT_ID: ${{ secrets.VITE_YOUTUBE_CLIENT_ID }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

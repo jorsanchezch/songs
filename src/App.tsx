@@ -14,6 +14,7 @@ import { SongVersionsView } from '@/components/SongVersionsView'
 import { SongView } from '@/components/SongView'
 import { SpotifyCallback } from '@/components/SpotifyCallback'
 import { StudyIndex, StudyView } from '@/components/StudyView'
+import { YoutubeCallback } from '@/components/YoutubeCallback'
 
 export default function App() {
   const basename = import.meta.env.BASE_URL.replace(/\/$/, '')
@@ -21,6 +22,7 @@ export default function App() {
     <BrowserRouter basename={basename}>
       <Routes>
         <Route path="/spotify/callback" element={<SpotifyCallback />} />
+        <Route path="/youtube/callback" element={<YoutubeCallback />} />
         <Route path="*" element={<SignedInApp />} />
       </Routes>
     </BrowserRouter>

@@ -52,6 +52,12 @@ import { sectionDegrees, sectionProgressions } from '../src/lib/sectionProgressi
 import { diatonicChords, keyName, parseStudyKey, pianoVoicings, signature } from '../src/lib/theory.ts'
 import { distinctMarks, songIconIndex, songMarkTone, SONG_ICON_SHAPES, SONG_MARK_HUES } from '../src/lib/songMark.ts'
 import { pickBestTrack, spotifySearchQuery } from '../src/lib/spotify.ts'
+import {
+  isYoutubeVideoId,
+  pickBestVideo,
+  songYoutubeTrack,
+  youtubeSearchQuery,
+} from '../src/lib/youtubePlaylist.ts'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const parentCharts = path.resolve(root, '..')
@@ -909,6 +915,29 @@ assert(pattern.alternatives.every((item) => item.key !== 'C'), 'another song in 
     ],
   )
   assert(pick?.uri === 'spotify:track:right', 'spotify pick prefers title+artist match')
+}
+
+{
+  assert(isYoutubeVideoId('nUC1ddmkGrE'), 'youtube video id shape')
+  assert(!isYoutubeVideoId('short'), 'rejects short youtube ids')
+  assert(
+    youtubeSearchQuery({ title: 'Yeshua', artist: 'Marcos Brunet' }) === 'Yeshua Marcos Brunet',
+    'youtube search joins title and artist',
+  )
+  const fromChart = songYoutubeTrack({
+    title: 'Aquí como en el cielo',
+    artist: 'Elevation Worship',
+    sources: [{ url: 'https://www.youtube.com/watch?v=nUC1ddmkGrE', label: 'YouTube' }],
+  })
+  assert(fromChart.videoId === 'nUC1ddmkGrE', 'songYoutubeTrack reads chart video')
+  const pick = pickBestVideo(
+    { title: 'Yeshua', artist: 'Marcos Brunet' },
+    [
+      { id: { videoId: 'aaaaaaaaaaa' }, snippet: { title: 'Otra cosa', channelTitle: 'Otro' } },
+      { id: { videoId: 'esxdJ7-k9AA' }, snippet: { title: 'Yeshua', channelTitle: 'Marcos Brunet' } },
+    ],
+  )
+  assert(pick?.videoId === 'esxdJ7-k9AA', 'youtube pick prefers title+channel match')
 }
 
 console.log(`Parsed ${files.length} charts`)

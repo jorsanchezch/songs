@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { ArrowLeft, Check, ChevronDown, ChevronUp, GripVertical, ListMusic, Plus, Trash2 } from 'lucide-react'
+import { ArrowLeft, Check, ChevronDown, ChevronUp, GripVertical, ListMusic, ListVideo, Plus, Trash2 } from 'lucide-react'
 import { Kbd, ShortcutLegend } from '@/components/KeyHint'
 import { SongMark } from '@/components/SongMark'
 import { Button } from '@/components/ui/button'
@@ -34,6 +34,18 @@ import {
   type SpotifyPlaylistResult,
   type SpotifyTrackRef,
 } from '@/lib/spotify'
+import {
+  beginYoutubeLogin,
+  clearPendingYoutubePlaylist,
+  createSetlistYoutubePlaylist,
+  ensureYoutubeAccess,
+  readPendingYoutubePlaylist,
+  savePendingYoutubePlaylist,
+  songYoutubeTrack,
+  youtubeConfigured,
+  type YoutubePlaylistResult,
+  type YoutubeTrackRef,
+} from '@/lib/youtubePlaylist'
 
 const page = 'mx-auto w-full max-w-[52.8rem] px-4'
 
@@ -53,8 +65,12 @@ export function SetlistView() {
   const [spotifyBusy, setSpotifyBusy] = useState(false)
   const [spotifyError, setSpotifyError] = useState('')
   const [spotifyResult, setSpotifyResult] = useState<SpotifyPlaylistResult | null>(null)
+  const [youtubeBusy, setYoutubeBusy] = useState(false)
+  const [youtubeError, setYoutubeError] = useState('')
+  const [youtubeResult, setYoutubeResult] = useState<YoutubePlaylistResult | null>(null)
   const dragFrom = useRef<number | null>(null)
   const spotifyRun = useRef(false)
+  const youtubeRun = useRef(false)
 
   const matches = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase('es')
@@ -103,6 +119,21 @@ export function SetlistView() {
       return
     }
     void finishSpotifyPlaylist(pending.name, pending.tracks)
+  }, [searchParams, setSearchParams, setlistId])
+
+  useEffect(() => {
+    if (searchParams.get('youtube') !== 'ready') return
+    if (youtubeRun.current) return
+    youtubeRun.current = true
+    const next = new URLSearchParams(searchParams)
+    next.delete('youtube')
+    setSearchParams(next, { replace: true })
+    const pending = readPendingYoutubePlaylist()
+    if (!pending || pending.setlistId !== setlistId) {
+      setYoutubeError('No encontré la lista pendiente para YouTube.')
+      return
+    }
+    void finishYoutubePlaylist(pending.name, pending.tracks)
   }, [searchParams, setSearchParams, setlistId])
 
   async function finishSpotifyPlaylist(name: string, tracks: SpotifyTrackRef[]) {
@@ -162,6 +193,63 @@ export function SetlistView() {
     }
   }
 
+  async function finishYoutubePlaylist(name: string, tracks: YoutubeTrackRef[]) {
+    setYoutubeBusy(true)
+    setYoutubeError('')
+    setYoutubeResult(null)
+    try {
+      const result = await createSetlistYoutubePlaylist({
+        setlistId,
+        name,
+        tracks,
+      })
+      clearPendingYoutubePlaylist()
+      setYoutubeResult(result)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'No pude crear la playlist.'
+      if (message === 'YOUTUBE_LOGIN') {
+        setYoutubeError('Vuelve a conectar YouTube e inténtalo otra vez.')
+      } else {
+        setYoutubeError(message)
+      }
+    } finally {
+      setYoutubeBusy(false)
+    }
+  }
+
+  async function createOnYoutube() {
+    if (!list || !youtubeConfigured() || youtubeBusy) return
+    const tracks = list.items
+      .map((item) => songs.find((song) => song.id === item.songId))
+      .filter((song): song is NonNullable<typeof song> => Boolean(song))
+      .map((song) => songYoutubeTrack(song))
+    if (tracks.length === 0) {
+      setYoutubeError('Esta lista no tiene canciones que YouTube pueda buscar.')
+      return
+    }
+    const pending = { setlistId: list.id, name: list.name, tracks }
+    savePendingYoutubePlaylist(pending)
+    setYoutubeError('')
+    setYoutubeResult(null)
+    try {
+      await ensureYoutubeAccess()
+      await finishYoutubePlaylist(pending.name, pending.tracks)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : ''
+      if (message === 'YOUTUBE_LOGIN') {
+        setYoutubeBusy(true)
+        try {
+          await beginYoutubeLogin(`/listas/${list.id}?youtube=ready`)
+        } catch (loginErr) {
+          setYoutubeBusy(false)
+          setYoutubeError(loginErr instanceof Error ? loginErr.message : 'No pude abrir YouTube.')
+        }
+        return
+      }
+      setYoutubeError(message || 'No pude crear la playlist.')
+    }
+  }
+
   if (!list) {
     return (
       <div className="mx-auto max-w-md px-4 py-16 text-center">
@@ -173,9 +261,10 @@ export function SetlistView() {
     )
   }
 
-  const spotifyTracksReady =
+  const playlistTracksReady =
     state.status === 'ready' &&
     list.items.some((item) => songs.some((song) => song.id === item.songId))
+  const showPlaylistExport = spotifyConfigured() || youtubeConfigured()
 
   return (
     <div className="min-h-svh pb-12">
@@ -226,27 +315,54 @@ export function SetlistView() {
           ]}
         />
         {list.evergreen && <p className="text-sm text-muted-foreground">{evergreenStatus(list)}</p>}
-        {spotifyConfigured() && (
-          <div className="flex flex-col gap-2">
+        {showPlaylistExport && (
+          <div className="flex flex-col gap-3">
             <div className="flex flex-wrap items-center gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                disabled={!spotifyTracksReady || spotifyBusy}
-                onClick={() => void createOnSpotify()}
-              >
-                <ListMusic />
-                {spotifyBusy ? 'Creando en Spotify…' : 'Crear playlist en Spotify'}
-              </Button>
-              {spotifyResult?.url && (
-                <a
-                  href={spotifyResult.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-sm font-medium underline-offset-2 hover:underline"
-                >
-                  Abrir playlist
-                </a>
+              {spotifyConfigured() && (
+                <>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={!playlistTracksReady || spotifyBusy}
+                    onClick={() => void createOnSpotify()}
+                  >
+                    <ListMusic />
+                    {spotifyBusy ? 'Creando en Spotify…' : 'Crear playlist en Spotify'}
+                  </Button>
+                  {spotifyResult?.url && (
+                    <a
+                      href={spotifyResult.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-sm font-medium underline-offset-2 hover:underline"
+                    >
+                      Abrir en Spotify
+                    </a>
+                  )}
+                </>
+              )}
+              {youtubeConfigured() && (
+                <>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={!playlistTracksReady || youtubeBusy}
+                    onClick={() => void createOnYoutube()}
+                  >
+                    <ListVideo />
+                    {youtubeBusy ? 'Creando en YouTube…' : 'Crear playlist en YouTube'}
+                  </Button>
+                  {youtubeResult?.url && (
+                    <a
+                      href={youtubeResult.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-sm font-medium underline-offset-2 hover:underline"
+                    >
+                      Abrir en YouTube
+                    </a>
+                  )}
+                </>
               )}
             </div>
             {spotifyError && <p className="text-sm text-destructive">{spotifyError}</p>}
@@ -254,9 +370,22 @@ export function SetlistView() {
               <p className="text-sm text-muted-foreground">
                 {spotifyResult.matched === 0
                   ? 'No encontré ninguna canción en Spotify.'
-                  : `Agregué ${spotifyResult.matched} canción${spotifyResult.matched === 1 ? '' : 'es'}.`}
+                  : `Spotify: agregué ${spotifyResult.matched} canción${spotifyResult.matched === 1 ? '' : 'es'}.`}
                 {spotifyResult.missing.length > 0
                   ? ` Sin coincidencia: ${spotifyResult.missing
+                      .map((track) => (track.artist ? `${track.title} (${track.artist})` : track.title))
+                      .join(', ')}.`
+                  : ''}
+              </p>
+            )}
+            {youtubeError && <p className="text-sm text-destructive">{youtubeError}</p>}
+            {youtubeResult && (
+              <p className="text-sm text-muted-foreground">
+                {youtubeResult.matched === 0
+                  ? 'No encontré ningún video en YouTube.'
+                  : `YouTube: agregué ${youtubeResult.matched} video${youtubeResult.matched === 1 ? '' : 's'}.`}
+                {youtubeResult.missing.length > 0
+                  ? ` Sin coincidencia: ${youtubeResult.missing
                       .map((track) => (track.artist ? `${track.title} (${track.artist})` : track.title))
                       .join(', ')}.`
                   : ''}
