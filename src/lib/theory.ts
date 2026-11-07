@@ -10,6 +10,7 @@ export type Quality = { id: string; label: string; intervals: number[] }
 export const QUALITIES: Quality[] = [
   { id: '', label: 'Mayor', intervals: [0, 4, 7] },
   { id: 'm', label: 'Menor', intervals: [0, 3, 7] },
+  { id: '5', label: 'Power (5)', intervals: [0, 7] },
   { id: '7', label: 'Séptima', intervals: [0, 4, 7, 10] },
   { id: 'maj7', label: 'Séptima mayor', intervals: [0, 4, 7, 11] },
   { id: 'm7', label: 'Menor séptima', intervals: [0, 3, 7, 10] },
