@@ -6,10 +6,12 @@ import { applyEditingKey, applyOriginalKey, foldComposerIntoArtist, normalizeKey
 import { keyChoices } from '../src/lib/theory.ts'
 import { blocksFor, headerChips, headerChipText, partKind } from '../src/lib/display.ts'
 import {
+  sliceBreaksByBlock,
   sliceChipLabel,
   sliceLetter,
   sliceStartLines,
   usableJumpHeight,
+  type ViewportNavStep,
 } from '../src/lib/viewportJumps.ts'
 import { diagramFor, shapesFor } from '../src/lib/guitar.ts'
 import { chartToCho, chartToSongMd, isBlockedPage, isPlainChordLine, songToMarkdown, wrapPlainChordLine } from '../src/lib/importChart.ts'
@@ -466,6 +468,14 @@ assert(sliceChipLabel('Verso 1', 0, 2) === 'Verso 1a' && sliceChipLabel('Verso 1
 assert(sliceChipLabel('Coro', 0, 2) === 'Coro a', 'plain labels get a spaced letter')
 assert(sliceChipLabel('Verso 1', 0, 1) === 'Verso 1', 'single slice keeps the label')
 assert(sliceLetter(26) === 'aa', 'slice letters continue past z')
+const breakSteps: ViewportNavStep[] = [
+  { key: 'v', blockId: 'v', lineIndex: null, label: 'Verso 1a', chipIds: ['v'], weight: 1 },
+  { key: 'v#4', blockId: 'v', lineIndex: 4, label: 'Verso 1b', chipIds: ['v'], weight: 1 },
+  { key: 'c', blockId: 'c', lineIndex: null, label: 'Coro', chipIds: ['c'], weight: 1 },
+]
+const breaks = sliceBreaksByBlock(breakSteps)
+assert(breaks.get('v')?.get(4) === 'Verso 1b', 'slice breaks map the mid-part jump')
+assert(!breaks.get('v')?.has(0) && !breaks.has('c'), 'first slice and unsplit parts have no break')
 
 const openC = diagramFor('C')
 assert(openC?.frets.join(',') === '-1,3,2,0,1,0', 'open C shape')

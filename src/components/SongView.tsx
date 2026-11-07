@@ -78,6 +78,7 @@ import type { SongPlayback } from '@/lib/types'
 import { neighborSong, setSetlistSemitones, songPath } from '@/lib/setlists'
 import { cn } from '@/lib/utils'
 import {
+  sliceBreaksByBlock,
   sliceChipLabel,
   sliceKey,
   sliceStartLines,
@@ -184,6 +185,10 @@ export function SongView() {
         usableHeight: jumpHeight,
       }),
     [blocks, jumpHeight, lineHeights, nav, settings.viewportJumps],
+  )
+  const sliceBreaks = useMemo(
+    () => (settings.viewportJumps ? sliceBreaksByBlock(steps) : new Map<string, Map<number, string>>()),
+    [settings.viewportJumps, steps],
   )
 
   const activeId =
@@ -1567,12 +1572,15 @@ export function SongView() {
                   onToggle={setOpenNote}
                 />
                 <div className="overflow-x-auto">
-                  {lines.map((line, lineIndex) => (
+                  {lines.map((line, lineIndex) => {
+                    const sliceLabel = sliceBreaks.get(block.id)?.get(lineIndex)
+                    return (
                     <div
                       key={`${block.id}-${lineIndex}`}
                       id={`line-${block.id}-${lineIndex}`}
                       style={{ scrollMarginTop: `${headerHeight + 8}px` }}
                     >
+                      {sliceLabel && <ViewportSliceBreak label={sliceLabel} />}
                       <ChartRow
                         block={shown}
                         lineIndex={lineIndex}
@@ -1590,7 +1598,8 @@ export function SongView() {
                         playingChord={playingLine === lineIndex ? playingHere?.chordIndex : null}
                       />
                     </div>
-                  ))}
+                    )
+                  })}
                   {block.section.sameAs && block.section.lines.length === 0 && (
                     <p className="font-sans text-[0.65em] text-muted-foreground">
                       No se encontró la parte «{block.section.sameAs}».
@@ -1874,11 +1883,26 @@ function playbackStep(steps: ViewportNavStep[], cursor: PlaybackCursor): Viewpor
   return own.filter((step) => (step.lineIndex ?? 0) <= line).pop() ?? own[0]
 }
 
+/** Mid-part viewport jump: dotted rule, not the dashed “siguiente parte” cue. */
+function ViewportSliceBreak({ label }: { label: string }) {
+  return (
+    <div
+      role="separator"
+      aria-label={`Salto de pantalla: ${label}`}
+      className="my-2.5 flex items-center gap-2 font-sans text-[0.55em] tracking-wide text-muted-foreground"
+    >
+      <span aria-hidden className="h-px min-w-4 flex-1 border-t border-dotted border-muted-foreground/55" />
+      <span className="shrink-0 font-semibold uppercase">{label}</span>
+      <span aria-hidden className="h-px min-w-4 flex-1 border-t border-dotted border-muted-foreground/55" />
+    </div>
+  )
+}
+
 const SHARE_HINT =
   'Una copia personal se puede compartir con todos o con una persona para que la vean. No publica el catálogo.'
 const USER_HINT = 'Una persona que entra con su nombre. Tiene un rol: dueño, admin o lectura.'
 const VIEWPORT_JUMPS_HINT =
-  'En vivo, parte las partes largas en saltos del área visible (menos cabecera, pie, botón de reproducción y un margen). Anterior, Siguiente y las flechas avanzan esos trozos; los chips pueden verse como Verso 1a, 1b… No cambia cómo se muestra la cifra ni los modos de plegado.'
+  'En vivo, parte las partes largas en saltos del área visible (menos cabecera, pie, botón de reproducción y un margen). Anterior, Siguiente y las flechas avanzan esos trozos; los chips pueden verse como Verso 1a, 1b… Dentro de la cifra, una línea de puntos marca cada salto (no es un cambio de parte).'
 
 function buildNavSteps(
   chips: ReturnType<typeof headerChips>,

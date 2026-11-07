@@ -73,3 +73,18 @@ export type ViewportNavStep = {
 export function sliceKey(blockId: string, lineIndex: number | null): string {
   return lineIndex == null ? blockId : `${blockId}#${lineIndex}`
 }
+
+/** Line indexes (within a part) where a viewport jump starts after the first slice. */
+export function sliceBreaksByBlock(steps: ViewportNavStep[]): Map<string, Map<number, string>> {
+  const map = new Map<string, Map<number, string>>()
+  for (const step of steps) {
+    if (step.lineIndex == null || step.lineIndex <= 0) continue
+    let lines = map.get(step.blockId)
+    if (!lines) {
+      lines = new Map()
+      map.set(step.blockId, lines)
+    }
+    lines.set(step.lineIndex, step.label)
+  }
+  return map
+}
