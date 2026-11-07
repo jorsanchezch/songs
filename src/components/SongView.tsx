@@ -123,9 +123,8 @@ export function SongView() {
   const [announce, setAnnounce] = useState('')
   const [headerHeight, setHeaderHeight] = useState(0)
   const [footerHeight, setFooterHeight] = useState(0)
-  const [viewportHeight, setViewportHeight] = useState(() =>
-    typeof window === 'undefined' ? 800 : window.innerHeight,
-  )
+  /** Open strip between sticky header bottom and fixed footer top. */
+  const [chartGap, setChartGap] = useState(0)
   const [chartWidth, setChartWidth] = useState(0)
   const [chPerPx, setChPerPx] = useState(0.6)
   const [lineHeights, setLineHeights] = useState<Record<string, number[]>>({})
@@ -176,7 +175,7 @@ export function SongView() {
     [chart, settings.fold, version],
   )
   const nav = useMemo(() => headerChips(blocks, foldGroupsParts(settings.fold)), [blocks, settings.fold])
-  const jumpHeight = usableJumpHeight(viewportHeight, headerHeight, footerHeight)
+  const jumpHeight = usableJumpHeight(chartGap)
   const steps = useMemo(
     () =>
       buildNavSteps(nav, blocks, {
@@ -606,29 +605,28 @@ export function SongView() {
     }
   }, [playCursor])
 
-  // The sticky header changes height with the controls. Parts land just under it.
+  // Sticky header + fixed footer define the chart strip; jump height follows that gap.
   useLayoutEffect(() => {
     const header = headerRef.current
-    if (!header) return
-    const observer = new ResizeObserver(() => setHeaderHeight(header.offsetHeight))
-    observer.observe(header)
-    return () => observer.disconnect()
-  })
-
-  useLayoutEffect(() => {
     const footer = footerRef.current
-    if (!footer) return
-    const observer = new ResizeObserver(() => setFooterHeight(footer.offsetHeight))
+    if (!header || !footer) return
+    const measure = () => {
+      const headerBox = header.getBoundingClientRect()
+      const footerBox = footer.getBoundingClientRect()
+      setHeaderHeight(headerBox.height)
+      setFooterHeight(footerBox.height)
+      setChartGap(Math.max(0, footerBox.top - headerBox.bottom))
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(header)
     observer.observe(footer)
-    return () => observer.disconnect()
+    window.addEventListener('resize', measure)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', measure)
+    }
   })
-
-  useEffect(() => {
-    const onResize = () => setViewportHeight(window.innerHeight)
-    onResize()
-    window.addEventListener('resize', onResize)
-    return () => window.removeEventListener('resize', onResize)
-  }, [])
 
   // Line heights feed equal viewport slices when the live-jump option is on.
   useLayoutEffect(() => {
@@ -1850,7 +1848,7 @@ const SHARE_HINT =
   'Una copia personal se puede compartir con todos o con una persona para que la vean. No publica el catálogo.'
 const USER_HINT = 'Una persona que entra con su nombre. Tiene un rol: dueño, admin o lectura.'
 const VIEWPORT_JUMPS_HINT =
-  'En vivo, parte las partes largas en saltos del alto de la pantalla (menos cabecera y pie). Anterior, Siguiente y las flechas avanzan esos trozos; los chips pueden verse como Verso 1a, 1b… No cambia cómo se muestra la cifra ni los modos de plegado.'
+  'En vivo, parte las partes largas en saltos del área visible (menos cabecera, pie, botón de reproducción y un margen). Anterior, Siguiente y las flechas avanzan esos trozos; los chips pueden verse como Verso 1a, 1b… No cambia cómo se muestra la cifra ni los modos de plegado.'
 
 function buildNavSteps(
   chips: ReturnType<typeof headerChips>,

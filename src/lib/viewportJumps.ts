@@ -1,34 +1,43 @@
-/** Slack between the sticky header, song footer, and the usable jump height. */
-export const VIEWPORT_JUMP_SLACK_PX = 24
+/** Landing offset under the sticky header (`scroll-margin-top`). */
+export const VIEWPORT_JUMP_SCROLL_MARGIN_PX = 8
 
-/** Usable chart height for one live jump: viewport minus chrome. */
+/** Collapsed PlaybackDock (size-20) sits in the chart strip above the footer. */
+export const VIEWPORT_JUMP_DOCK_RESERVE_PX = 92
+
+/** Breathing room / safe-area after header, footer, dock, and scroll margin. */
+export const VIEWPORT_JUMP_SLACK_PX = 32
+
+/**
+ * Usable chart height for one live jump.
+ * `chartGapPx` is the open strip between the sticky header bottom and the fixed footer top.
+ */
 export function usableJumpHeight(
-  viewportHeight: number,
-  headerHeight: number,
-  footerHeight: number,
-  slack = VIEWPORT_JUMP_SLACK_PX,
+  chartGapPx: number,
+  extras = VIEWPORT_JUMP_SCROLL_MARGIN_PX + VIEWPORT_JUMP_DOCK_RESERVE_PX + VIEWPORT_JUMP_SLACK_PX,
 ): number {
-  return Math.max(48, viewportHeight - headerHeight - footerHeight - slack)
+  return Math.max(48, chartGapPx - extras)
 }
 
 /**
- * Start line indexes for equal scroll targets inside one part.
- * Packs consecutive lines up to `usableHeight`; the last slice may be short.
+ * Start line indexes for scroll targets inside one part.
+ * Packs consecutive lines while they fit in `usableHeight`; the last slice may be short.
  * A single oversized line still starts its own slice.
  */
 export function sliceStartLines(lineHeights: number[], usableHeight: number): number[] {
   if (lineHeights.length === 0) return [0]
-  const total = lineHeights.reduce((sum, height) => sum + Math.max(0, height), 0)
+  const heights = lineHeights.map((height) => Math.max(0, height))
+  const total = heights.reduce((sum, height) => sum + height, 0)
   if (usableHeight <= 0 || total <= usableHeight) return [0]
 
   const starts = [0]
   let filled = 0
-  for (let index = 0; index < lineHeights.length - 1; index++) {
-    filled += Math.max(0, lineHeights[index] ?? 0)
-    if (filled >= usableHeight) {
-      starts.push(index + 1)
+  for (let index = 0; index < heights.length; index++) {
+    const height = heights[index]!
+    if (filled > 0 && filled + height > usableHeight) {
+      starts.push(index)
       filled = 0
     }
+    filled += height
   }
   return starts
 }
