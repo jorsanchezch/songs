@@ -21,12 +21,18 @@ Secretos del repositorio (Settings → Secrets and variables → Actions), o des
 # Account ID de la cuenta (barra lateral del dashboard), NO el database_id de D1
 printf '%s' 'TU_ACCOUNT_ID' | gh secret set CLOUDFLARE_ACCOUNT_ID -R jorsanchezch/songs
 printf '%s' 'TU_API_TOKEN' | gh secret set CLOUDFLARE_API_TOKEN -R jorsanchezch/songs
-# Opcional: playlist desde listas (Client IDs públicos, PKCE)
+# Opcional: playlist desde listas (Client IDs públicos, PKCE → Pages build)
 printf '%s' 'TU_SPOTIFY_CLIENT_ID' | gh secret set VITE_SPOTIFY_CLIENT_ID -R jorsanchezch/songs
 printf '%s' 'TU_YOUTUBE_CLIENT_ID' | gh secret set VITE_YOUTUBE_CLIENT_ID -R jorsanchezch/songs
+# YouTube playlist OAuth (Worker). CD lo sincroniza al Worker en cada deploy.
+printf '%s' 'TU_GOOGLE_CLIENT_SECRET' | gh secret set YOUTUBE_OAUTH_CLIENT_SECRET -R jorsanchezch/songs
+# Opcional: media backfill (Worker)
+printf '%s' 'TU_YOUTUBE_API_KEY' | gh secret set YOUTUBE_API_KEY -R jorsanchezch/songs
 ```
 
 `CLOUDFLARE_API_TOKEN` = token con plantilla **Edit Cloudflare Workers**. `CLOUDFLARE_ACCOUNT_ID` = Account ID (en este proyecto: `a3568bed2d3a17ee343a6714d68c15f2`). El UUID en `wrangler.toml` es solo el `database_id` de D1.
+
+El workflow **Deploy Worker** publica el Worker y, si existen, empuja `YOUTUBE_OAUTH_CLIENT_SECRET` y `YOUTUBE_API_KEY` con `wrangler secret put`. Las listas one-shot (miércoles/sábado) se aplican al arrancar el Worker (`ensureSchema`); no usan `d1 execute --file` en CD (ese Import API suele fallar con el token de Workers).
 
 ## Base de datos
 
@@ -85,7 +91,7 @@ En cada lista puedes crear una playlist privada en Spotify y/o YouTube. Ambos fl
    - `http://127.0.0.1:4322/youtube/callback` (local)
    - `https://jorsanchezch.github.io/songs/youtube/callback` (Pages)
 4. `VITE_YOUTUBE_CLIENT_ID` en `.env` (hay un valor por defecto en el código).
-5. El canje del código OAuth lo hace el Worker con el **Client Secret** (no va al frontend):
+5. El canje del código OAuth lo hace el Worker con el **Client Secret** (no va al frontend). Ponlo como secreto de Actions `YOUTUBE_OAUTH_CLIENT_SECRET` (el CD lo sincroniza al Worker) o a mano:
    `npx wrangler secret put YOUTUBE_OAUTH_CLIENT_SECRET`
 6. En la pantalla de consentimiento, agrega tu cuenta como **usuario de prueba**.
 7. La exportación usa el video ya guardado en la canción cuando existe; si no, busca en YouTube por título y artista.

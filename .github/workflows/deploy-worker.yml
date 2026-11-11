@@ -15,29 +15,34 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
+
       - name: Deploy songbook Worker
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: deploy
-      - name: Seed new catalog songs into D1
-        run: npm run db:export-seed
-      - name: Apply catalog seed (INSERT OR IGNORE)
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: d1 execute songbook --remote --file=data/seed.sql --yes
-      - name: Apply Saturday setlist (one-shot)
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: d1 execute songbook --remote --file=scripts/saturday-setlist.sql --yes
-      - name: Apply Wednesday setlist (one-shot)
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: d1 execute songbook --remote --file=scripts/wednesday-setlist.sql --yes
+
+      # D1 `execute --file` uses the Import API and fails with auth 10000 on the
+      # usual "Edit Cloudflare Workers" token. One-shot setlists (and the catalog
+      # songs they need) apply on Worker boot via ensureSchema, so CD only needs
+      # the Worker + its secrets.
+
+      - name: Sync Worker secrets from GitHub Actions
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          YOUTUBE_OAUTH_CLIENT_SECRET: ${{ secrets.YOUTUBE_OAUTH_CLIENT_SECRET }}
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -n "${YOUTUBE_OAUTH_CLIENT_SECRET}" ]; then
+            printf '%s' "$YOUTUBE_OAUTH_CLIENT_SECRET" | npx wrangler secret put YOUTUBE_OAUTH_CLIENT_SECRET
+          else
+            echo "YOUTUBE_OAUTH_CLIENT_SECRET not set in Actions — skip (YouTube playlist login will fail until it is)."
+          fi
+          if [ -n "${YOUTUBE_API_KEY}" ]; then
+            printf '%s' "$YOUTUBE_API_KEY" | npx wrangler secret put YOUTUBE_API_KEY
+          else
+            echo "YOUTUBE_API_KEY not set in Actions — skip."
+          fi
