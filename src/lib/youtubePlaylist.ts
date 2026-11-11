@@ -1,6 +1,7 @@
 /** YouTube Data API helpers (Google OAuth Authorization Code + PKCE). */
 
 import { findYoutubeSource } from '@/lib/songMedia'
+import { request } from '@/lib/api'
 import { youtubeVideoId } from '@/lib/playback'
 import type { Song } from '@/lib/types'
 
@@ -116,24 +117,12 @@ export async function completeYoutubeLogin(params: URLSearchParams): Promise<str
   const auth = JSON.parse(raw) as AuthPending
   sessionStorage.removeItem(AUTH_KEY)
   if (auth.state !== state) throw new Error('El estado de YouTube no coincide.')
-  const body = new URLSearchParams({
+  const json = await exchangeGoogleOAuthToken({
     grant_type: 'authorization_code',
     code,
-    redirect_uri: youtubeRedirectUri(),
-    client_id: youtubeClientId(),
     code_verifier: auth.verifier,
+    redirect_uri: youtubeRedirectUri(),
   })
-  const response = await fetch('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body,
-  })
-  if (!response.ok) throw new Error('No pude canjear el código de YouTube.')
-  const json = (await response.json()) as {
-    access_token: string
-    refresh_token?: string
-    expires_in: number
-  }
   writeToken({
     accessToken: json.access_token,
     refreshToken: json.refresh_token ?? '',
@@ -276,29 +265,38 @@ function fold(value: string): string {
 }
 
 async function refreshAccess(refreshToken: string): Promise<TokenBundle> {
-  const body = new URLSearchParams({
-    grant_type: 'refresh_token',
-    refresh_token: refreshToken,
-    client_id: youtubeClientId(),
-  })
-  const response = await fetch('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body,
-  })
-  if (!response.ok) {
+  try {
+    const json = await exchangeGoogleOAuthToken({
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken,
+    })
+    return {
+      accessToken: json.access_token,
+      refreshToken: json.refresh_token || refreshToken,
+      expiresAt: Date.now() + Math.max(30, json.expires_in - 60) * 1000,
+    }
+  } catch {
     writeToken(null)
     throw new Error('YOUTUBE_LOGIN')
   }
-  const json = (await response.json()) as {
-    access_token: string
-    refresh_token?: string
-    expires_in: number
-  }
-  return {
-    accessToken: json.access_token,
-    refreshToken: json.refresh_token || refreshToken,
-    expiresAt: Date.now() + Math.max(30, json.expires_in - 60) * 1000,
+}
+
+async function exchangeGoogleOAuthToken(
+  body:
+    | {
+        grant_type: 'authorization_code'
+        code: string
+        code_verifier: string
+        redirect_uri: string
+      }
+    | { grant_type: 'refresh_token'; refresh_token: string },
+): Promise<{ access_token: string; refresh_token?: string; expires_in: number }> {
+  // Worker holds the Google client secret; the browser only sends the PKCE code.
+  try {
+    return await request('/api/oauth/google/token', { method: 'POST', body })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'No pude canjear el código de YouTube.'
+    throw new Error(message.includes('YOUTUBE_OAUTH_CLIENT_SECRET') ? message : `YouTube: ${message}`)
   }
 }
 

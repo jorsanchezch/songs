@@ -493,7 +493,7 @@ function apiRoot(): string {
   return typeof value === 'string' ? value.replace(/\/$/, '') : ''
 }
 
-async function request<T>(path: string, init?: { method?: string; body?: unknown; auth?: boolean }): Promise<T> {
+export async function request<T>(path: string, init?: { method?: string; body?: unknown; auth?: boolean }): Promise<T> {
   const headers = new Headers()
   const token = localStorage.getItem(SESSION_KEY)
   if (token && init?.auth !== false) headers.set('authorization', `Bearer ${token}`)

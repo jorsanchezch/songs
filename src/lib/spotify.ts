@@ -280,7 +280,7 @@ async function spotifyJson<T>(url: string, access: string, init: RequestInit = {
   }
   if (!response.ok) {
     const text = await response.text().catch(() => '')
-    throw new Error(text || `Spotify respondió ${response.status}`)
+    throw new Error(spotifyErrorMessage(response.status, text))
   }
   if (response.status === 204) return undefined as T
   return (await response.json()) as T
@@ -301,6 +301,24 @@ function readToken(): TokenBundle | null {
 function writeToken(token: TokenBundle | null) {
   if (!token) localStorage.removeItem(TOKEN_KEY)
   else localStorage.setItem(TOKEN_KEY, JSON.stringify(token))
+}
+
+function spotifyErrorMessage(status: number, text: string): string {
+  let detail = ''
+  try {
+    const parsed = JSON.parse(text) as { error?: { message?: string; status?: number } | string }
+    if (typeof parsed.error === 'string') detail = parsed.error
+    else if (parsed.error?.message) detail = parsed.error.message
+  } catch {
+    detail = text.trim()
+  }
+  if (status === 403) {
+    return (
+      'Spotify rechazó la petición (403). En developer.spotify.com → tu app → User Management, ' +
+      'agrega la cuenta de Spotify con la que iniciaste sesión. La app en modo Development solo admite esos usuarios.'
+    )
+  }
+  return detail || `Spotify respondió ${status}`
 }
 
 function quote(value: string): string {

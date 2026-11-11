@@ -72,6 +72,8 @@ async function answer(
   // Local sqlite keeps MP3s on disk (data/audio), never in the DB. ALLOW_YT_EXTRACT enables Admin Extraer MP3.
   const response = await handleApi(sql, request, {
     YOUTUBE_API_KEY: options.youtubeKey || process.env.YOUTUBE_API_KEY,
+    YOUTUBE_OAUTH_CLIENT_SECRET: process.env.YOUTUBE_OAUTH_CLIENT_SECRET,
+    YOUTUBE_OAUTH_CLIENT_ID: process.env.YOUTUBE_OAUTH_CLIENT_ID,
     AUDIO_BUCKET: localAudioBucket(options.rootDir),
     AUDIO_DIR: path.join(options.rootDir, 'data', 'audio'),
     ALLOW_YT_EXTRACT: true,

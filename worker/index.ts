@@ -15,6 +15,9 @@ type Env = {
   DB: D1Database
   SONGBOOK_ORIGIN?: string
   YOUTUBE_API_KEY?: string
+  /** Google OAuth web client secret for YouTube playlist export (never in the frontend). */
+  YOUTUBE_OAUTH_CLIENT_SECRET?: string
+  YOUTUBE_OAUTH_CLIENT_ID?: string
   /** R2 bucket for MP3 blobs. audio_url stays a text pointer (/api/audio/…). */
   AUDIO_BUCKET?: R2Bucket
 }
@@ -33,6 +36,8 @@ export default {
     }
     const response = await handleApi(openD1(env.DB), request, {
       YOUTUBE_API_KEY: env.YOUTUBE_API_KEY,
+      YOUTUBE_OAUTH_CLIENT_SECRET: env.YOUTUBE_OAUTH_CLIENT_SECRET,
+      YOUTUBE_OAUTH_CLIENT_ID: env.YOUTUBE_OAUTH_CLIENT_ID,
       AUDIO_BUCKET: env.AUDIO_BUCKET,
       // Worker cannot run yt-dlp — Admin Extraer MP3 stays blocked here.
     })

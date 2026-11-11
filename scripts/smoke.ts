@@ -26,6 +26,7 @@ import {
   serviceListName,
 } from '../src/lib/setlists.ts'
 import { churchToday, dayListIsDue as seedDayListIsDue } from '../server/dayListArchive.ts'
+import { exchangeGoogleToken, googleOAuthConfigured } from '../server/googleOAuth.ts'
 import { can, currentUser, roleLabel } from '../src/lib/access.ts'
 import { parseChart } from '../src/lib/parseChart.ts'
 import { lineDiff, songFieldChanges } from '../src/lib/songVersionDiff.ts'
@@ -921,6 +922,17 @@ assert(pattern.alternatives.every((item) => item.key !== 'C'), 'another song in 
   )
   assert(pick?.uri === 'spotify:track:right', 'spotify pick prefers title+artist match')
   assert(spotifyConfigured(), 'spotify export has a default public client id')
+  assert(!googleOAuthConfigured({}), 'google oauth needs the worker client secret')
+  const missingSecret = await exchangeGoogleToken(
+    {},
+    {
+      grant_type: 'authorization_code',
+      code: 'x',
+      code_verifier: 'y',
+      redirect_uri: 'https://example.com/callback',
+    },
+  )
+  assert(!missingSecret.ok && missingSecret.status === 503, 'google token exchange refuses without secret')
 }
 
 {

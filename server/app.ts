@@ -16,6 +16,7 @@ import { chartMeta } from './meta.ts'
 import { hashPassword, verifyPassword } from './password.ts'
 import { songPlayback } from './playback.ts'
 import { enrichYoutubeVideo, findYoutubeMedia, youtubeVideoIdFromUrl, type YoutubeHit } from './youtubeMedia.ts'
+import { exchangeGoogleToken, type GoogleOAuthEnv } from './googleOAuth.ts'
 import { OWNER_ID } from './schema.ts'
 import type { Sql } from './sql.ts'
 import {
@@ -26,12 +27,13 @@ import {
   ytDlpAvailable,
 } from './youtubeExtract.ts'
 
-export type ApiEnv = MediaBackfillEnv & {
-  /** Node/sqlite only — enables Admin Extraer MP3 via yt-dlp. Never set on the Worker. */
-  ALLOW_YT_EXTRACT?: boolean
-  /** Tests: never search YouTube when a song is created or looked up. */
-  OFFLINE?: boolean
-}
+export type ApiEnv = MediaBackfillEnv &
+  GoogleOAuthEnv & {
+    /** Node/sqlite only — enables Admin Extraer MP3 via yt-dlp. Never set on the Worker. */
+    ALLOW_YT_EXTRACT?: boolean
+    /** Tests: never search YouTube when a song is created or looked up. */
+    OFFLINE?: boolean
+  }
 
 type Role = 'owner' | 'admin' | 'viewer'
 type Origin = 'catalog' | 'local' | 'copy'
@@ -102,6 +104,9 @@ export async function handleApi(sql: Sql, request: Request, env: ApiEnv = {}): P
     if (pathname === '/api/songs' && request.method === 'POST') return createSong(sql, user, request, env)
     if (pathname === '/api/media/lookup' && request.method === 'GET') return mediaLookup(url, env)
     if (pathname === '/api/youtube/info' && request.method === 'GET') return youtubeInfo(url, env)
+    if (pathname === '/api/oauth/google/token' && request.method === 'POST') {
+      return googleOAuthToken(user, request, env)
+    }
     if (pathname === '/api/catalog' && request.method === 'POST') return upsertCatalog(sql, user, request)
     if (pathname === '/api/songs/reveal' && request.method === 'POST') return revealSongs(sql, user)
     if (pathname === '/api/setlists' && request.method === 'GET') return listSetlists(sql)
@@ -1695,6 +1700,37 @@ async function uploadAudio(sql: Sql, user: User, request: Request, env: ApiEnv):
   const key = `songs/${songId}/${Date.now()}.${ext}`
   const stored = await putAudioObject(env, key, bytes, file.type || contentTypeForKey(key))
   return json({ audioUrl: stored.audioUrl, key: stored.key })
+}
+
+/** Exchanges a Google auth code (or refresh) using the Worker client secret. */
+async function googleOAuthToken(_user: User, request: Request, env: ApiEnv): Promise<Response> {
+  const body = await readJson<{
+    grant_type?: string
+    code?: string
+    code_verifier?: string
+    redirect_uri?: string
+    refresh_token?: string
+  }>(request)
+  const grant = body.grant_type?.trim()
+  if (grant === 'authorization_code') {
+    const result = await exchangeGoogleToken(env, {
+      grant_type: 'authorization_code',
+      code: body.code ?? '',
+      code_verifier: body.code_verifier ?? '',
+      redirect_uri: body.redirect_uri ?? '',
+    })
+    if (!result.ok) return json({ error: result.error }, result.status)
+    return json(result.token)
+  }
+  if (grant === 'refresh_token') {
+    const result = await exchangeGoogleToken(env, {
+      grant_type: 'refresh_token',
+      refresh_token: body.refresh_token ?? '',
+    })
+    if (!result.ok) return json({ error: result.error }, result.status)
+    return json(result.token)
+  }
+  return json({ error: 'grant_type debe ser authorization_code o refresh_token.' }, 400)
 }
 
 async function youtubeInfo(url: URL, env: ApiEnv): Promise<Response> {

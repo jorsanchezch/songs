@@ -84,10 +84,13 @@ En cada lista puedes crear una playlist privada en Spotify y/o YouTube. Ambos fl
 3. Redirect URIs:
    - `http://127.0.0.1:4322/youtube/callback` (local)
    - `https://jorsanchezch.github.io/songs/youtube/callback` (Pages)
-4. `VITE_YOUTUBE_CLIENT_ID` en `.env` y el secreto de Actions del mismo nombre.
-5. La exportación usa el video ya guardado en la canción cuando existe; si no, busca en YouTube por título y artista.
+4. `VITE_YOUTUBE_CLIENT_ID` en `.env` (hay un valor por defecto en el código).
+5. El canje del código OAuth lo hace el Worker con el **Client Secret** (no va al frontend):
+   `npx wrangler secret put YOUTUBE_OAUTH_CLIENT_SECRET`
+6. En la pantalla de consentimiento, agrega tu cuenta como **usuario de prueba**.
+7. La exportación usa el video ya guardado en la canción cuando existe; si no, busca en YouTube por título y artista.
 
-Sin el Client ID correspondiente, ese botón no aparece.
+Sin el Client ID correspondiente, ese botón no aparece. Sin `YOUTUBE_OAUTH_CLIENT_SECRET` en el Worker, el login de YouTube falla al canjear el código.
 
 ### Medios: YouTube, BPM, duración, MP3
 
