@@ -153,9 +153,10 @@ export function SetlistView() {
   }
 
   function spotifyAuthError(message: string) {
-    if (message === 'SPOTIFY_FORBIDDEN') {
+    if (message === 'SPOTIFY_FORBIDDEN' || message.startsWith('SPOTIFY_FORBIDDEN\n')) {
+      const detail = message.startsWith('SPOTIFY_FORBIDDEN\n') ? message.slice('SPOTIFY_FORBIDDEN\n'.length) : ''
       setSpotifyNeedsReconnect(true)
-      setSpotifyError(spotifyForbiddenMessage())
+      setSpotifyError(spotifyForbiddenMessage(detail))
       return
     }
     if (message === 'SPOTIFY_LOGIN') {

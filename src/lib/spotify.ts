@@ -106,11 +106,16 @@ export async function beginSpotifyLogin(
   window.location.assign(url.toString())
 }
 
-export function spotifyForbiddenMessage(): string {
+export function spotifyForbiddenMessage(detail = ''): string {
+  const client = spotifyClientId()
+  const extra = detail.trim() ? ` Spotify dijo: ${detail.trim()}.` : ''
   return (
-    'Spotify bloqueó esta cuenta (app en modo Development). ' +
-    'En developer.spotify.com → tu app → User Management, agrega exactamente la misma cuenta ' +
-    'con la que autorizaste. Luego pulsa Reconectar Spotify y elige esa cuenta.'
+    'Spotify bloqueó esta cuenta (app en modo Development).' +
+    extra +
+    ` Abre la app con Client ID ${client} en developer.spotify.com → User Management ` +
+    'y agrega el email exacto de la cuenta de Spotify con la que autorizaste ' +
+    '(no otro Gmail). El dueño de la app necesita Spotify Premium. ' +
+    'Espera ~15 min tras agregar, luego Reconectar Spotify y elige esa misma cuenta.'
   )
 }
 
@@ -308,9 +313,10 @@ async function spotifyJson<T>(url: string, access: string, init: RequestInit = {
     throw new Error('SPOTIFY_LOGIN')
   }
   if (response.status === 403) {
-    // Stale token or account not on the Development Mode allowlist.
+    const text = await response.text().catch(() => '')
     clearSpotifySession()
-    throw new Error('SPOTIFY_FORBIDDEN')
+    // Keep Spotify's reason (e.g. user not approved) for the UI message.
+    throw new Error(`SPOTIFY_FORBIDDEN\n${spotifyErrorDetail(text)}`)
   }
   if (!response.ok) {
     const text = await response.text().catch(() => '')
@@ -337,16 +343,21 @@ function writeToken(token: TokenBundle | null) {
   else localStorage.setItem(TOKEN_KEY, JSON.stringify(token))
 }
 
-function spotifyErrorMessage(status: number, text: string): string {
-  let detail = ''
+function spotifyErrorDetail(text: string): string {
   try {
-    const parsed = JSON.parse(text) as { error?: { message?: string; status?: number } | string }
-    if (typeof parsed.error === 'string') detail = parsed.error
-    else if (parsed.error?.message) detail = parsed.error.message
+    const parsed = JSON.parse(text) as { error?: { message?: string; reason?: string } | string }
+    if (typeof parsed.error === 'string') return parsed.error
+    if (parsed.error?.message) {
+      return parsed.error.reason ? `${parsed.error.message} (${parsed.error.reason})` : parsed.error.message
+    }
   } catch {
-    detail = text.trim()
+    /* ignore */
   }
-  return detail || `Spotify respondió ${status}`
+  return text.trim()
+}
+
+function spotifyErrorMessage(status: number, text: string): string {
+  return spotifyErrorDetail(text) || `Spotify respondió ${status}`
 }
 
 function quote(value: string): string {
