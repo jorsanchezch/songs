@@ -81,7 +81,10 @@ export function clearSpotifySession() {
   sessionStorage.removeItem(AUTH_KEY)
 }
 
-export async function beginSpotifyLogin(returnPath: string): Promise<void> {
+export async function beginSpotifyLogin(
+  returnPath: string,
+  options: { forceAccountPicker?: boolean } = {},
+): Promise<void> {
   const clientId = spotifyClientId()
   if (!clientId) throw new Error('Falta VITE_SPOTIFY_CLIENT_ID.')
   const verifier = randomString(64)
@@ -97,9 +100,18 @@ export async function beginSpotifyLogin(returnPath: string): Promise<void> {
   url.searchParams.set('state', state)
   url.searchParams.set('code_challenge_method', 'S256')
   url.searchParams.set('code_challenge', challenge)
-  // Force account picker so Development Mode uses the allowlisted Spotify user.
-  url.searchParams.set('show_dialog', 'true')
+  // Only when the user explicitly reconnects after a 403 — always forcing the
+  // dialog made authorize ↔ callback bounce when API still rejected the account.
+  if (options.forceAccountPicker) url.searchParams.set('show_dialog', 'true')
   window.location.assign(url.toString())
+}
+
+export function spotifyForbiddenMessage(): string {
+  return (
+    'Spotify bloqueó esta cuenta (app en modo Development). ' +
+    'En developer.spotify.com → tu app → User Management, agrega exactamente la misma cuenta ' +
+    'con la que autorizaste. Luego pulsa Reconectar Spotify y elige esa cuenta.'
+  )
 }
 
 /** Finish PKCE after Spotify redirects to /spotify/callback. Returns where to go next. */

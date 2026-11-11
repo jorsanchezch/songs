@@ -32,6 +32,7 @@ import {
   readPendingPlaylist,
   savePendingPlaylist,
   spotifyConfigured,
+  spotifyForbiddenMessage,
   type SpotifyPlaylistResult,
   type SpotifyTrackRef,
 } from '@/lib/spotify'
@@ -65,6 +66,7 @@ export function SetlistView() {
   const [overIndex, setOverIndex] = useState<number | null>(null)
   const [spotifyBusy, setSpotifyBusy] = useState(false)
   const [spotifyError, setSpotifyError] = useState('')
+  const [spotifyNeedsReconnect, setSpotifyNeedsReconnect] = useState(false)
   const [spotifyResult, setSpotifyResult] = useState<SpotifyPlaylistResult | null>(null)
   const [youtubeBusy, setYoutubeBusy] = useState(false)
   const [youtubeError, setYoutubeError] = useState('')
@@ -137,25 +139,39 @@ export function SetlistView() {
     void finishYoutubePlaylist(pending.name, pending.tracks)
   }, [searchParams, setSearchParams, setlistId])
 
-  async function reconnectSpotify() {
+  async function reconnectSpotify(forceAccountPicker = true) {
     if (!list) return
     clearSpotifySession()
     setSpotifyBusy(true)
-    setSpotifyError(
-      'Spotify bloqueó la cuenta (modo Development). Elige en el login la cuenta que agregaste en User Management.',
-    )
+    setSpotifyError('')
     try {
-      await beginSpotifyLogin(`/listas/${list.id}?spotify=ready`)
+      await beginSpotifyLogin(`/listas/${list.id}?spotify=ready`, { forceAccountPicker })
     } catch (loginErr) {
       setSpotifyBusy(false)
       setSpotifyError(loginErr instanceof Error ? loginErr.message : 'No pude abrir Spotify.')
     }
   }
 
+  function spotifyAuthError(message: string) {
+    if (message === 'SPOTIFY_FORBIDDEN') {
+      setSpotifyNeedsReconnect(true)
+      setSpotifyError(spotifyForbiddenMessage())
+      return
+    }
+    if (message === 'SPOTIFY_LOGIN') {
+      setSpotifyNeedsReconnect(true)
+      setSpotifyError('Hay que conectar Spotify otra vez.')
+      return
+    }
+    setSpotifyNeedsReconnect(false)
+    setSpotifyError(message)
+  }
+
   async function finishSpotifyPlaylist(name: string, tracks: SpotifyTrackRef[]) {
     setSpotifyBusy(true)
     setSpotifyError('')
     setSpotifyResult(null)
+    setSpotifyNeedsReconnect(false)
     try {
       const result = await createSetlistPlaylist({
         setlistId,
@@ -165,12 +181,10 @@ export function SetlistView() {
       clearPendingPlaylist()
       setSpotifyResult(result)
     } catch (err) {
+      // Never auto-redirect to authorize here — that caused an infinite
+      // authorize ↔ callback loop when Development Mode still returned 403.
       const message = err instanceof Error ? err.message : 'No pude crear la playlist.'
-      if (message === 'SPOTIFY_LOGIN' || message === 'SPOTIFY_FORBIDDEN') {
-        await reconnectSpotify()
-        return
-      }
-      setSpotifyError(message)
+      spotifyAuthError(message)
     } finally {
       setSpotifyBusy(false)
     }
@@ -190,16 +204,18 @@ export function SetlistView() {
     savePendingPlaylist(pending)
     setSpotifyError('')
     setSpotifyResult(null)
+    setSpotifyNeedsReconnect(false)
     try {
       await ensureSpotifyAccess()
       await finishSpotifyPlaylist(pending.name, pending.tracks)
     } catch (err) {
       const message = err instanceof Error ? err.message : ''
-      if (message === 'SPOTIFY_LOGIN' || message === 'SPOTIFY_FORBIDDEN') {
-        await reconnectSpotify()
+      // First-time connect only — never bounce again after a failed API call.
+      if (message === 'SPOTIFY_LOGIN') {
+        await reconnectSpotify(false)
         return
       }
-      setSpotifyError(message || 'No pude crear la playlist.')
+      spotifyAuthError(message || 'No pude crear la playlist.')
     }
   }
 
@@ -375,7 +391,22 @@ export function SetlistView() {
                 </>
               )}
             </div>
-            {spotifyError && <p className="text-sm text-destructive">{spotifyError}</p>}
+            {spotifyError && (
+              <div className="space-y-2">
+                <p className="text-sm text-destructive">{spotifyError}</p>
+                {spotifyNeedsReconnect && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={spotifyBusy}
+                    onClick={() => void reconnectSpotify(true)}
+                  >
+                    Reconectar Spotify
+                  </Button>
+                )}
+              </div>
+            )}
             {spotifyResult && (
               <p className="text-sm text-muted-foreground">
                 {spotifyResult.matched === 0
