@@ -25,6 +25,7 @@ import {
   rememberClosedDayList,
   serviceListName,
 } from '../src/lib/setlists.ts'
+import { churchToday, dayListIsDue as seedDayListIsDue } from '../server/dayListArchive.ts'
 import { can, currentUser, roleLabel } from '../src/lib/access.ts'
 import { parseChart } from '../src/lib/parseChart.ts'
 import { lineDiff, songFieldChanges } from '../src/lib/songVersionDiff.ts'
@@ -595,6 +596,9 @@ assert(
   closeRotatedDayList({ weekday: 6, serviceDate: '2026-10-17' }, [{ songId: 'a', semitones: 1 }], saturday) == null,
   'close uses the same day-after rule',
 )
+assert(seedDayListIsDue('2026-11-07', '2026-11-08'), 'seed archive is due the day after the service')
+assert(!seedDayListIsDue('2026-11-07', '2026-11-07'), 'seed archive is not due on the service day')
+assert(/^\d{4}-\d{2}-\d{2}$/.test(churchToday()), 'church today is an ISO date')
 const closed = closeRotatedDayList(
   { weekday: 6, serviceDate: '2026-10-17' },
   [

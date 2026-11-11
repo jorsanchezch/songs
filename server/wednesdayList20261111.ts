@@ -1,3 +1,4 @@
+import { archiveDueDayList } from './dayListArchive.ts'
 import { INSTRUMENTS } from './instruments.ts'
 import { chartMeta } from './meta.ts'
 import { OWNER_ID } from './schema.ts'
@@ -54,6 +55,7 @@ export async function applyWednesdayList20261111(sql: Sql): Promise<void> {
   }
   const done = await sql.get<{ value: string }>(`SELECT value FROM app_meta WHERE key = ?`, [META_KEY])
   if (done) return
+  await archiveDueDayList(sql, { listId: LIST_ID, weekday: 3 })
   await sql.run(`DELETE FROM setlist_items WHERE setlist_id = ?`, [LIST_ID])
   for (let position = 0; position < SONGS.length; position += 1) {
     const item = SONGS[position]!
