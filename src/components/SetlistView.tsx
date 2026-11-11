@@ -26,6 +26,7 @@ import {
 import {
   beginSpotifyLogin,
   clearPendingPlaylist,
+  clearSpotifySession,
   createSetlistPlaylist,
   ensureSpotifyAccess,
   readPendingPlaylist,
@@ -136,6 +137,21 @@ export function SetlistView() {
     void finishYoutubePlaylist(pending.name, pending.tracks)
   }, [searchParams, setSearchParams, setlistId])
 
+  async function reconnectSpotify() {
+    if (!list) return
+    clearSpotifySession()
+    setSpotifyBusy(true)
+    setSpotifyError(
+      'Spotify bloqueó la cuenta (modo Development). Elige en el login la cuenta que agregaste en User Management.',
+    )
+    try {
+      await beginSpotifyLogin(`/listas/${list.id}?spotify=ready`)
+    } catch (loginErr) {
+      setSpotifyBusy(false)
+      setSpotifyError(loginErr instanceof Error ? loginErr.message : 'No pude abrir Spotify.')
+    }
+  }
+
   async function finishSpotifyPlaylist(name: string, tracks: SpotifyTrackRef[]) {
     setSpotifyBusy(true)
     setSpotifyError('')
@@ -150,11 +166,11 @@ export function SetlistView() {
       setSpotifyResult(result)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'No pude crear la playlist.'
-      if (message === 'SPOTIFY_LOGIN') {
-        setSpotifyError('Vuelve a conectar Spotify e inténtalo otra vez.')
-      } else {
-        setSpotifyError(message)
+      if (message === 'SPOTIFY_LOGIN' || message === 'SPOTIFY_FORBIDDEN') {
+        await reconnectSpotify()
+        return
       }
+      setSpotifyError(message)
     } finally {
       setSpotifyBusy(false)
     }
@@ -179,14 +195,8 @@ export function SetlistView() {
       await finishSpotifyPlaylist(pending.name, pending.tracks)
     } catch (err) {
       const message = err instanceof Error ? err.message : ''
-      if (message === 'SPOTIFY_LOGIN') {
-        setSpotifyBusy(true)
-        try {
-          await beginSpotifyLogin(`/listas/${list.id}?spotify=ready`)
-        } catch (loginErr) {
-          setSpotifyBusy(false)
-          setSpotifyError(loginErr instanceof Error ? loginErr.message : 'No pude abrir Spotify.')
-        }
+      if (message === 'SPOTIFY_LOGIN' || message === 'SPOTIFY_FORBIDDEN') {
+        await reconnectSpotify()
         return
       }
       setSpotifyError(message || 'No pude crear la playlist.')

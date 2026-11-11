@@ -3,7 +3,12 @@
 const TOKEN_KEY = 'songbook-spotify-token-v1'
 const PENDING_KEY = 'songbook-spotify-pending-v1'
 const AUTH_KEY = 'songbook-spotify-auth-v1'
-const SCOPES = ['playlist-modify-public', 'playlist-modify-private', 'user-read-private'].join(' ')
+const SCOPES = [
+  'playlist-modify-public',
+  'playlist-modify-private',
+  'user-read-private',
+  'user-read-email',
+].join(' ')
 
 export type SpotifyTrackRef = { title: string; artist: string }
 
@@ -71,6 +76,11 @@ export function clearPendingPlaylist() {
   sessionStorage.removeItem(PENDING_KEY)
 }
 
+export function clearSpotifySession() {
+  writeToken(null)
+  sessionStorage.removeItem(AUTH_KEY)
+}
+
 export async function beginSpotifyLogin(returnPath: string): Promise<void> {
   const clientId = spotifyClientId()
   if (!clientId) throw new Error('Falta VITE_SPOTIFY_CLIENT_ID.')
@@ -87,6 +97,8 @@ export async function beginSpotifyLogin(returnPath: string): Promise<void> {
   url.searchParams.set('state', state)
   url.searchParams.set('code_challenge_method', 'S256')
   url.searchParams.set('code_challenge', challenge)
+  // Force account picker so Development Mode uses the allowlisted Spotify user.
+  url.searchParams.set('show_dialog', 'true')
   window.location.assign(url.toString())
 }
 
@@ -155,6 +167,11 @@ export async function createSetlistPlaylist(
   pending: SpotifyPendingPlaylist,
 ): Promise<SpotifyPlaylistResult> {
   const access = await ensureSpotifyAccess()
+  const me = await spotifyJson<{ id: string; display_name?: string; email?: string }>(
+    'https://api.spotify.com/v1/me',
+    access,
+  )
+  if (!me.id) throw new Error('Spotify no devolvió el usuario conectado.')
   const matched: string[] = []
   const missing: SpotifyTrackRef[] = []
   for (const track of pending.tracks) {
@@ -163,7 +180,7 @@ export async function createSetlistPlaylist(
     else missing.push(track)
   }
   const playlist = await spotifyJson<{ id: string; external_urls?: { spotify?: string } }>(
-    'https://api.spotify.com/v1/me/playlists',
+    `https://api.spotify.com/v1/users/${encodeURIComponent(me.id)}/playlists`,
     access,
     {
       method: 'POST',
@@ -278,6 +295,11 @@ async function spotifyJson<T>(url: string, access: string, init: RequestInit = {
     writeToken(null)
     throw new Error('SPOTIFY_LOGIN')
   }
+  if (response.status === 403) {
+    // Stale token or account not on the Development Mode allowlist.
+    clearSpotifySession()
+    throw new Error('SPOTIFY_FORBIDDEN')
+  }
   if (!response.ok) {
     const text = await response.text().catch(() => '')
     throw new Error(spotifyErrorMessage(response.status, text))
@@ -311,12 +333,6 @@ function spotifyErrorMessage(status: number, text: string): string {
     else if (parsed.error?.message) detail = parsed.error.message
   } catch {
     detail = text.trim()
-  }
-  if (status === 403) {
-    return (
-      'Spotify rechazó la petición (403). En developer.spotify.com → tu app → User Management, ' +
-      'agrega la cuenta de Spotify con la que iniciaste sesión. La app en modo Development solo admite esos usuarios.'
-    )
   }
   return detail || `Spotify respondió ${status}`
 }
