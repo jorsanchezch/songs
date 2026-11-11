@@ -33,8 +33,11 @@ type AuthPending = {
   returnPath: string
 }
 
+/** Public PKCE client id (not a secret). Env overrides when set at build time. */
+const DEFAULT_SPOTIFY_CLIENT_ID = 'bfe45189360e48a2987fdae586883cd3'
+
 export function spotifyClientId(): string {
-  return (import.meta.env.VITE_SPOTIFY_CLIENT_ID ?? '').trim()
+  return (import.meta.env.VITE_SPOTIFY_CLIENT_ID ?? '').trim() || DEFAULT_SPOTIFY_CLIENT_ID
 }
 
 export function spotifyConfigured(): boolean {

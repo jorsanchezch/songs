@@ -52,7 +52,8 @@ import { suggestParts } from '../src/lib/partSuggest.ts'
 import { sectionDegrees, sectionProgressions } from '../src/lib/sectionProgression.ts'
 import { diatonicChords, keyName, parseStudyKey, pianoVoicings, signature } from '../src/lib/theory.ts'
 import { distinctMarks, songIconIndex, songMarkTone, SONG_ICON_SHAPES, SONG_MARK_HUES } from '../src/lib/songMark.ts'
-import { pickBestTrack, spotifySearchQuery } from '../src/lib/spotify.ts'
+import { pickBestTrack, spotifyConfigured, spotifySearchQuery } from '../src/lib/spotify.ts'
+import { youtubeConfigured } from '../src/lib/youtubePlaylist.ts'
 import {
   isYoutubeVideoId,
   pickBestVideo,
@@ -919,10 +920,12 @@ assert(pattern.alternatives.every((item) => item.key !== 'C'), 'another song in 
     ],
   )
   assert(pick?.uri === 'spotify:track:right', 'spotify pick prefers title+artist match')
+  assert(spotifyConfigured(), 'spotify export has a default public client id')
 }
 
 {
   assert(isYoutubeVideoId('nUC1ddmkGrE'), 'youtube video id shape')
+  assert(youtubeConfigured(), 'youtube export has a default public client id')
   assert(!isYoutubeVideoId('short'), 'rejects short youtube ids')
   assert(
     youtubeSearchQuery({ title: 'Yeshua', artist: 'Marcos Brunet' }) === 'Yeshua Marcos Brunet',

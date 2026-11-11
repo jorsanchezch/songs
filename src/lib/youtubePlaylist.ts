@@ -37,8 +37,12 @@ type AuthPending = {
   returnPath: string
 }
 
+/** Public PKCE client id (not a secret). Env overrides when set at build time. */
+const DEFAULT_YOUTUBE_CLIENT_ID =
+  '1005651847868-k4oas55ikbu34alfcggqts39tel93j0r.apps.googleusercontent.com'
+
 export function youtubeClientId(): string {
-  return (import.meta.env.VITE_YOUTUBE_CLIENT_ID ?? '').trim()
+  return (import.meta.env.VITE_YOUTUBE_CLIENT_ID ?? '').trim() || DEFAULT_YOUTUBE_CLIENT_ID
 }
 
 export function youtubeConfigured(): boolean {
