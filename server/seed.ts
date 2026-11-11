@@ -2,6 +2,7 @@ import { INSTRUMENTS } from './instruments.ts'
 import { chartMeta } from './meta.ts'
 import { OWNER_ID, OWNER_NAME, OWNER_USERNAME, SCHEMA } from './schema.ts'
 import { applySaturdayList20261107 } from './saturdayList20261107.ts'
+import { applyWednesdayList20261111 } from './wednesdayList20261111.ts'
 import type { CatalogFile } from './catalog.ts'
 import type { Sql, SqlValue } from './sql.ts'
 
@@ -42,6 +43,7 @@ export async function ensureSchema(sql: Sql): Promise<void> {
   await backfillCreators(sql)
   await sql.exec(`CREATE INDEX IF NOT EXISTS idx_songs_creator ON songs(creator_id)`)
   await applySaturdayList20261107(sql)
+  await applyWednesdayList20261111(sql)
 }
 
 /**
