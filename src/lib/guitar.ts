@@ -69,18 +69,6 @@ const MOVABLE: Record<string, { openPc: number; frets: number[] }[]> = {
     { openPc: 4, frets: [0, 2, 2, 0, 0, 0] },
     { openPc: 9, frets: [-1, 0, 2, 2, 1, 0] },
   ],
-  '7': [
-    { openPc: 4, frets: [0, 2, 0, 1, 0, 0] },
-    { openPc: 9, frets: [-1, 0, 2, 0, 2, 0] },
-  ],
-  m7: [
-    { openPc: 4, frets: [0, 2, 0, 0, 0, 0] },
-    { openPc: 9, frets: [-1, 0, 2, 0, 1, 0] },
-  ],
-  maj7: [
-    { openPc: 4, frets: [0, 2, 1, 1, 0, 0] },
-    { openPc: 9, frets: [-1, 0, 2, 1, 2, 0] },
-  ],
   sus4: [
     { openPc: 4, frets: [0, 2, 2, 2, 0, 0] },
     { openPc: 9, frets: [-1, 0, 2, 2, 3, 0] },
@@ -105,6 +93,28 @@ const MOVABLE: Record<string, { openPc: number; frets: number[] }[]> = {
   ],
   '5': [
     { openPc: 4, frets: [0, 2, 2, -1, -1, -1] },
+    { openPc: 4, frets: [0, 2, 2, 0, -1, -1] },
+    { openPc: 9, frets: [-1, 0, 2, 2, -1, -1] },
+    { openPc: 9, frets: [-1, 0, 2, 2, 0, -1] },
+    { openPc: 2, frets: [-1, -1, 0, 2, 2, -1] },
+  ],
+  '7': [
+    { openPc: 4, frets: [0, 2, 0, 1, 0, 0] },
+    { openPc: 9, frets: [-1, 0, 2, 0, 2, 0] },
+    { openPc: 2, frets: [-1, -1, 0, 2, 1, 2] },
+    { openPc: 7, frets: [3, 2, 0, 0, 0, 1] },
+  ],
+  m7: [
+    { openPc: 4, frets: [0, 2, 0, 0, 0, 0] },
+    { openPc: 9, frets: [-1, 0, 2, 0, 1, 0] },
+    { openPc: 2, frets: [-1, -1, 0, 2, 1, 1] },
+    { openPc: 7, frets: [3, 5, 3, 3, 3, 3] },
+  ],
+  maj7: [
+    { openPc: 4, frets: [0, 2, 1, 1, 0, 0] },
+    { openPc: 9, frets: [-1, 0, 2, 1, 2, 0] },
+    { openPc: 2, frets: [-1, -1, 0, 2, 2, 2] },
+    { openPc: 7, frets: [3, 2, 0, 0, 0, 2] },
   ],
 }
 
@@ -151,7 +161,7 @@ function ease(frets: number[]): number {
   return pressed.length ? Math.min(...pressed) : 0
 }
 
-function windowed(name: string, frets: number[]): Diagram {
+export function windowed(name: string, frets: number[]): Diagram {
   const pressed = frets.filter((fret) => fret > 0)
   const max = pressed.length ? Math.max(...pressed) : 1
   const min = pressed.length ? Math.min(...pressed) : 1

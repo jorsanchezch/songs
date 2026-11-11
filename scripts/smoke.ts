@@ -14,6 +14,7 @@ import {
   type ViewportNavStep,
 } from '../src/lib/viewportJumps.ts'
 import { diagramFor, shapesFor } from '../src/lib/guitar.ts'
+import { closedFrets, closedTriadShapes, powerShapes, seventhShapes } from '../src/lib/guitarClosedShapes.ts'
 import { chartToCho, chartToSongMd, isBlockedPage, isPlainChordLine, songToMarkdown, wrapPlainChordLine } from '../src/lib/importChart.ts'
 import { shareLyrics } from '../server/lyrics.ts'
 import { copyChartMedia, shareChartMeta } from '../server/chartMedia.ts'
@@ -498,6 +499,28 @@ assert(cShapes.length >= 3, `C has alternate shapes, got ${cShapes.length}`)
 assert(new Set(cShapes.map((shape) => shape.id)).size === cShapes.length, 'C shapes are unique')
 const barreC = cShapes.find((shape) => shape.id !== openC?.id)
 assert(barreC && diagramFor('C', barreC.id)?.id === barreC.id, 'selected C shape')
+assert(shapesFor('C5').length >= 3, 'power chord shapes')
+assert(shapesFor('G7').length >= 3, 'dominant 7 has several shapes')
+
+const cTriads = closedTriadShapes(0, false, 'C')
+assert(cTriads.length === 12, `C major closed triads: ${cTriads.length}`)
+assert(
+  cTriads.some((shape) => shape.frets.join(',') === '-1,-1,-1,5,5,3'),
+  'C major root triad on strings 1-2-3',
+)
+assert(
+  cTriads.some((shape) => shape.frets.join(',') === '-1,-1,-1,0,1,0'),
+  'C major 2nd inversion at the nut on 1-2-3',
+)
+const cmTriads = closedTriadShapes(0, true, 'Cm')
+assert(cmTriads.length === 12, 'C minor closed triads')
+assert(
+  cmTriads.some((shape) => shape.frets.join(',') === '-1,-1,-1,5,4,3'),
+  'C minor root triad on strings 1-2-3',
+)
+assert(powerShapes(0, 'C5').length === 6, 'power chord catalog')
+assert(seventhShapes(0, '7', 'C7').length >= 12, 'C7 drop-2/shell shapes')
+assert(closedFrets([3, 4, 5], [0, 4, 7])?.join(',') === '-1,-1,-1,5,5,3', 'closed frets helper')
 
 assert(wrapPlainChordLine('C    F') === '[C]  [F]', 'UG removes two spaces')
 assert(isPlainChordLine('Am  G  F'), 'plain chord line')

@@ -9,6 +9,7 @@ import { UserBadge } from '@/components/UserBadge'
 import { useSongs } from '@/hooks/useSongs'
 import { parseKey, prefersFlats, spellPitch } from '@/lib/chords'
 import { diagramFor, shapesFor } from '@/lib/guitar'
+import { closedTriadShapes, powerShapes, seventhShapes, type LabeledShape } from '@/lib/guitarClosedShapes'
 import { loadSettings } from '@/lib/settings'
 import { guitarMidis, pianoMidis, playNotes, playSequence } from '@/lib/sound'
 import {
@@ -43,6 +44,7 @@ const page = 'mx-auto w-full max-w-[52.8rem] px-4'
 
 const TABS = [
   { id: 'tono', label: 'Tonalidad' },
+  { id: 'formas', label: 'Formas' },
   { id: 'progresiones', label: 'Progresiones' },
   { id: 'escalas', label: 'Escalas' },
   { id: 'diccionario', label: 'Diccionario' },
@@ -178,6 +180,7 @@ export function StudyView() {
             onKey={setKey}
           />
         )}
+        {tab === 'formas' && <ShapesTab instrument={instrument} studyKey={studyKey} />}
         {tab === 'progresiones' && (
           <ProgressionsTab instrument={instrument} studyKey={studyKey} labels={labels} />
         )}
@@ -497,6 +500,105 @@ function ChordGrid({
       {active && <ChordDetail instrument={instrument} chord={active} labels={labels} flats={flats} />}
     </>
   )
+}
+
+type ShapeFamily = 'maj' | 'min' | '7' | 'maj7' | 'm7' | '5'
+
+const SHAPE_FAMILIES: { id: ShapeFamily; label: string }[] = [
+  { id: 'maj', label: 'Tríadas mayores' },
+  { id: 'min', label: 'Tríadas menores' },
+  { id: '7', label: 'Séptimas (7)' },
+  { id: 'maj7', label: 'Séptimas mayores' },
+  { id: 'm7', label: 'Menores 7' },
+  { id: '5', label: 'Power chords' },
+]
+
+function ShapesTab({ instrument, studyKey }: { instrument: StudyInstrument; studyKey: StudyKey }) {
+  const flats = keyFlats(studyKey)
+  const rootName = spellPitch(studyKey.pc, flats)
+  const [family, setFamily] = useState<ShapeFamily>(studyKey.minor ? 'min' : 'maj')
+  const shapes = useMemo(() => shapesForFamily(family, studyKey.pc, rootName), [family, studyKey.pc, rootName])
+  const groups = useMemo(() => groupShapes(shapes), [shapes])
+
+  if (instrument === 'piano') {
+    return (
+      <div className="rounded-xl border bg-card/70 p-4 text-sm text-muted-foreground">
+        Las formas de mástil son para guitarra. Cambia a Guitarra arriba, o usa Diccionario para ver
+        las inversiones en piano.
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div>
+        <h2 className="font-semibold">Formas en el mástil · {rootName}</h2>
+        <p className="text-sm text-muted-foreground">
+          Tríadas cerradas en los cuatro grupos de tres cuerdas (como las cartillas de mayores y
+          menores), más séptimas drop-2/shell y power chords. La tonalidad fija la fundamental.
+        </p>
+      </div>
+      <div className="flex flex-wrap gap-1" role="group" aria-label="Familia de formas">
+        {SHAPE_FAMILIES.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            aria-pressed={item.id === family}
+            onClick={() => setFamily(item.id)}
+            className={cn(
+              'rounded-full border px-2.5 py-1 text-xs font-medium',
+              item.id === family ? 'border-primary bg-primary text-primary-foreground' : 'bg-card',
+            )}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+      {groups.map((group) => (
+        <section key={group.title} className="rounded-xl border bg-card/70 p-3">
+          <h3 className="mb-2 text-sm font-semibold">{group.title}</h3>
+          <div className="flex flex-wrap gap-2">
+            {group.shapes.map((shape) => (
+              <button
+                key={shape.id}
+                type="button"
+                className="rounded-lg border bg-background px-1 pb-1 hover:bg-accent/60"
+                aria-label={`${shape.name}, ${shape.caption}`}
+                onClick={() => playNotes(guitarMidis(shape.frets), { strum: 0.035 })}
+              >
+                <ChordDiagram diagram={shape} size="lg" />
+                <span className="block max-w-[5.6rem] text-[10px] leading-tight text-muted-foreground">
+                  {shape.caption}
+                </span>
+              </button>
+            ))}
+          </div>
+        </section>
+      ))}
+      <p className="text-xs text-muted-foreground">Toca un diagrama para escucharlo.</p>
+    </div>
+  )
+}
+
+function shapesForFamily(family: ShapeFamily, root: number, rootName: string): LabeledShape[] {
+  if (family === 'maj') return closedTriadShapes(root, false, rootName)
+  if (family === 'min') return closedTriadShapes(root, true, `${rootName}m`)
+  if (family === '5') return powerShapes(root, `${rootName}5`)
+  return seventhShapes(root, family, `${rootName}${family}`)
+}
+
+function groupShapes(shapes: LabeledShape[]): { title: string; shapes: LabeledShape[] }[] {
+  const order: string[] = []
+  const map = new Map<string, LabeledShape[]>()
+  for (const shape of shapes) {
+    const title = shape.caption.split(' · ')[0] ?? shape.caption
+    if (!map.has(title)) {
+      map.set(title, [])
+      order.push(title)
+    }
+    map.get(title)!.push(shape)
+  }
+  return order.map((title) => ({ title, shapes: map.get(title) ?? [] }))
 }
 
 function KeyTab({
