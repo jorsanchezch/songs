@@ -42,7 +42,7 @@ const DEFAULT_YOUTUBE_CLIENT_ID =
   '1005651847868-k4oas55ikbu34alfcggqts39tel93j0r.apps.googleusercontent.com'
 
 export function youtubeClientId(): string {
-  return (import.meta.env.VITE_YOUTUBE_CLIENT_ID ?? '').trim() || DEFAULT_YOUTUBE_CLIENT_ID
+  return (import.meta.env?.VITE_YOUTUBE_CLIENT_ID ?? '').trim() || DEFAULT_YOUTUBE_CLIENT_ID
 }
 
 export function youtubeConfigured(): boolean {
