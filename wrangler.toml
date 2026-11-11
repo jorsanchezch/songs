@@ -23,7 +23,8 @@ binding = "AUDIO_BUCKET"
 bucket_name = "songbook-audio"
 preview_bucket_name = "songbook-audio"
 
-# Secrets (not in this file):
+# Secrets (not in this file; CD syncs the GitHub Actions names of the same name):
+#   npx wrangler secret put YOUTUBE_OAUTH_CLIENT_SECRET
 #   npx wrangler secret put YOUTUBE_API_KEY
 # Optional later if you expose R2 via a custom domain instead of /api/audio:
 #   npx wrangler secret put AUDIO_PUBLIC_BASE
