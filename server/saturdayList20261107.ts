@@ -2,6 +2,7 @@ import { archiveDueDayList } from './dayListArchive.ts'
 import { INSTRUMENTS } from './instruments.ts'
 import { chartMeta } from './meta.ts'
 import { OWNER_ID } from './schema.ts'
+import { serviceListTitle } from './serviceListTitle.ts'
 import type { Sql } from './sql.ts'
 
 const META_KEY = 'saturday_list_2026_11_07'
@@ -72,6 +73,10 @@ export async function applySaturdayList20261107(sql: Sql): Promise<void> {
       [LIST_ID, position, item.id, item.semitones],
     )
   }
-  await sql.run(`UPDATE setlists SET service_date = ? WHERE id = ?`, [SERVICE_DATE, LIST_ID])
+  await sql.run(`UPDATE setlists SET service_date = ?, name = ? WHERE id = ?`, [
+    SERVICE_DATE,
+    serviceListTitle(6, SERVICE_DATE),
+    LIST_ID,
+  ])
   await sql.run(`INSERT OR IGNORE INTO app_meta (key, value) VALUES (?, '1')`, [META_KEY])
 }

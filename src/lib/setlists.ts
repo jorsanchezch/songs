@@ -36,9 +36,18 @@ export const WEEKDAYS = [
 
 export const DEFAULT_SERVICE_DAYS = [3, 6, 0]
 
-export function serviceListName(weekday: number): string {
-  const name = WEEKDAYS.find((day) => day.id === weekday)?.name ?? 'día'
-  return `Servicio del próximo ${name.toLocaleLowerCase('es')}`
+export function formatListDate(iso: string): string {
+  const [year, month, day] = iso.split('-').map(Number)
+  const date = new Date(year ?? 0, (month ?? 1) - 1, day ?? 1)
+  return date.toLocaleDateString('es', { day: 'numeric', month: 'short', year: 'numeric' })
+}
+
+/** Evergreen list title: `Miércoles (11 nov 2026)`. Uses next service day when undated. */
+export function serviceListName(weekday: number, serviceDate?: string | null, today = new Date()): string {
+  const name = WEEKDAYS.find((day) => day.id === weekday)?.name ?? 'Día'
+  const iso =
+    serviceDate && /^\d{4}-\d{2}-\d{2}$/.test(serviceDate) ? serviceDate : nextServiceDate(today, weekday)
+  return `${name} (${formatListDate(iso)})`
 }
 
 export function isoDate(date: Date): string {
@@ -214,10 +223,15 @@ function syncEvergreen(days: number[]) {
   const current = read()
   const evergreen = ordered.map((weekday) => {
     const existing = current.find((list) => list.evergreen?.weekday === weekday)
-    if (existing?.evergreen) return { ...existing, name: serviceListName(weekday) }
+    if (existing?.evergreen) {
+      return {
+        ...existing,
+        name: serviceListName(weekday, existing.evergreen.serviceDate),
+      }
+    }
     return {
       id: `servicio-${weekday}`,
-      name: serviceListName(weekday),
+      name: serviceListName(weekday, null),
       items: [],
       evergreen: { weekday, serviceDate: null },
     }
@@ -287,7 +301,12 @@ export function addSetlistSong(id: string, songId: string, today = new Date()) {
     if (list.evergreen) {
       const next = planEvergreenAdd(list.evergreen, list.items, songId, today)
       history = rememberClosedDayList(history, next.closed)
-      return { ...list, evergreen: next.evergreen, items: next.items }
+      return {
+        ...list,
+        name: serviceListName(next.evergreen.weekday, next.evergreen.serviceDate, today),
+        evergreen: next.evergreen,
+        items: next.items,
+      }
     }
     if (list.items.some((item) => item.songId === songId)) return list
     return { ...list, items: [...list.items, { songId, semitones: 0 }] }

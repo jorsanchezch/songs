@@ -3,13 +3,14 @@ import { chartMeta } from './meta.ts'
 import { OWNER_ID, OWNER_NAME, OWNER_USERNAME, SCHEMA } from './schema.ts'
 import { applySaturdayList20261107 } from './saturdayList20261107.ts'
 import { applyWednesdayList20261111 } from './wednesdayList20261111.ts'
+import { serviceListTitle } from './serviceListTitle.ts'
 import type { CatalogFile } from './catalog.ts'
 import type { Sql, SqlValue } from './sql.ts'
 
 const SERVICE_LISTS = [
-  { id: 'servicio-3', weekday: 3, name: 'Servicio del próximo miércoles' },
-  { id: 'servicio-6', weekday: 6, name: 'Servicio del próximo sábado' },
-  { id: 'servicio-0', weekday: 0, name: 'Servicio del próximo domingo' },
+  { id: 'servicio-3', weekday: 3 },
+  { id: 'servicio-6', weekday: 6 },
+  { id: 'servicio-0', weekday: 0 },
 ]
 
 const PARTS_TABLE = `CREATE TABLE instrument_parts_next (
@@ -44,6 +45,19 @@ export async function ensureSchema(sql: Sql): Promise<void> {
   await sql.exec(`CREATE INDEX IF NOT EXISTS idx_songs_creator ON songs(creator_id)`)
   await applySaturdayList20261107(sql)
   await applyWednesdayList20261111(sql)
+  await syncEvergreenListTitles(sql)
+}
+
+/** Rename evergreen lists to `Miércoles (11 nov 2026)` from weekday + service_date. */
+async function syncEvergreenListTitles(sql: Sql): Promise<void> {
+  const rows = await sql.all<{ id: string; weekday: number; service_date: string | null }>(
+    `SELECT id, evergreen_weekday AS weekday, service_date FROM setlists WHERE evergreen_weekday IS NOT NULL`,
+  )
+  const today = new Date()
+  for (const row of rows) {
+    const name = serviceListTitle(Number(row.weekday), row.service_date, today)
+    await sql.run(`UPDATE setlists SET name = ? WHERE id = ?`, [name, row.id])
+  }
 }
 
 /**
@@ -192,11 +206,12 @@ async function seedServices(sql: Sql): Promise<void> {
   const flag = await sql.get<{ value: string }>(`SELECT value FROM app_meta WHERE key = 'services_seeded'`)
   if (flag) return
   let position = 0
+  const today = new Date()
   for (const list of SERVICE_LISTS) {
     await sql.run(`INSERT OR IGNORE INTO service_days (weekday) VALUES (?)`, [list.weekday])
     await sql.run(
       `INSERT OR IGNORE INTO setlists (id, name, evergreen_weekday, service_date, position) VALUES (?, ?, ?, NULL, ?)`,
-      [list.id, list.name, list.weekday, position],
+      [list.id, serviceListTitle(list.weekday, null, today), list.weekday, position],
     )
     position += 1
   }
@@ -237,10 +252,11 @@ export function renderSeedSql(files: CatalogFile[]): string {
       )
     }
   }
+  const today = new Date()
   SERVICE_LISTS.forEach((list, position) => {
     lines.push(`INSERT OR IGNORE INTO service_days (weekday) VALUES (${list.weekday});`)
     lines.push(
-      `INSERT OR IGNORE INTO setlists (id, name, evergreen_weekday, service_date, position) VALUES (${quote(list.id)}, ${quote(list.name)}, ${list.weekday}, NULL, ${position});`,
+      `INSERT OR IGNORE INTO setlists (id, name, evergreen_weekday, service_date, position) VALUES (${quote(list.id)}, ${quote(serviceListTitle(list.weekday, null, today))}, ${list.weekday}, NULL, ${position});`,
     )
   })
   lines.push(`INSERT OR IGNORE INTO app_meta (key, value) VALUES ('services_seeded', '1');`)

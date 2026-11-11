@@ -11,7 +11,14 @@ import { useSongs } from '@/hooks/useSongs'
 import { useUser } from '@/hooks/useUser'
 import { can } from '@/lib/access'
 import { ListMark, useListMarks, WeekdayMark } from '@/components/ListMark'
-import { createSetlist, evergreenStatus, removeSetlist, songPath, type DayListHistory } from '@/lib/setlists'
+import {
+  createSetlist,
+  evergreenStatus,
+  removeSetlist,
+  serviceListName,
+  songPath,
+  type DayListHistory,
+} from '@/lib/setlists'
 import type { Song } from '@/lib/types'
 
 const page = 'mx-auto w-full max-w-[52.8rem] px-4'
@@ -150,7 +157,7 @@ function DayListHistoryPanel({
             <header className="flex items-center gap-3 border-b px-4 py-3">
               <WeekdayMark weekday={entry.weekday} />
               <span className="min-w-0">
-                <span className="block font-medium">{historyTitle(entry.serviceDate)}</span>
+                <span className="block font-medium">{historyTitle(entry.weekday, entry.serviceDate)}</span>
                 <span className="block text-sm text-muted-foreground">
                   {entry.items.length} {entry.items.length === 1 ? 'canción' : 'canciones'}
                 </span>
@@ -188,11 +195,8 @@ function DayListHistoryPanel({
   )
 }
 
-function historyTitle(iso: string): string {
-  const [year, month, day] = iso.split('-').map(Number)
-  const date = new Date(year ?? 0, (month ?? 1) - 1, day ?? 1)
-  const label = date.toLocaleDateString('es', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' })
-  return label.charAt(0).toLocaleUpperCase('es') + label.slice(1)
+function historyTitle(weekday: number, iso: string): string {
+  return serviceListName(weekday, iso)
 }
 
 function SetlistGroup({
