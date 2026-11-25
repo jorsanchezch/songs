@@ -25,7 +25,11 @@ import {
   rememberClosedDayList,
   serviceListName,
 } from '../src/lib/setlists.ts'
-import { churchToday, dayListIsDue as seedDayListIsDue } from '../server/dayListArchive.ts'
+import { archiveReplacedDayList, churchToday, dayListIsDue as seedDayListIsDue } from '../server/dayListArchive.ts'
+import { readCatalogFiles } from '../server/catalog.ts'
+import { seedCatalog } from '../server/seed.ts'
+import { SCHEMA } from '../server/schema.ts'
+import { openSqlite } from '../server/sqlite.ts'
 import { exchangeGoogleToken, googleOAuthConfigured } from '../server/googleOAuth.ts'
 import { can, currentUser, roleLabel } from '../src/lib/access.ts'
 import { parseChart } from '../src/lib/parseChart.ts'
@@ -607,6 +611,58 @@ assert(
 )
 assert(seedDayListIsDue('2026-11-07', '2026-11-08'), 'seed archive is due the day after the service')
 assert(!seedDayListIsDue('2026-11-07', '2026-11-07'), 'seed archive is not due on the service day')
+{
+  const db = openSqlite(':memory:')
+  await db.exec(SCHEMA)
+  await db.run(
+    `INSERT INTO setlists (id, name, evergreen_weekday, service_date, position) VALUES ('servicio-3', 'Miércoles', 3, '2026-11-25', 0)`,
+  )
+  await db.run(
+    `INSERT INTO setlist_items (setlist_id, position, song_id, semitones) VALUES ('servicio-3', 0, 'charts/old', 2)`,
+  )
+  const kept = await archiveReplacedDayList(db, { listId: 'servicio-3', weekday: 3, today: '2026-11-25' })
+  assert(kept, 'replacing a list on its service day still archives it')
+  const row = await db.get<{ song_id: string; semitones: number }>(
+    `SELECT song_id, semitones FROM day_list_history_items WHERE history_id = ?`,
+    ['historial-3-2026-11-25'],
+  )
+  assert(row?.song_id === 'charts/old' && row.semitones === 2, 'archived songs keep id and semitones')
+  const again = await archiveReplacedDayList(db, { listId: 'servicio-3', weekday: 3, today: '2026-11-26' })
+  assert(again === false, 'the same service day is archived once')
+}
+{
+  const db = openSqlite(':memory:')
+  await seedCatalog(db, await readCatalogFiles(root))
+  const list = await db.get<{ service_date: string; name: string }>(
+    `SELECT service_date, name FROM setlists WHERE id = 'servicio-3'`,
+  )
+  assert(list?.service_date === '2026-11-25', `wednesday list date ${list?.service_date}`)
+  assert(list?.name === 'Miércoles (25 nov 2026)', `wednesday list name ${list?.name}`)
+  const items = await db.all<{ song_id: string; semitones: number }>(
+    `SELECT song_id, semitones FROM setlist_items WHERE setlist_id = 'servicio-3' ORDER BY position`,
+  )
+  assert(
+    items.map((item) => `${item.song_id}:${item.semitones}`).join('|') ===
+      [
+        'charts/Cordero y León - TWICE:0',
+        'charts/Este es mi deseo - Claudio Freidzon:0',
+        'charts/Rindo mis coronas - Gateway Worship Español:0',
+      ].join('|'),
+    `wednesday songs ${items.map((item) => item.song_id).join('|')}`,
+  )
+  const previous = await db.all<{ song_id: string }>(
+    `SELECT song_id FROM day_list_history_items WHERE history_id = 'historial-3-2026-11-11' ORDER BY position`,
+  )
+  assert(
+    previous.map((item) => item.song_id).join('|') ===
+      [
+        'charts/Nada Más (Nothing Else) - Cody Carnes',
+        'charts/No hay lugar más alto - Miel San Marcos',
+        'charts/Vine a adorarte - Marcela Gandara',
+      ].join('|'),
+    'the previous wednesday lineup stays in history',
+  )
+}
 assert(/^\d{4}-\d{2}-\d{2}$/.test(churchToday()), 'church today is an ISO date')
 const closed = closeRotatedDayList(
   { weekday: 6, serviceDate: '2026-10-17' },

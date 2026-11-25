@@ -16,10 +16,12 @@ export function dayListIsDue(serviceDate: string, today: string): boolean {
 }
 
 /**
- * Before a seed/agent replace wipes an evergreen list, copy its songs into
- * day_list_history when that service date is already past.
+ * Before a list update deletes the current songs, copy them into
+ * day_list_history. The service date does not have to be past: replacing
+ * the lineup is what closes the previous one. A date already stored is
+ * left as it was, so a later edit cannot wipe that snapshot.
  */
-export async function archiveDueDayList(
+export async function archiveReplacedDayList(
   sql: Sql,
   opts: { listId: string; weekday: number; today?: string },
 ): Promise<boolean> {
@@ -27,10 +29,8 @@ export async function archiveDueDayList(
     `SELECT service_date FROM setlists WHERE id = ?`,
     [opts.listId],
   )
-  const serviceDate = list?.service_date
-  if (!serviceDate) return false
   const today = opts.today ?? churchToday()
-  if (!dayListIsDue(serviceDate, today)) return false
+  const serviceDate = list?.service_date || today
 
   const items = await sql.all<{ song_id: string; semitones: number }>(
     `SELECT song_id, semitones FROM setlist_items WHERE setlist_id = ? ORDER BY position`,
